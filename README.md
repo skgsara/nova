@@ -27,6 +27,14 @@ using only a computer's sound input and an HF receiver.
 - Input: WAV natively; m4a/AAC via an installed `ffmpeg`
 - Live reception via sound input
 
+## Status
+
+**M0 done (2026-08-12):** the headless core decodes a real off-air
+JMH test chart straight and readable, with automatic clock-error
+correction. Synthetic tests cover 60/90/120 lpm, IOC 288/576,
+±150/±400 Hz deviation, +100 ppm clock error, and heavy noise.
+See `ROADMAP.md` for the milestone map.
+
 ## Platforms
 
 Tier 1 (release-tested): Windows 64-bit, macOS (universal), Linux x86_64.

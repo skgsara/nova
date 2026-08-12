@@ -14,8 +14,8 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(Until code exists: the project being "alive" = docs/01 + docs/02
-present and the compliance matrix readable.)
+(2 test suites: synthetic round-trip matrix + real JMH fixture.)
+Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-60s.wav out.pgm`
 
 **Where things live:**
 - `docs/00` — prior-art survey and reuse ledger

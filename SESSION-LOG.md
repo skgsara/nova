@@ -7,6 +7,17 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 2 close-out: documentation sweep
+End-of-day pass: AGENTS.md risk register updated (slant + per-line
+resync marked M0-proven, remaining risks re-ranked), README gains a
+Status section, START-HERE alive-command now real. Tree is buildable,
+all tests green, everything committed. Project sleeps at M1's door.
+
+**Next step:** M1 — library mode survey + one full-length decode;
+fresh JMH test-chart fixture inbound from Sara (see previous entry).
+
+---
+
 ## 2026-08-12 — Session 2 addendum: WMO-386 2023 edition check
 Sara supplied `386_2023-edition_en.pdf`. Compared Part III §5 + §6–7
 against the 2009 edition parameter by parameter: ALL signal values

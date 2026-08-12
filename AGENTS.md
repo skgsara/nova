@@ -42,15 +42,16 @@ the old reading, a committed test update in the same change.
 - Verify before claiming done: run the tests, look at the output image.
 
 ## Current risk register (top items)
-1. Auto slant/clock correction (unsolved by every surveyed tool —
-   all punt to manual calibration). Screamer: decode of a long
-   uncorrected-clock fixture must measure straight within tolerance.
-2. Per-line resync from the dead-sector sync pulse [WMO §5.1.3.3].
-3. ±150 Hz LF deviation mode [ISO §4.2.2] — no known fixture; needs
-   the harness signal generator.
-4. Start/stop tone robustness on noisy HF (false-start on text-heavy
-   image content is the known failure mode — KiwiSDR filters this via
-   phasing-spread sanity check; adapt it).
+1. ~~Auto slant/clock correction~~ — M0: median-slope clock fit +
+   per-line dead-sector lock; proven synthetic (+100 ppm) and on the
+   JMH fixture (~-100 ppm). Remaining: prove on more stations/rates.
+2. ~~Per-line resync~~ — M0: black->white sync template, sequential
+   tracking; failure modes documented in SESSION-LOG session 2
+   (regime offset, tracker window). Watch on noisier fixtures.
+3. Start/stop tone detection + auto sequencing (M3) — untouched;
+   false-start on text-heavy content is the known trap.
+4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only; no fixture.
+5. Long recordings: 20-30 min charts untested end-to-end (M1).
 
 ## Registered gaps
 - 90 lpm fixture: not yet identified in the recording library.
