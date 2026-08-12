@@ -67,20 +67,24 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
             for (int i = 0; i < plen; i++)
                 line[i] = (i < dead) ? 1.0f : 0.0f;
         } else {
-            // dead sector: sync pulse (black) in first half, then white
+            // image line, measured JMH layout (session 3): sync pulse
+            // (black) 1.5%, white gap to 3.6%, picture to 98.4%, then a
+            // black porch to end of line
             for (int i = 0; i < plen; i++)
-                line[i] = (i < dead / 2) ? 0.0f : 1.0f;
-            // picture sector
+                line[i] = (i < 0.015 * plen) ? 0.0f : 1.0f;
+            const int pic0 = static_cast<int>(0.036 * plen);
+            const int pic1 = static_cast<int>(0.984 * plen);
             const int row = (l - phasing_lines) % content.height;
-            for (int i = static_cast<int>(dead); i < plen; i++) {
+            for (int i = pic0; i < pic1; i++) {
                 const int x = static_cast<int>(
-                    static_cast<double>(i - dead) / (plen - dead) *
+                    static_cast<double>(i - pic0) / (pic1 - pic0) *
                     content.width);
                 line[i] = content.px[static_cast<size_t>(row) *
                                          content.width +
                                      std::min(x, content.width - 1)] /
                           255.0f;
             }
+            for (int i = pic1; i < plen; i++) line[i] = 0.0f;  // porch
         }
         vid.insert(vid.end(), line.begin(), line.end());
     }

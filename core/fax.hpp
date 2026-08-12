@@ -1,12 +1,16 @@
 // fax.hpp — WEFAX line sync and image assembly.
 //
 // Approach [docs/01 §5]:
-//   - line period measured from the signal itself (autocorrelation),
-//     giving the sound-card clock error for free;
-//   - coarse phase from a fold-average of the first lines;
+//   - signal onset found by an odd-harmonic line-comb scan (recordings
+//     may open with leader tones or SDR stall-fill, not signal);
+//   - line period measured from the strongest comb window
+//     (autocorrelation), giving the sound-card clock error for free;
+//   - coarse phase from a fold-average of the first lines after onset;
 //   - per-line relock on the dead-sector edge [WMO §5.1.3.3] with a
 //     fractional accumulator (weatherfax_pi/KiwiSDR approach), so a
 //     wrong or drifting clock does not slant the picture.
+//   - locked_lines counts real sync-template matches only; if no comb
+//     is found the decoder fails loudly instead of drawing noise.
 #pragma once
 #include "image.hpp"
 #include <vector>

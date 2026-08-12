@@ -34,4 +34,15 @@ add_test(NAME roundtrip COMMAND nova-test)
 
 add_executable(nova-test-fixture tests/test_fixture.cpp)
 target_link_libraries(nova-test-fixture PRIVATE nova-core)
-add_test(NAME fixture COMMAND nova-test-fixture ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav)
+# Fixture suite — bounds measured 2026-08-12 session 3 (see test_fixture.cpp
+# header for each fixture's unique coverage).
+add_test(NAME fixture COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 115 125 -130 -40 0.6)
+add_test(NAME fixture_lpe COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 115 125 -130 -40 0.3)
+add_test(NAME fixture_warp COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.4)
+add_test(NAME fixture_60lpm COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.8)
+add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
+  ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)

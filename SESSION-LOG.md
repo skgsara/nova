@@ -7,6 +7,88 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 3: two KiwiSDR recordings, three real bugs, M1 batch
+Agent: Kimi Code CLI.
+
+**Inbound fixtures (Sara):** `JMH Test Chart KiwiSDR 13986.6.m4a` (478 s)
+and `JMH KiwiSDR Himawari 13986.6.m4a` (1033 s). Both clean of the old
+fixture's 144 ms long-path echo (validated: row-xcorr peak at +523 px on
+the OLD decode, only negative values on the new one — method + result).
+Per the agreed procedure the KiwiSDR test chart became the primary M0
+fixture (80..140 s excerpt); the old one stays as the LPE case.
+
+**Measurement campaign (all persisted under recordings/):** the new
+test chart has NO line structure for its first 72.5 s (leader/tuning
+tone or stream stall-fill; BOM documents 60 s white tuning tones) and
+the Himawari ~49 s (incl. a looping ~500 ms replay buffer that fakes a
+2 Hz comb). Himawari has two genuine stream time-skips (410.5 s: 0.3 s
+silence + ~164 ms phase jump; ~950 s) — Sara confirmed one single
+transmission; the mid-image blocks are the dead sector rendered
+mid-line after the phase jumps, not dropouts.
+
+**Bugs found (every new recording finds one — here three):**
+1. decode_fax assumed signal at t=0. Whole-file autocorrelation over
+   fill returned a confident junk period (+96735 ppm on 60 s of pure
+   fill); the phase fold over fill anchored the tracker to noise, so it
+   content-locked for entire files and `locked_lines` was vacuous
+   (counted "correction didn't jump"; real template locks were 25/956
+   on the new chart, median sstr 0.010). Fixed: odd-harmonic line-comb
+   onset scan (15 s windows, gate = max(0.06, 0.5*file_max), 2
+   consecutive windows, lowest-clearing-rate wins — 120's teeth are a
+   subset of 60's comb, the reverse is not true); period refined over
+   onset..EOF; fold anchored at onset; no comb -> throw. Honest
+   `locked_lines` = real sync-template matches (sstr >= 0.6).
+2. Rate gate mis-sized at 60 lpm (comb teeth sit in the fade band):
+   fixed by the relative gate + lowest-rate rule above. Verified on the
+   whole library: JSC1/4/5/6 (Kyodo News newspaper fax) are 60 lpm —
+   the library DOES cover 60 lpm (93-99% locks). 90 lpm: still none.
+3. Line geometry (Sara, from screenshots + a reference decode): the
+   dead sector is SPLIT around the line boundary. Measured on locked
+   JMH lines: 7.5 ms sync pulse, 10.5 ms white gap, 474 ms picture,
+   ~8 ms black porch. The old 4.5%/95.5% picture mapping cut ~16 px at
+   the left edge and showed the porch as a 31 px black band at the
+   right. Sara's call: render the true full line, no cropping ("the
+   standard doesn't ask you to chop"). Assembly now maps pulse..pulse
+   to the full width; gen + round-trip ref frame updated to the
+   measured layout.
+
+**Fixture suite (ctest, 6 suites green, zero warnings):** roundtrip,
+fixture (new primary), fixture_lpe, fixture_warp (Himawari 350..470 s,
+spans the 410.5 s time-skip), fixture_60lpm (JSC1 60..180 s), and
+fixture_fill_reject (first 15 s must throw).
+
+**M1 batch survey (all 20 library recordings, reports in
+recordings/library-8k/decodes/_reports.txt):**
+- Rates: 120 lpm everywhere except JSC1/4/5/6 at 60 lpm. No 90 lpm.
+- IOC: only `jmh sample.wav` carries a start tone (300 Hz = IOC 576).
+  IOC 288: none found — registered gap stands.
+- VMW (both recordings): locked = 0/1162 and 60/1176 with the
+  black-pulse template — MEASURED confirmation that VMW sends a
+  white-only dead sector (BOM quote, thanks Sara). Decode still
+  produces a legible straight chart by coasting (period is right).
+  -> needs the white-sector sync template (next session's candidate).
+- GYA 2300Z: weak/faded, period estimate +3576 ppm off, slanted — the
+  weak-signal case. GYA 2324Z marginal (13 locks).
+- FAXSignal.wav: Himawari full disk dated 25 Sep 2010 — a sample file
+  from elsewhere (clock +0.8 ppm, suspiciously exact). Decodes great.
+- Long decodes: JSC4 61 min end-to-end, 3431/3687 locks, newspaper
+  text crisp (dead-sector diagonal drift visible over the hour —
+  residual clock wander, bounded). XSG ASPN/FYCI 23 min fine.
+
+**Contradictions found:** my first reading of the Himawari blocks as a
+second transmission — wrong, corrected by Sara (internet-side drops);
+my first geometry fix (crop to picture sector) — wrong direction,
+corrected by Sara (render the full line). Both corrected in writing
+here. Also: session 2's fixture "locked" bounds were passing on the
+vacuous metric — now re-bound on honest locks.
+
+**Next step:** VMW white-dead-sector sync template (fixture:
+`VMW 2215Z.m4a`, currently 0 locks) + wide re-acquisition after stream
+time-skips (warp fixture coasts after the jump; clamped-tracker
+re-lock, M2 scope). Then commit — tree is green and buildable.
+
+---
+
 ## 2026-08-12 — Session 2 close-out: documentation sweep
 End-of-day pass: AGENTS.md risk register updated (slant + per-line
 resync marked M0-proven, remaining risks re-ranked), README gains a

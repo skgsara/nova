@@ -13,6 +13,14 @@ namespace {
 
 constexpr double kDeadFrac = 0.045;   // dead sector, of line [WMO §5.1.3.3]
 constexpr double kPulseFrac = 0.0225; // sync pulse <= half the dead sector
+// Line layout measured on the JMH test chart (SESSION-LOG 2026-08-12
+// session 3): 7.5 ms sync pulse, 10.5 ms white gap, 474 ms picture,
+// then a ~8 ms black porch before the next pulse — the WMO §5.1.3.3
+// dead sector is split around the line boundary. The image maps the
+// FULL line starting at the sync pulse (576*pi px at IOC 576 is the
+// full line, dead sector included; neither WMO nor ISO asks for any
+// cropping), so pulse/gap/picture/porch all render truthfully.
+constexpr double kPi = 3.14159265358979323846;
 
 // Mean-downsample video to ~200 Hz for cheap autocorrelation.
 std::vector<float> to_200hz(const std::vector<float>& v, int fs) {
@@ -25,6 +33,45 @@ std::vector<float> to_200hz(const std::vector<float>& v, int fs) {
         out.push_back(acc / block);
     }
     return out;
+}
+
+// Hann-windowed DFT power at f Hz for v[s .. s+wlen), sampling rate
+// 200 Hz, window mean removed. Naive O(wlen) per call: used at comb
+// teeth and band bins of short windows, never on the full signal.
+double tooth_power(const std::vector<float>& v, size_t s, size_t wlen,
+                   double mean, double f) {
+    const double w = 2.0 * kPi * f / 200.0;
+    double cr = 0.0, ci = 0.0;
+    for (size_t n = 0; n < wlen; n++) {
+        const double h = 0.5 - 0.5 * std::cos(2.0 * kPi * n / (wlen - 1));
+        const double x = (v[s + n] - mean) * h;
+        cr += x * std::cos(w * static_cast<double>(n));
+        ci -= x * std::sin(w * static_cast<double>(n));
+    }
+    return cr * cr + ci * ci;
+}
+
+// Odd-harmonic comb fraction for candidate line rate f0 Hz in window
+// [s, s+wlen) of 200 Hz video: energy on f0, 3f0 .. 9f0 as a fraction of
+// the 0.5-50 Hz band. Odd teeth only — a 120 lpm comb is a subset of the
+// 60 lpm comb, so even teeth cannot discriminate rates.
+double comb_score(const std::vector<float>& v, size_t s, size_t wlen,
+                  double f0) {
+    double mean = 0.0;
+    for (size_t n = 0; n < wlen; n++) mean += v[s + n];
+    mean /= static_cast<double>(wlen);
+    const double res = 200.0 / static_cast<double>(wlen);
+    const size_t lo = static_cast<size_t>(std::ceil(0.5 / res));
+    const size_t hi =
+        std::min(static_cast<size_t>(50.0 / res), wlen / 2);
+    double band = 0.0;
+    for (size_t b = lo; b <= hi; b++)
+        band += tooth_power(v, s, wlen, mean, b * res);
+    if (band <= 0.0) return 0.0;
+    double comb = 0.0;
+    for (int k = 1; k <= 9; k += 2)
+        if (k * f0 < 50.0) comb += tooth_power(v, s, wlen, mean, k * f0);
+    return comb / band;
 }
 
 // Best lag in [lo, hi] by biased autocorrelation; parabolic refine.
@@ -112,33 +159,106 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     if (video.empty()) throw std::invalid_argument("decode_fax: empty input");
     DecodeResult res;
 
-    const size_t start = static_cast<size_t>(opt.start_sec * fs);
-    if (start >= video.size())
-        throw std::invalid_argument("decode_fax: start beyond end");
-
-    // --- 1. coarse line rate (200 Hz autocorr, snap to standard) ---------
+    // --- 1. signal onset + coarse line rate ------------------------------
+    // Real recordings do not start with signal: receivers are started
+    // early, stations send leader/tuning tones, and SDR streams stall and
+    // replay fill. Autocorrelation over signal-free audio returns a
+    // plausible junk period (measured: +96735 ppm on 60 s of stall-fill),
+    // and a phase fold over fill anchors the tracker to noise for the
+    // whole file (SESSION-LOG 2026-08-12 session 3). So the line comb is
+    // located first; everything downstream anchors to it. No comb in any
+    // window -> fail loudly instead of decoding noise into a fake image.
     std::vector<float> v200 = to_200hz(video, fs);
-    if (v200.size() < 600)
+    const size_t start200 = std::min(
+        static_cast<size_t>(opt.start_sec * 200.0), v200.size());
+    if (v200.size() - start200 < 600)
         throw std::runtime_error("decode_fax: recording too short");
-    double period_200;
-    if (opt.lpm == 0) {
-        period_200 = best_period(v200, 200.0 * 60 / 127, 200.0 * 60 / 57);
-    } else {
-        const double nom = 200.0 * 60 / opt.lpm;
-        period_200 = best_period(v200, nom * 0.97, nom * 1.03);
-    }
-    const double measured_lpm = 60.0 * 200.0 / period_200;
+
+    // Gate: relative to the strongest window in the file, with an absolute
+    // floor. Measured on the library (session 3): fill <= 0.05 (looped
+    // stall-fill up to 0.12), 120 lpm signal 0.10-0.60, 60 lpm newspaper
+    // fax 0.07-0.18 — a fixed gate cannot serve both, a relative one can.
+    const double kGateFloor = 0.06;
+    const size_t kWin = 3000, kHop = 1500;  // 15 s / 7.5 s at 200 Hz
     static const int kRates[] = {60, 90, 120};
-    int lpm = opt.lpm;
-    if (lpm == 0) {
-        lpm = kRates[0];
-        for (int r : kRates)
-            if (std::fabs(r - measured_lpm) < std::fabs(lpm - measured_lpm))
-                lpm = r;
+
+    const size_t avail200 = v200.size() - start200;
+    const size_t wlen = avail200 >= kWin ? kWin : avail200;
+    const size_t hop = avail200 >= kWin ? kHop : 1;
+    struct Win {
+        size_t s;
+        double score[3];  // per kRates entry
+    };
+    std::vector<Win> wins;
+    double file_max = 0.0;
+    for (size_t s = start200; s + wlen <= v200.size(); s += hop) {
+        Win w{s, {0.0, 0.0, 0.0}};
+        for (size_t ri = 0; ri < 3; ri++) {
+            if (opt.lpm != 0 && kRates[ri] != opt.lpm) continue;
+            w.score[ri] = comb_score(v200, s, wlen, kRates[ri] / 60.0);
+            file_max = std::max(file_max, w.score[ri]);
+        }
+        wins.push_back(w);
+        if (std::getenv("NOVA_DEBUG"))
+            std::fprintf(stderr,
+                         "dbg: comb win@%.1fs 60=%.3f 90=%.3f 120=%.3f\n",
+                         s / 200.0, w.score[0], w.score[1], w.score[2]);
+        if (wlen == avail200) break;  // short file: single window
     }
+    const double gate = std::max(kGateFloor, 0.5 * file_max);
+
+    // Rate rule: the LOWEST rate whose odd teeth clear the gate wins. A
+    // true 60 lpm comb has energy at its 1 Hz fundamental; a true 120 lpm
+    // signal has nothing at 1/3/5 Hz, so its 60-candidate never clears
+    // (measured <= 0.01). The reverse rule would be ambiguous: 120's
+    // teeth are a subset of 60's comb.
+    auto clearing_rate = [&](const Win& w) -> int {
+        for (size_t ri = 0; ri < 3; ri++)
+            if (w.score[ri] >= gate) return kRates[ri];
+        return 0;
+    };
+
+    // Onset = first window of the first pair of consecutive windows that
+    // clear the gate on the same rate (isolated clears can be fill
+    // artifacts; a real transmission sustains).
+    size_t onset200 = 0;
+    int lpm = opt.lpm;
+    bool have_onset = false;
+    for (size_t i = 1; i < wins.size(); i++) {
+        const int r0 = clearing_rate(wins[i - 1]);
+        const int r1 = clearing_rate(wins[i]);
+        if (r0 != 0 && r0 == r1) {
+            onset200 = wins[i - 1].s;
+            if (lpm == 0) lpm = r0;
+            have_onset = true;
+            break;
+        }
+    }
+    if (!have_onset && wins.size() == 1 && clearing_rate(wins[0]) != 0) {
+        onset200 = wins[0].s;  // short file: one window is all we have
+        if (lpm == 0) lpm = clearing_rate(wins[0]);
+        have_onset = true;
+    }
+    if (!have_onset)
+        throw std::runtime_error(
+            "decode_fax: no fax line comb found (fill or no signal)");
+
+    // Period: autocorrelation over everything from onset to EOF (the
+    // onset gate has already excluded fill, the historical bias source).
+    // Precision matters for weak signals where pass B cannot engage
+    // (e.g. ±150 Hz LF deviation, whose sync template never reaches the
+    // lock threshold): a 15 s window is not precise enough on its own.
+    const double nom200 = 200.0 * 60.0 / lpm;
+    std::vector<float> pwin(v200.begin() + onset200, v200.end());
+    const double period_200 =
+        best_period(pwin, nom200 * 0.97, nom200 * 1.03);
+    if (std::getenv("NOVA_DEBUG"))
+        std::fprintf(stderr, "dbg: onset=%.1fs lpm=%d measured=%.3f\n",
+                     onset200 / 200.0, lpm, 60.0 * 200.0 / period_200);
     res.lpm = lpm;
 
-    const double period0 = period_200 * fs / 200.0;  // coarse, samples/line
+    const size_t start = onset200 * static_cast<size_t>(fs) / 200;
+    const double period0 = period_200 * fs / 200.0;  // samples/line
     const double nominal = fs * 60.0 / lpm;
     const double pulse = kPulseFrac * period0;
     const double search = opt.search_frac * period0;
@@ -204,6 +324,13 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         }
     }
 
+    // Honest lock metric: lines where the sync template actually matched.
+    // (Before session 3 this counted "correction did not jump", which is
+    // vacuously true when the tracker coasts through noise.)
+    res.locked_lines = 0;
+    for (int l = 0; l < n_lines; l++)
+        if (sstr[l] >= 0.6) res.locked_lines++;
+
     // --- 4. pass B: robust period/phase from median slope ------------------
     // Least squares bends here by design of the signal: phasing lines and
     // image lines anchor the template ~half a dead sector apart (the wedge
@@ -243,7 +370,8 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         std::fprintf(stderr,
                      "dbg: dead_start0=%.1f a=%.1f b=%.4f n_lines=%d\n",
                      dead_start0, a, b, n_lines);
-        for (int l = 0; l < n_lines; l += 10)
+        const int step = std::getenv("NOVA_DEBUG_FULL") ? 1 : 10;
+        for (int l = 0; l < n_lines; l += step)
             std::fprintf(stderr, "dbg: l=%3d spos=%.1f sstr=%.2f resid=%+.1f\n",
                          l, spos[l], sstr[l], spos[l] - (a + b * l));
     }
@@ -284,8 +412,6 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                 } else if (corr < prev_corr - corr_clamp) {
                     corr = prev_corr - corr_clamp;
                     res.clamped_corrections++;
-                } else {
-                    res.locked_lines++;
                 }
             }
             const double step_px =
@@ -296,9 +422,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             line_start += corr;
         }
 
-        // picture sector follows the dead sector [WMO §5.1.1, §5.1.3.3]
-        const double pic_start = line_start + kDeadFrac * b;
-        const double pic_len = b * (1.0 - kDeadFrac);
+        // the whole line, sync pulse to sync pulse — no cropping
+        const double pic_start = line_start;
+        const double pic_len = b;
         for (int j = 0; j < width; j++) {
             const double pos = pic_start + pic_len * j / width;
             const float v = lerp_at(video, pos);

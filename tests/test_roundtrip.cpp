@@ -24,9 +24,14 @@ void check(bool ok, const char* what) {
 }
 
 // x-position of the left edge of the black vertical bar, per line.
+// Search spans most of the line (past the pulse/gap, before the porch):
+// an unlocked decode's frame sits at an arbitrary constant offset, and
+// the bar must still be found. The bar is the first strong black edge
+// in this span (the gradient strip starts further right).
 double edge_x(const nova::Image& img, int y) {
-    const int x0 = img.width / 6 - 100;
-    for (int x = x0; x < img.width / 6 + 100; x++)
+    const int x0 = img.width / 16;
+    const int x1 = 9 * img.width / 10;
+    for (int x = x0; x < x1; x++)
         if (img.px[static_cast<size_t>(y) * img.width + x] < 100)
             return x;
     return -1;
@@ -81,6 +86,31 @@ double mean_abs_diff(const nova::Image& a, const nova::Image& b) {
     return acc / n;
 }
 
+// Expected image in the full-line frame, mirroring gen_fax_signal's
+// measured line layout: sync pulse (black) 1.5%, white gap to 3.6%,
+// test pattern to 98.4%, black porch to end of line.
+nova::Image make_full_ref(int width, int rows) {
+    nova::Image pat = nova::gen_test_pattern(width, rows);
+    nova::Image ref;
+    ref.width = width;
+    ref.height = rows;
+    ref.px.resize(static_cast<size_t>(width) * rows);
+    const int pulse = static_cast<int>(0.015 * width);
+    const int pic0 = static_cast<int>(0.036 * width);
+    const int pic1 = static_cast<int>(0.984 * width);
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < width; x++) {
+            uint8_t v = 0;  // pulse and porch are black
+            if (x >= pulse && x < pic0)
+                v = 255;  // white gap
+            else if (x >= pic0 && x < pic1)
+                v = pat.px[static_cast<size_t>(y) * width +
+                           (x - pic0) * width / (pic1 - pic0)];
+            ref.px[static_cast<size_t>(y) * width + x] = v;
+        }
+    return ref;
+}
+
 nova::DecodeResult run(const nova::GenOptions& g, int lines,
                        nova::DecodeOptions d) {
     nova::Image content = nova::gen_test_pattern(
@@ -103,8 +133,8 @@ int main() {
         check(std::fabs(r.clock_ppm) < 15, "clock ppm near zero");
         // 200 image lines + 30 phasing + tone regions decoded as lines
         check(r.lines >= 225, "line count plausible");
-        nova::Image ref = nova::gen_test_pattern(1810, kLines);
         // compare a crop inside the image region (skip phasing rows)
+        nova::Image ref = make_full_ref(1810, kLines);
         nova::Image crop = crop_rows(r.img, 40, kLines);
         check(mean_abs_diff(crop, ref) < 20, "image content matches (MAD<20)");
         check(edge_stdev(crop) < 1.5, "vertical bar straight (stdev<1.5px)");

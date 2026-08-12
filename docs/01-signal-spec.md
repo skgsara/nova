@@ -68,9 +68,16 @@ about 1900 Hz. Nova's deviation mode implements exactly that.
 
 - One internal sample rate; all inputs resampled. Mode table drives
   IOC/rpm — no hardcoded 576/120.
-- Clock rate estimated during the 30 s phasing (known line rate);
-  phase re-locked per line from the dead-sector sync pulse.
-  [risk-register items 1–2]
+- Real recordings do not start with signal (leader/tuning tones, SDR
+  stall-fill). Signal onset is detected by an odd-harmonic line-comb
+  scan; no comb -> refuse to decode. [session 3 measurement]
+- Clock rate estimated from the whole signal after onset (windowed
+  autocorrelation); per-line phase re-locked on the dead-sector sync
+  pulse. [risk-register items 1–2]
+- The dead sector is station-dependent within WMO §5.1.3.3: JMH/XSG send
+  a black sync pulse; VMW sends plain white (no pulse) — measured on
+  recordings 2026-08-12 (VMW locks: 0/1162 lines with the pulse
+  template). A white-sector matcher is required for VMW.
 - ±150 Hz LF mode is a deviation setting, same code path as ±400 Hz.
   [ISO §4.2.2 "and/or"]
 - Phasing waveform may be 5/95 asymmetric — detectors must accept both.

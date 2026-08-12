@@ -14,12 +14,20 @@ register are milestone entries, not intentions (SOP P1.5).
   (real JMH excerpt, measured bounds).
 - Key bring-up findings in SESSION-LOG 2026-08-12 session 2.
 
-## M1 — mode generality  [pending]
-- IOC 576/288, 60/90/120 lpm from one mode table (no hardcoded
-  576/120).
-- ±400 Hz and ±150 Hz deviation [ISO §4.2.2].
-- Fixtures: identify recordings covering 60/90 lpm and IOC 288 in the
-  library (phasing-tone analysis of each file); registered gap if none.
+## M1 — mode generality  [mostly done 2026-08-12, session 3]
+- Rate auto-detect: odd-harmonic comb scan, 60/90/120 from one code
+  path (no hardcoded 576/120). Real-signal proof: JSC1/4/5/6 at 60 lpm
+  (93-99% locks), everything else at 120.
+- Signal onset gate: recordings opening with leader tones / stall-fill
+  are detected and anchored (or refused) — session 3.
+- Full-line image mapping (measured JMH line layout; no cropping).
+- Fixtures: `kyodo-news-jsc1-60lpm-120s` (only 60 lpm signal),
+  `himawari-jmh-warp-120s` (stream time-skip), `stall-fill-15s`
+  (rejection screamer), KiwiSDR test chart (new primary).
+- REMAINING: VMW white-dead-sector sync template (0 locks now,
+  fixture: VMW 2215Z); wide re-acquisition after stream time-skips;
+  weak-signal period estimation (GYA 2300Z).
+- ±400 Hz proven on real signals; ±150 Hz synthetic only (gap).
 
 ## M2 — automatic slant correction  [pending]
 - Clock-rate estimate from the 30 s phasing stage; fractional
@@ -52,5 +60,6 @@ register are milestone entries, not intentions (SOP P1.5).
 
 ## Registered gaps
 - 240 lpm: deliberately out of scope (not required by ISO 9876 §4.2.4).
-- 90 lpm / IOC 288 real fixtures: unconfirmed in library.
+- 90 lpm real fixture: none in the library (session 3 batch survey).
+- IOC 288 real fixture: none found (no 675 Hz start tone anywhere).
 - ±150 Hz LF mode: synthetic testing only; no known on-air source.
