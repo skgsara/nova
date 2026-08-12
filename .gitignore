@@ -1,0 +1,30 @@
+# Build output
+build/
+out/
+*.o
+*.obj
+*.exe
+*.app
+*.dmg
+*.AppImage
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*~
+
+# Raw recordings and licensed standards NEVER enter this repo.
+# Ground-truth recordings live in ../ (outside the repo); only trimmed
+# WAV excerpts under fixtures/ are committed.
+recordings/
+*.m4a
+*.mp3
+*.flac
+*.pdf
+*.tar.bz2
+
+# Test scratch
+/tmp/

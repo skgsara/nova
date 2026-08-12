@@ -1,0 +1,52 @@
+Nova — NOTICE
+=============
+
+Nova is an original work by Sara Sakuragawa, licensed GPLv3+ (see LICENSE).
+It is not affiliated with, endorsed by, or derived from any proprietary
+software. It implements a publicly documented international radio
+facsimile format.
+
+Standards basis
+---------------
+The decoded signal is specified by:
+
+  * WMO-No. 386 (Manual on the Global Telecommunication System),
+    Volume I, Part III, section 5 — "Technical characteristics of
+    equipment for meteorological facsimile (analogue) transmissions"
+    (2009 edition used as reference).
+
+  * ISO 9876:2015, "Ships and marine technology — Marine facsimile
+    receivers for meteorological charts" — used as the reference for
+    receiver-side behaviour. Nova is DESIGNED TO SATISFY the
+    software-applicable requirements of ISO 9876:2015 section 4.2;
+    it has not undergone formal type testing, and no claim of
+    certified compliance is made.
+
+Third-party code lineage
+------------------------
+Nova reuses and adapts algorithms from the following free-software
+projects, under their respective licences. Reused files keep their
+original copyright headers; the combined work is GPLv3+.
+
+  * ACfax    — Andreas Czechanowski (DL4SDC), 1995–1998, GPLv2+.
+               FIR lowpass coefficient tables; fs/4 quadrature
+               downconversion and amplitude-normalized delay-line
+               discriminator architecture.
+  * HamFax   — Christof Schmitt (DH1CS), 2001–2011, GPLv2+.
+               Program structure reference.
+  * weatherfax_pi (OpenCPN weather fax plugin) — Sean D'Epagnier,
+               GPLv3. Via yahfax, an improved adaptation of HamFax.
+  * KiwiSDR FAX extension — jks-prv/KiwiSDR, file-level GPLv3
+               (D'Epagnier decoder adapted). Fractional sample-rate
+               tracking, phasing wedge-fit with median filtering.
+  * JWX      — Paul Lutus, 2011–2013, GPLv2+. Studied as prior art
+               (PLL demodulation, Goertzel tone detection); no code
+               taken.
+  * Isobar   — Sara Sakuragawa, 2026, GPLv3+ (this project's author's
+               own prior work). Per-line resync approach adapted.
+  * fldigi   — David Freese (W1HKJ) et al., GPLv3+. Studied as prior
+               art.
+
+GPLv2+ code is incorporated under the "or any later version" clause as
+GPLv3. If you believe attribution is missing or incorrect, please open
+an issue — provenance accuracy is a project rule, not a courtesy.
