@@ -20,7 +20,12 @@ unchanged (ISO §4.2.2 already pins the AF shifts). Updated: docs/01
 comment. No code changes needed. Contradictions found: none.
 
 **Next step (unchanged):** M1 — library mode survey + one full-length
-decode.
+decode. **Inbound fixture:** Sara will record a fresh, cleaner JMH
+test chart (morning JST) for cross-referencing the test harness;
+current fixture carries a 144 ms long-path echo. When it lands:
+convert to 8 kHz mono WAV, decode, compare sync/clock behavior and
+image against `test-chart-jmh-60s` bounds; if cleaner, it becomes the
+primary M0 fixture and the echo one stays as the LPE case.
 
 ---
 
