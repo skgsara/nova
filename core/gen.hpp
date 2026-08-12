@@ -18,7 +18,7 @@ struct GenOptions {
     double ppm = 0.0;       // clock error to inject
     double noise = 0.0;     // Gaussian RMS, relative to full scale
     double amplitude = 0.5;
-    double deviation = 400.0;  // 400 (HF) or 150 (LF) [WMO §5.5.1]
+    double deviation = 400.0;  // 400 (HF) or 150 (LF) [WMO §5.5.2]
     bool start_tone = true;
     bool phasing = true;
     bool stop_tone = true;

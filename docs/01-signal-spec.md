@@ -1,12 +1,14 @@
 # 01 — Signal specification (authoritative)
 
 The HF weather-fax signal as Nova implements it. Normative source:
-**WMO-No. 386, Vol. I, Part III, §5** (2009 edition), with definitions
-from **ISO 9876:2015 §3**. Where the two differ in level of detail,
+**WMO-No. 386, Vol. I, Part III, §5** — verified identical in the 2009
+and 2023 editions except where noted — with definitions from
+**ISO 9876:2015 §3**. Where the two differ in level of detail,
 WMO governs the signal; ISO governs what the receiver must do with it.
 
 Citations `[WMO §x]` / `[ISO §x]` are the claim IDs of this project —
-every load-bearing number below traces to one.
+every load-bearing number below traces to one. Section numbers follow
+the 2023 edition (§5.5 was restructured vs 2009; see note in §2 below).
 
 ## 1. Scanning geometry
 
@@ -27,14 +29,22 @@ Derived: full-line pixels at IOC 576 ≈ 576·π ≈ 1809.6 (JWX/others use
 
 | Parameter | Value | Source |
 |---|---|---|
-| Centre frequency | 1900 Hz | WMO §5.3.1.2 |
-| Black | 1500 Hz | WMO §5.3.1.2 |
-| White | 2300 Hz | WMO §5.3.1.2 |
-| Deviation on HF radio circuits | ±400 Hz about assigned f₀ | WMO §5.5.1(a) |
-| Deviation on LF circuits | ±150 Hz | WMO §5.5.1(b), ISO §4.2.2 |
+| Centre frequency | 1900 Hz | WMO §5.3.1.2, §5.5.1 |
+| Black | 1500 Hz | WMO §5.3.1.2, §5.5.1 |
+| White | 2300 Hz | WMO §5.3.1.2, §5.5.1 |
+| Audio shift at receiver | ±400 Hz (HF circuits), ±150 Hz (LF circuits) about the 1900 Hz centre | ISO §4.2.2, WMO §5.5.2 |
 | Tone stability | black/white freqs within 8 Hz over 30 s; 16 Hz over 15 min | WMO §5.3.1.2 |
 | Gray scale | 8 tones, linear: 1500, 1614, 1729, 1843, 1957, 2071, 2186, 2300 Hz | WMO §5.4.3 |
 | Input level range (receiver) | −10 dBm … +10 dBm equivalent | ISO §4.2.2 |
+
+**Edition note (2023 vs 2009).** The 2023 edition restructured §5.5:
+§5.5.1 is now explicitly the audio **subcarrier** FM (1500/1900/2300 Hz),
+and a new §5.5.2 covers **direct FSK of the RF carrier** (HF: f₀±400 Hz;
+LF: f₀±150 Hz). In the 2009 text the ±400/±150 figures sat under the
+subcarrier heading and read ambiguously. For a decoder the practical
+content is unchanged and is pinned by ISO §4.2.2 anyway: the audio
+presented to the demodulator shifts by ±400 Hz (HF) or ±150 Hz (LF)
+about 1900 Hz. Nova's deviation mode implements exactly that.
 
 ## 3. Remote-control signals
 

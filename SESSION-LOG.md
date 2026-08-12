@@ -7,6 +7,23 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 2 addendum: WMO-386 2023 edition check
+Sara supplied `386_2023-edition_en.pdf`. Compared Part III §5 + §6–7
+against the 2009 edition parameter by parameter: ALL signal values
+identical (IOC, dead sector, rates, control tones, FM frequencies,
+gray scale, shifts). One structural change: §5.5 restructured —
+§5.5.1 is now explicitly the audio subcarrier FM (1500/1900/2300 Hz);
+new §5.5.2 is direct RF FSK (HF f₀±400, LF f₀±150). This REMOVES the
+2009 ambiguity Sara's docs inherited; decoder-affecting content
+unchanged (ISO §4.2.2 already pins the AF shifts). Updated: docs/01
+(citations + edition note), NOTICE (both editions verified), gen.hpp
+comment. No code changes needed. Contradictions found: none.
+
+**Next step (unchanged):** M1 — library mode survey + one full-length
+decode.
+
+---
+
 ## 2026-08-12 — Session 2: M0 DONE — real JMH test chart decodes
 Agent: Kimi Code CLI.
 
