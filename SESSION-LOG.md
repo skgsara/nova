@@ -10,9 +10,8 @@ anything as our develop history").
 ## 2026-08-12 — Session 1 addendum: first commit
 - Scaffold committed as `20a9a64` on `main`; SESSION-LOG.md un-ignored
   and tracked per Sara's call. Regular commit standards from here on.
-- Open item: commit author name — global git config is "Sara Wang",
-  Isobar copyright line is "Sara Sakuragawa"; scaffold commit used the
-  latter. Sara to pick one; amend or set repo-local config accordingly.
+- Resolved: commit author is "skgsara <skgsara@riseup.net>", set
+  repo-local; both commits amended (now `99408ab`, `e49834d`).
 
 **Next step (unchanged):** M0 — harness signal generator + minimal FM
 demod; decode `test chart.m4a` (via WAV) headlessly into an image.
