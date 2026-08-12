@@ -23,10 +23,18 @@
 //   kyodo-news-jsc1-60lpm-120s.wav — JSC1 (Kyodo News newspaper fax),
 //     60..180 s: the library's only 60 lpm signal (session 3 batch
 //     survey). 99% honest locks. The 60 lpm screamer.
+//   vmw-white-sector-120s.wav — VMW (Australian BOM) 200..320 s: a
+//     WHITE-ONLY dead sector, no sync pulse anywhere (session 4). Pins
+//     two things at once: the style is detected, and the decoder does NOT
+//     manufacture locks it cannot have — two white-sector per-line
+//     templates were built, both scored hundreds of "locks" and both made
+//     the picture worse, so zero here is the correct answer and this
+//     screamer exists to keep it zero.
 //
 // Bounds are set between measured-known-good and clearly-broken values.
 // Usage: nova-test-fixture <path> <lpm> <min_lines> <max_lines>
 //                        <clock_lo_ppm> <clock_hi_ppm> <min_locked_frac>
+//                        [--expect-white-only]
 //        nova-test-fixture --expect-reject <path>
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
@@ -55,13 +63,16 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (argc != 8) {
+    if (argc != 8 && argc != 9) {
         std::fprintf(stderr,
                      "usage: nova-test-fixture <path> <lpm> <min_lines>"
-                     " <max_lines> <clock_lo> <clock_hi> <min_locked_frac>\n"
+                     " <max_lines> <clock_lo> <clock_hi> <min_locked_frac>"
+                     " [--expect-white-only]\n"
                      "       nova-test-fixture --expect-reject <path>\n");
         return 2;
     }
+    const bool want_white_only =
+        argc == 9 && !std::strcmp(argv[8], "--expect-white-only");
     const char* path = argv[1];
     const int want_lpm = std::atoi(argv[2]);
     const int min_lines = std::atoi(argv[3]);
@@ -78,11 +89,14 @@ int main(int argc, char** argv) {
         nova::DecodeResult r = nova::decode_fax(video, w.sample_rate, opt);
         const double locked_frac =
             r.lines > 0 ? static_cast<double>(r.locked_lines) / r.lines : 0.0;
+        const bool white_only =
+            r.dead_sector == nova::DeadSector::kWhiteOnly;
         std::printf(
             "fixture: lpm=%d clock=%+.1f ppm lines=%d locked=%d (%.2f) "
-            "clamped=%d max_step=%.1f\n",
+            "clamped=%d max_step=%.1f dead=%s(%.2f)\n",
             r.lpm, r.clock_ppm, r.lines, r.locked_lines, locked_frac,
-            r.clamped_corrections, r.max_step_px);
+            r.clamped_corrections, r.max_step_px,
+            white_only ? "white" : "pulse", r.dead_consistency);
 
         auto check = [&](bool ok, const char* what) {
             std::printf("  %s %s\n", ok ? "PASS" : "FAIL", what);
@@ -96,6 +110,13 @@ int main(int argc, char** argv) {
         check(locked_frac >= min_locked,
               "honest sync-template locks above bound");
         check(r.max_step_px < 100, "no wild line jumps");
+        if (want_white_only) {
+            check(white_only, "white-only dead sector detected");
+            check(!r.per_line_sync, "no per-line sync claimed");
+            check(r.locked_lines == 0, "no locks invented on a white sector");
+        } else {
+            check(!white_only, "black sync pulse detected");
+        }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "fixture test error: %s\n", e.what());
         return 1;

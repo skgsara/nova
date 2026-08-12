@@ -20,8 +20,8 @@ using only a computer's sound input and an HF receiver.
 - ±400 Hz (HF) and ±150 Hz (LF) subcarrier deviation
 - Automatic start (300/675 Hz), stop (450 Hz), and phasing
 - Automatic clock-error (slant) correction: rate estimated from the
-  phasing stage, phase re-locked per line from the dead-sector sync
-  pulse — no TCXO or GPS-disciplined clock required
+  signal, phase re-locked per line from the dead-sector sync pulse where
+  the station sends one — no TCXO or GPS-disciplined clock required
 - Post-decode image realignment and line-start adjustment on the
   retained raw stream (non-destructive)
 - Input: WAV natively; m4a/AAC via an installed `ffmpeg`
@@ -29,10 +29,21 @@ using only a computer's sound input and an HF receiver.
 
 ## Status
 
-**M0 done (2026-08-12):** the headless core decodes a real off-air
-JMH test chart straight and readable, with automatic clock-error
-correction. Synthetic tests cover 60/90/120 lpm, IOC 288/576,
-±150/±400 Hz deviation, +100 ppm clock error, and heavy noise.
+**M0 and M1 done (2026-08-12):** the headless core decodes real off-air
+recordings straight and readable, with automatic line-rate detection
+(60/120 lpm proven on air), signal-onset gating, automatic clock-error
+correction, and per-line sync that re-acquires after dropouts. Verified
+across a 20-recording library from JMH, JSC, XSG, NMC, VMW, GYA and two
+satellite sources: 88–99% of lines carry a real sync-template match on
+every station that transmits a sync pulse.
+
+Stations that send a plain white dead sector — permitted by
+WMO §5.1.3.3, and five of the twenty recordings do — decode on the
+measured clock and report **zero** locks rather than a number that
+flatters the decoder. See `docs/01-signal-spec.md` §5.
+
+Synthetic tests cover 60/90/120 lpm, IOC 288/576, ±150/±400 Hz
+deviation, +100 ppm clock error, and heavy noise.
 See `ROADMAP.md` for the milestone map.
 
 ## Platforms

@@ -14,7 +14,7 @@ register are milestone entries, not intentions (SOP P1.5).
   (real JMH excerpt, measured bounds).
 - Key bring-up findings in SESSION-LOG 2026-08-12 session 2.
 
-## M1 — mode generality  [mostly done 2026-08-12, session 3]
+## M1 — mode generality  [DONE 2026-08-12, sessions 3 + 4]
 - Rate auto-detect: odd-harmonic comb scan, 60/90/120 from one code
   path (no hardcoded 576/120). Real-signal proof: JSC1/4/5/6 at 60 lpm
   (93-99% locks), everything else at 120.
@@ -24,18 +24,40 @@ register are milestone entries, not intentions (SOP P1.5).
 - Fixtures: `kyodo-news-jsc1-60lpm-120s` (only 60 lpm signal),
   `himawari-jmh-warp-120s` (stream time-skip), `stall-fill-15s`
   (rejection screamer), KiwiSDR test chart (new primary).
-- REMAINING: VMW white-dead-sector sync template (0 locks now,
-  fixture: VMW 2215Z); wide re-acquisition after stream time-skips;
-  weak-signal period estimation (GYA 2300Z).
 - ±400 Hz proven on real signals; ±150 Hz synthetic only (gap).
 
-## M2 — automatic slant correction  [pending]
-- Clock-rate estimate from the 30 s phasing stage; fractional
-  resampling (KiwiSDR approach); per-line dead-sector re-lock
-  [WMO §5.1.3.3]; Isobar's sync_step_lock as reference.
-- Screamer: longest fixture decodes straight WITHOUT manual
-  calibration; measured max strip-jump count between known-bad and
-  known-good bounds.
+## M1b — dead-sector style + re-acquisition  [DONE 2026-08-12, session 4]
+- Line-start anchor now measured by across-line consistency instead of a
+  fold-average: the dead sector is the only part of a line that looks the
+  same on every line. Scores the black->white *shape*, so the black space
+  margin of a full-disk satellite image cannot fake a pulse.
+- Dead-sector style (black pulse / white only) detected per recording,
+  reported, and pinned by a screamer. Library separation: 0.48-0.94 vs
+  0.14-0.34.
+- Pass A re-acquires: after 8 unlocked lines it sweeps the whole line at
+  a coarse step. This also healed the Himawari stream time-skip — the
+  warp fixture's max_step fell from 54.3 px to 0.75 px — so "wide
+  re-acquisition after time-skips" is done, not M2 work.
+- Library effect (honest locks, before -> after): FAXSignal 65 -> 2170,
+  XSG ASPN 116 -> 2566, JSC2 103 -> 2192, jmh sample 71 -> 1023, test
+  chart 62 -> 711, HDSDR 105 -> 1790, JMH Himawari 740 -> 1953.
+- NEGATIVE RESULT, recorded: the "VMW white-sector sync template" this
+  roadmap asked for does not exist. Two were built and measured; both
+  raise lock counts and make the picture worse. White-only stations are
+  decoded on the measured clock and report zero locks. See docs/01 §5.
+- REMAINING: weak-signal period estimation (GYA 2300Z, still slanted).
+
+## M2 — automatic slant correction  [mostly done; one case open]
+- Done in M0/M1b: clock-rate estimate from the whole signal, per-line
+  dead-sector re-lock [WMO §5.1.3.3], whole-line re-acquisition. The
+  library decodes straight without manual calibration, longest fixture
+  included (JSC4, 61 min).
+- OPEN: weak/faded signals. `GYA 2300Z` fits +3576 ppm and slants; it is
+  also white-only, so nothing per-line rescues it. Suspect is the coarse
+  autocorrelation period fit. Prior art to check first: JWX's
+  clock-corrected line accumulation (docs/00, session 4 note).
+- OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
+  the fitted-line + local-median correction has been sufficient.
 
 ## M3 — full auto sequencing  [pending]
 - 300/675 Hz start, 450 Hz stop [ISO §4.2.5], phasing align with

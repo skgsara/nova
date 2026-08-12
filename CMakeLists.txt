@@ -34,15 +34,21 @@ add_test(NAME roundtrip COMMAND nova-test)
 
 add_executable(nova-test-fixture tests/test_fixture.cpp)
 target_link_libraries(nova-test-fixture PRIVATE nova-core)
-# Fixture suite — bounds measured 2026-08-12 session 3 (see test_fixture.cpp
-# header for each fixture's unique coverage).
+# Fixture suite — bounds measured 2026-08-12, re-bound session 4 after the
+# consistency anchor + re-acquisition landed (see test_fixture.cpp header
+# for each fixture's unique coverage). Lock bounds sit below the measured
+# value with room for noise, but above what the previous code achieved, so
+# a regression to the old anchor fails the suite.
 add_test(NAME fixture COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 115 125 -130 -40 0.6)
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 115 125 -130 -40 0.85)
 add_test(NAME fixture_lpe COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 115 125 -130 -40 0.3)
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 115 125 -130 -40 0.75)
 add_test(NAME fixture_warp COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.4)
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85)
 add_test(NAME fixture_60lpm COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.8)
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.9)
+add_test(NAME fixture_white_sector COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
+  --expect-white-only)
 add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
   ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)

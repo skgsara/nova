@@ -49,9 +49,12 @@ int main(int argc, char** argv) {
         nova::write_pgm(argv[2], r.img);
         std::printf(
             "lpm=%d (measured %.3f)  clock=%+.1f ppm  lines=%d  "
-            "locked=%d  clamped=%d  max_step=%.2f px\n",
+            "locked=%d  clamped=%d  max_step=%.2f px  dead=%s(%.2f)%s\n",
             r.lpm, 60.0 / r.line_period_s, r.clock_ppm, r.lines,
-            r.locked_lines, r.clamped_corrections, r.max_step_px);
+            r.locked_lines, r.clamped_corrections, r.max_step_px,
+            r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
+                                                           : "white",
+            r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "nova-decode: %s\n", e.what());
         return 1;

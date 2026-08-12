@@ -40,6 +40,25 @@ verbatim (checked against `mod_demod.c`).
 | Isobar | per-line sync lock approach; session/fixture doctrine | KG-FAX interop (out of scope) |
 | fldigi | mature C++ modem idioms | suite architecture |
 
+## Prior-art checks per change (added session 4, Sara's reuse-first rule)
+
+**Line-start anchor / dead-sector location (session 4).** Checked JWX
+`DecodeFax.s_sync` (source in the parent folder) and the weatherfax_pi /
+KiwiSDR notes above. JWX accumulates a fold of ~20 s of lines with a
+per-line clock correction (`CommonCode.clock_correct_line`), integrates
+it, and takes the strongest negative excursion as the line start;
+weatherfax_pi/KiwiSDR fit the phasing wedge over ~7% of the line and take
+a median over ~40 lines with spread rejection. **Both locate the anchor
+during the phasing stage, where there is no picture content to fool
+them.** Nova has no phasing detection yet (M3), so it has to find the
+anchor inside image lines — where a fold-average is exactly what fails
+(it picks the strongest mean edge, which is content). Hence the
+across-line *consistency* profile, which is new here and is written down
+as such rather than presented as reuse. Two things to take from them when
+M3 lands: (a) do the anchor during phasing, as they do; (b) JWX's
+clock-corrected accumulation removes the smear that currently caps Nova's
+profile at 120 lines.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

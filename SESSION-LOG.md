@@ -7,6 +7,93 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 4: the anchor was the bug; a template that shouldn't exist
+Agent: Claude Opus 5.
+
+**Task as accepted:** the VMW white-dead-sector sync template (session 3's
+next step), then follow the roadmap.
+
+**What the measurement actually said.** Before writing the template I
+profiled the library. VMW is not a lonely special case — nine of twenty
+recordings had near-zero honest locks, including `FAXSignal.wav`, which
+carries a black sync pulse on 98% of its lines. That is not a missing
+template; that is the anchor. Confirmed: the coarse phase came from a
+40-line fold-average maximising contrast, and on FAXSignal it landed 211
+samples from the pulse — outside pass A's ±120 sample search — so the
+tracker never saw the sync it was sitting next to.
+
+**Three fixes, each measured:**
+1. *Anchor from across-line consistency.* The dead sector is the only
+   part of a line that looks the same on EVERY line [WMO §5.1.3.3], so
+   score, per position, the FRACTION of lines that are dark/white there,
+   not the average contrast. Score the black->white SHAPE, taking the
+   weaker half: a full-disk satellite image is black on 100% of lines
+   over hundreds of samples at the margins, and a level-only test picks
+   an arbitrary point inside that band (this is what broke himawari and
+   FAXSignal on the first attempt). Profile skips the ~30 s phasing stage
+   [WMO §5.2.3.1] — with phasing included, every station in the library
+   scored 0.51-0.63 and the style decision was a coin toss.
+2. *Pass A re-acquires.* After 8 unlocked lines, sweep the whole line at
+   a coarse step. A tracker that only looks ±narrow around its own
+   prediction can never come back from being wrong. This also healed the
+   Himawari stream time-skip: warp fixture max_step 54.3 px -> 0.75 px.
+   The roadmap listed that as separate M2 work; it is done.
+3. *Parabolic-refinement guard.* `denom != 0` is not enough — at a
+   coarse-scan winner the neighbours need not bracket a maximum and the
+   vertex formula throws the position arbitrarily far. One such jump
+   moved a FAXSignal line by 250k samples and poisoned the median
+   intercept. Now requires a real maximum and clamps to ±1 sample.
+
+**Honest locks, before -> after:** FAXSignal 65 -> 2170/2192, XSG ASPN
+116 -> 2566/2633, JSC2 103 -> 2192/2269, jmh sample 71 -> 1023/1127, test
+chart 62 -> 711/800, HDSDR 105 -> 1790/1851, JMH Himawari 740 -> 1953/2035,
+JSC4 3431 -> 3592/3687. Nothing regressed.
+
+**The white-sector template does not exist — measured, not assumed.**
+Two were built. "White across the dead sector against the picture either
+side" gave VMW 2215Z 753 locks of 1162 and tore the chart into strips (it
+wanders inside the 45 ms always-white run, which is twice the 22.5 ms
+dead sector because the chart has its own white margin). "Rising edge
+into white" gave 879 locks and slanted the whole image, dragging the
+fitted clock from -121 to -285 ppm. Both were matching the paper, not the
+signal. A white-only dead sector contains nothing the picture does not
+also contain, so it carries no per-line phase. VMW/NMC/GYA are now
+decoded on the measured clock and report **zero** locks, which is the
+truth and which produces the better picture. Sara's rule from session 3
+applies: a lock metric that goes up while the image gets worse is the
+vacuous metric wearing a new hat.
+
+**Prior art checked first (Sara's reuse-first rule, added to AGENTS.md
+this session).** JWX `DecodeFax.s_sync` folds ~20 s of clock-corrected
+lines and takes the strongest negative excursion; weatherfax_pi/KiwiSDR
+fit the phasing wedge with a median over ~40 lines. Both do it DURING
+PHASING, where there is no content to fool a fold — Nova has no phasing
+detection until M3, so it must work inside image lines, which is why the
+consistency profile is new code rather than reuse. Recorded in docs/00
+with two things to take from them at M3. Reuse ledger unchanged.
+
+**Tests:** 7 suites green, zero warnings. New `fixture_white_sector`
+(`vmw-white-sector-120s.wav`, VMW 200..320 s) pins style detection AND
+that no locks are invented. Existing lock bounds re-bound upward
+(0.6->0.85, 0.3->0.75, 0.4->0.85, 0.8->0.9) so a regression to the old
+anchor fails.
+
+**Contradictions found:** session 3's docs/01 §5 claim "a white-sector
+matcher is required for VMW" is wrong and is now corrected in place with
+the measurement that refutes it. My own first anchor attempt (level, not
+shape) regressed himawari from 1892 locks to 22 — caught and fixed
+before it left the session. Also worth flagging against my own framing
+this morning: I described this as VMW work; it was library-wide work that
+VMW happened to point at.
+
+**Next step:** weak-signal period estimation — `GYA 2300Z.wav` (+3576 ppm
+off, slanted, white-only so it coasts) and `GYA 2324Z.wav` (marginal).
+The coarse autocorrelation fit is the suspect; JWX's clock-corrected
+accumulation (docs/00, session 4 note) is the prior art to check first.
+Then M2/M3 proper. Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 3: two KiwiSDR recordings, three real bugs, M1 batch
 Agent: Kimi Code CLI.
 

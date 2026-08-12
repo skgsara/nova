@@ -44,7 +44,8 @@ original copyright headers; the combined work is GPLv3+.
                (D'Epagnier decoder adapted). Fractional sample-rate
                tracking, phasing wedge-fit with median filtering.
   * JWX      — Paul Lutus, 2011–2013, GPLv2+. Studied as prior art
-               (PLL demodulation, Goertzel tone detection); no code
+               (PLL demodulation, Goertzel tone detection; clock-
+               corrected line accumulation for the sync fold); no code
                taken.
   * Isobar   — Sara Sakuragawa, 2026, GPLv3+ (this project's author's
                own prior work). Per-line resync approach adapted.

@@ -22,6 +22,29 @@ constexpr double kPulseFrac = 0.0225; // sync pulse <= half the dead sector
 // cropping), so pulse/gap/picture/porch all render truthfully.
 constexpr double kPi = 3.14159265358979323846;
 
+// Level slices for the across-line consistency profile. Deliberately well
+// inside the demodulator's 0..1 black..white range so that fading and
+// noise do not push a genuinely black pulse over the line.
+constexpr double kDarkLevel = 0.25;
+constexpr double kWhiteLevel = 0.93;
+// A station "sends the pulse" when its black->white pulse shape holds on
+// this fraction of lines. Measured across the 20-recording library
+// (session 4): stations that send one score 0.48-0.94, stations that do
+// not score 0.14-0.34. The cut sits in that gap; the two closest files to
+// it are HDSDR (0.48) and JSC4 (0.50), both of which are pulse stations on
+// other recordings of the same transmitter, so the cut errs the safe way.
+constexpr double kPulseConsistency = 0.40;
+// Lock threshold: the pulse template swings ~0.9 on a clean black->white
+// edge. This is "did the template really match", never "did the correction
+// stay put".
+constexpr double kPulseLock = 0.6;
+// Re-acquisition: after this many consecutive unlocked lines, sweep the
+// whole line instead of the ±narrow window — but only on every Nth line,
+// and at a coarse step, so a file that never locks costs a bounded extra.
+constexpr int kReacqMisses = 8;
+constexpr int kReacqEvery = 8;
+constexpr double kReacqStep = 4.0;
+
 // Mean-downsample video to ~200 Hz for cheap autocorrelation.
 std::vector<float> to_200hz(const std::vector<float>& v, int fs) {
     const int block = std::max(1, fs / 200);
@@ -110,38 +133,77 @@ inline float lerp_at(const std::vector<float>& v, double pos) {
     return static_cast<float>(v[i] * (1.0 - f) + v[i + 1] * f);
 }
 
-// Sync-template score [WMO §5.1.3.3]: the dead sector holds a black pulse
-// (<= half the dead sector) followed by white. Content-independent: unlike
-// edge strength, this cannot lock onto picture content, because the pulse
-// is black->white in every image line regardless of what precedes it.
-// Returns score in roughly [-1, 1]; ~1.0 = clean sync at p.
-double sync_score(const std::vector<float>& v, double p, double pulse,
-                  double white) {
-    double dark = 0.0, bright = 0.0;
-    int nd = 0, nb = 0;
-    for (double x = p; x < p + pulse; x += 1.0, nd++)
-        dark += lerp_at(v, x);
-    for (double x = p + pulse; x < p + pulse + white; x += 1.0, nb++)
-        bright += lerp_at(v, x);
-    if (nd == 0 || nb == 0) return -1.0;
-    return bright / nb - dark / nd;
+inline double mean_over(const std::vector<float>& v, double from, double len) {
+    double acc = 0.0;
+    int n = 0;
+    for (double x = from; x < from + len; x += 1.0, n++) acc += lerp_at(v, x);
+    return n ? acc / n : 0.0;
 }
 
+// Sync-template score for a station that sends the optional black pulse
+// [WMO §5.1.3.3]: the dead sector opens with black (<= half the dead
+// sector) followed by white. Content-independent — unlike edge strength
+// this cannot lock onto picture content, because the pulse is black->white
+// in every image line regardless of what precedes it.
+// Returns roughly [-1, 1]; ~1.0 = clean sync at p.
+double pulse_score(const std::vector<float>& v, double p, double pulse) {
+    return mean_over(v, p + pulse, pulse) - mean_over(v, p, pulse);
+}
+
+// There is deliberately NO per-line template for a white-only dead sector.
+// Two were built and measured against VMW 2215Z (session 4): "white across
+// the dead sector, against the picture either side", and "rising edge into
+// white". Both raise the lock count (0 -> 753 and -> 879 of 1162) and both
+// make the picture WORSE — the first jitters inside the white run and tears
+// the chart into strips, the second drifts and drags the fitted clock from
+// -121 to -285 ppm, slanting the whole image. Neither is a lock; both are
+// the picture's own white margin being matched. A white-only dead sector
+// carries no per-line phase information, because WMO §5.1.3.3 puts nothing
+// in it that the paper does not also contain. Such stations are decoded on
+// the measured clock, and report zero locks, which is the truth.
 // Best template position in [lo, hi], parabolic sub-sample refinement.
+// `step` > 1 scans coarsely first and then refines at single-sample
+// resolution around the winner — the template is smooth on the scale of
+// its own width, so a coarse pass cannot step over the peak, and a
+// whole-line re-acquisition sweep stays affordable.
 double best_sync(const std::vector<float>& v, double lo, double hi,
-                 double pulse, double* score) {
+                 double pulse, double* score, double step = 1.0) {
+    if (hi <= lo) {  // window clamped out of existence at the file edges
+        if (score) *score = -1e300;
+        return lo;
+    }
     double best_s = -1e300, best_p = lo;
-    for (double p = lo; p < hi; p += 1.0) {
-        const double s = sync_score(v, p, pulse, pulse);
+    for (double p = lo; p < hi; p += step) {
+        const double s = pulse_score(v, p, pulse);
         if (s > best_s) {
             best_s = s;
             best_p = p;
         }
     }
-    const double sm = sync_score(v, best_p - 1, pulse, pulse);
-    const double sp = sync_score(v, best_p + 1, pulse, pulse);
+    if (step > 1.0) {
+        const double f0 = std::max(lo, best_p - step);
+        const double f1 = std::min(hi, best_p + step);
+        for (double p = f0; p < f1; p += 1.0) {
+            const double s = pulse_score(v, p, pulse);
+            if (s > best_s) {
+                best_s = s;
+                best_p = p;
+            }
+        }
+    }
+    // Sub-sample vertex, but only where there really is one. `denom != 0`
+    // is not enough: at a coarse-scan winner the neighbours need not
+    // bracket a maximum, and the vertex formula then throws the position
+    // arbitrarily far — measured on FAXSignal, where one such jump moved a
+    // line by a quarter million samples, poisoned the median intercept and
+    // left the whole file at 59 locks of 2192.
+    const double sm = pulse_score(v, best_p - 1, pulse);
+    const double sp = pulse_score(v, best_p + 1, pulse);
     const double denom = sm - 2.0 * best_s + sp;
-    if (denom != 0.0) best_p += 0.5 * (sm - sp) / denom;
+    if (denom < 0.0) {
+        const double d = 0.5 * (sm - sp) / denom;
+        best_p += std::max(-1.0, std::min(1.0, d));
+    }
     if (score) *score = best_s;
     return best_p;
 }
@@ -261,6 +323,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     const double period0 = period_200 * fs / 200.0;  // samples/line
     const double nominal = fs * 60.0 / lpm;
     const double pulse = kPulseFrac * period0;
+    const double dead = kDeadFrac * period0;
     const double search = opt.search_frac * period0;
 
     const size_t avail = video.size() - start;
@@ -268,58 +331,171 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
     if (n_lines < 4) throw std::runtime_error("decode_fax: too few lines");
 
-    // --- 2. coarse phase: fold-average, max-contrast 4.5% window ---------
-    const int fold_lines = std::min(40, n_lines);
+    // --- 2. coarse phase + dead-sector style, from across-line consistency -
+    // The dead sector is the one part of the line that looks the same on
+    // EVERY line [WMO §5.1.3.3]. Picture content does not: a chart border
+    // is dark on many lines, never on all of them. So the anchor is found
+    // by counting, per position, the FRACTION of lines that are dark (or
+    // white) there — not by the average contrast of a fold, which picks
+    // whatever has the strongest mean edge and is routinely content.
+    // Measured (session 4): on FAXSignal the fold anchor landed 211 samples
+    // off a black pulse present on 98% of lines — outside pass A's ±120
+    // sample search — so the file locked 65 of 2192 lines while carrying a
+    // textbook sync pulse. Same failure on jmh sample, test chart, XSG
+    // ASPN, JSC2, NMC, HDSDR.
     const int plen = static_cast<int>(period0);
-    std::vector<double> fold(plen, 0.0);
-    for (int l = 0; l < fold_lines; l++)
-        for (int i = 0; i < plen; i++)
-            fold[i] += lerp_at(video, start + l * period0 + i);
-    for (auto& x : fold) x /= fold_lines;
-    double best_c = -1.0, dead_start0 = 0.0;
-    const int w = std::max(2, static_cast<int>(kDeadFrac * plen));
-    for (int i = 0; i < plen; i++) {
-        double mn = 1e300, mx = -1e300;
-        for (int j = 0; j < w; j++) {
-            const double s = fold[(i + j) % plen];
-            mn = std::min(mn, s);
-            mx = std::max(mx, s);
-        }
-        if (mx - mn > best_c) {
-            best_c = mx - mn;
-            dead_start0 = i;
+    // Profile length is bounded by clock smear, not by taste: the profile
+    // is stacked on the coarse period, so a relative period error e spreads
+    // the pulse by prof_lines*period0*e. The autocorrelation period is good
+    // to ~1e-4 (himawari: 3999.90 coarse vs 3999.64 fitted), which at 400
+    // lines is 104 samples — wider than the pulse itself, and measurably
+    // enough to bias the anchor. 120 lines keeps the smear inside a third
+    // of a pulse width; pass A's re-acquisition covers the rest.
+    // Skip the phasing stage first. Phasing is ~30 s of alternating
+    // black/white [WMO §5.2.3.1] whose white edge sits half a dead sector
+    // away from where the image lines put theirs [WMO §5.2.3.4], so those
+    // lines agree with nothing and drag both consistency profiles toward
+    // the middle — measured: with phasing included every station in the
+    // library scored 0.51-0.63 and the style decision became a coin toss.
+    // The onset gate anchors on the line comb, and phasing has one, so
+    // phasing is exactly what onset lands on when a station sends it.
+    const int prof0 =
+        std::min(n_lines / 4, static_cast<int>(30.0 * lpm / 60.0));
+    const int prof_lines = std::min(n_lines - prof0, 120);
+    std::vector<double> dark_frac(plen, 0.0), white_frac(plen, 0.0);
+    for (int l = 0; l < prof_lines; l++) {
+        const double base = start + (prof0 + l) * period0;
+        for (int i = 0; i < plen; i++) {
+            const float x = lerp_at(video, base + i);
+            if (x < kDarkLevel) dark_frac[i] += 1.0;
+            if (x > kWhiteLevel) white_frac[i] += 1.0;
         }
     }
+    for (int i = 0; i < plen; i++) {
+        dark_frac[i] /= prof_lines;
+        white_frac[i] /= prof_lines;
+    }
+
+    // Wrapped window mean of a profile; the dead sector straddles the line
+    // boundary, so every window here wraps.
+    auto win_mean = [&](const std::vector<double>& f, int at, int win) {
+        double s = 0.0;
+        for (int j = 0; j < win; j++) s += f[((at + j) % plen + plen) % plen];
+        return s / win;
+    };
+    const int pulse_w = std::max(2, static_cast<int>(kPulseFrac * plen));
+    const int dead_w = std::max(2, static_cast<int>(kDeadFrac * plen));
+
+    // Both anchors score a SHAPE, not a level. Level alone is not enough:
+    // a full-disk satellite image carries black space at both line margins,
+    // dark on 100% of lines over hundreds of samples, so "darkest window"
+    // lands anywhere inside that band (measured: FAXSignal and himawari,
+    // session 4). What identifies the pulse is that black is followed
+    // immediately by white [WMO §5.1.3.3] — so score the pair, and take the
+    // weaker half, which the black band cannot fake.
+    double pulse_shape = -1.0, white_shape = -1.0;
+    int pulse_at = 0, white_at = 0;
+    for (int i = 0; i < plen; i++) {
+        const double s = std::min(win_mean(dark_frac, i, pulse_w),
+                                  win_mean(white_frac, i + pulse_w, pulse_w));
+        if (s > pulse_shape) {
+            pulse_shape = s;
+            pulse_at = i;
+        }
+        // White-only: the anchor is the entry into the dead sector — where
+        // consistent whiteness starts [WMO §5.2.3.4 puts the phasing
+        // reference at exactly that edge]. A rising edge in white-fraction
+        // survives the run being wider than the dead sector, which happens
+        // whenever the chart also has a white margin (VMW 2215Z: 45 ms of
+        // always-white for a 22.5 ms dead sector).
+        const double e = win_mean(white_frac, i, dead_w) -
+                         win_mean(white_frac, i - dead_w, dead_w);
+        if (e > white_shape) {
+            white_shape = e;
+            white_at = i;
+        }
+    }
+    const double pulse_cons = win_mean(dark_frac, pulse_at, pulse_w);
+    const double white_cons = win_mean(white_frac, white_at, dead_w);
+    if (std::getenv("NOVA_DEBUG_PROFILE"))
+        for (int i = 0; i < plen; i += std::max(1, plen / 200))
+            std::fprintf(stderr, "prof %5d dark=%.2f white=%.2f\n", i,
+                         dark_frac[i], white_frac[i]);
+
+    // The pulse is optional. Take it when the station really sends one,
+    // because it is by far the stronger template; otherwise anchor on the
+    // always-white dead sector itself.
+    const bool has_pulse = pulse_shape >= kPulseConsistency;
+    res.dead_sector =
+        has_pulse ? DeadSector::kBlackPulse : DeadSector::kWhiteOnly;
+    res.dead_consistency = has_pulse ? pulse_cons : white_cons;
+    const double dead_start0 = has_pulse ? pulse_at : white_at;
+    // Only a black pulse gives per-line phase. See the note on white_score
+    // above: a white-only dead sector is decoded on the measured clock.
+    res.per_line_sync = has_pulse;
+    if (std::getenv("NOVA_DEBUG"))
+        std::fprintf(stderr,
+                     "dbg: pulse shape %.2f cons %.2f @%d | white shape %.2f "
+                     "cons %.2f @%d -> %s\n",
+                     pulse_shape, pulse_cons, pulse_at, white_shape,
+                     white_cons, white_at,
+                     has_pulse ? "black-pulse" : "white-only");
 
     // --- 3. pass A: sequential sync tracking -------------------------------
     // Walk line to line: each search window is centred on the previous
     // lock + coarse period, so sound-card drift can never walk the sync
     // out of the window (the failure mode of a fixed coarse grid).
     // Lines with no real sync match are coasted (prediction only).
+    const double lock = kPulseLock;
     std::vector<double> spos(n_lines), sstr(n_lines);
-    {
+    if (!res.per_line_sync) {
+        // Nothing to track. Draw on the measured clock from the coarse
+        // anchor and leave every line unlocked, honestly.
+        for (int l = 0; l < n_lines; l++) {
+            spos[l] = start + dead_start0 + l * period0;
+            sstr[l] = -1.0;
+        }
+    } else {
         const double wide = 0.05 * period0;
         // must exceed the phasing<->image regime offset (~half a dead
         // sector = 0.0225 lines) or the tracker falls off the grid at the
         // phasing->image boundary and coasts to EOF
         const double narrow = 0.03 * period0;
+        // the template reads a dead sector's worth either side of p
+        const double margin = 2.0 * dead + 2.0;
+        const double pmin = margin;
+        const double pmax = video.size() - margin;
         double pred = start + dead_start0;
-        spos[0] = best_sync(video, std::max<double>(1.0, pred - wide),
-                            std::min<double>(video.size() - 2 * pulse - 2,
-                                             pred + wide),
-                            pulse, &sstr[0]);
+        spos[0] = best_sync(video, std::max(pmin, pred - wide),
+                            std::min(pmax, pred + wide), pulse, &sstr[0]);
         double last_good = spos[0];
         long last_good_l = 0;
-        if (sstr[0] < 0.6) last_good = pred;  // coast from coarse
+        if (sstr[0] < lock) last_good = pred;  // coast from coarse
+        // Re-acquisition. A tracker that only ever looks ±narrow around its
+        // own prediction can never come back from being wrong: a coarse
+        // anchor off by more than the window, or a stream time-skip, puts
+        // the sync outside every future window and the file coasts to EOF
+        // (measured: himawari.wav, anchor 128 samples late, 14 locks of
+        // 1988 — the signal itself is textbook). So after a run of misses,
+        // sweep the whole line. The sweep only counts if the template
+        // actually matches, so a white-only station cannot re-acquire onto
+        // picture content: it simply keeps coasting, which is the honest
+        // outcome.
+        int miss = 0;
         for (int l = 1; l < n_lines; l++) {
             const double c = last_good + (l - last_good_l) * period0;
-            const double lo = std::max<double>(1.0, c - narrow);
-            const double hi = std::min<double>(
-                video.size() - 2 * pulse - 2, c + narrow);
-            spos[l] = best_sync(video, lo, hi, pulse, &sstr[l]);
-            if (sstr[l] >= 0.6) {
+            const bool reacq = miss >= kReacqMisses && (miss % kReacqEvery) == 0;
+            const double span = reacq ? 0.5 * period0 : narrow;
+            const double lo = std::max(pmin, c - span);
+            const double hi = std::min(pmax, c + span);
+            spos[l] = best_sync(video, lo, hi, pulse, &sstr[l],
+                                reacq ? kReacqStep : 1.0);
+            if (sstr[l] >= lock) {
                 last_good = spos[l];
                 last_good_l = l;
+                miss = 0;
+            } else {
+                miss++;
             }
         }
     }
@@ -329,7 +505,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // vacuously true when the tracker coasts through noise.)
     res.locked_lines = 0;
     for (int l = 0; l < n_lines; l++)
-        if (sstr[l] >= 0.6) res.locked_lines++;
+        if (sstr[l] >= lock) res.locked_lines++;
 
     // --- 4. pass B: robust period/phase from median slope ------------------
     // Least squares bends here by design of the signal: phasing lines and
@@ -343,7 +519,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         std::vector<double> slopes;
         for (int l = 1; l < n_lines; l++) {
             for (int j = std::max(0, l - 10); j < l; j++) {
-                if (sstr[j] < 0.6 || sstr[l] < 0.6) continue;
+                if (sstr[j] < lock || sstr[l] < lock) continue;
                 const double s = (spos[l] - spos[j]) / (l - j);
                 if (std::fabs(s - period0) < 0.02 * period0)
                     slopes.push_back(s);
@@ -353,7 +529,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             b = median(slopes);
             std::vector<double> intercepts;
             for (int l = 0; l < n_lines; l++)
-                if (sstr[l] >= 0.6) intercepts.push_back(spos[l] - b * l);
+                if (sstr[l] >= lock) intercepts.push_back(spos[l] - b * l);
             a = median(intercepts);
         }
     }
@@ -400,7 +576,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             for (int k = std::max(0, l - med_rad);
                  k <= std::min(n_lines - 1, l + med_rad); k++) {
                 const double rk = spos[k] - (a + b * k);
-                if (sstr[k] > 0.6 && std::fabs(rk) < 2.0 * search)
+                if (sstr[k] >= lock && std::fabs(rk) < 2.0 * search)
                     r.push_back(rk);
             }
             double corr = r.empty() ? (have_corr ? prev_corr : 0.0)

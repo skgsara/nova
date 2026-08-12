@@ -74,10 +74,23 @@ about 1900 Hz. Nova's deviation mode implements exactly that.
 - Clock rate estimated from the whole signal after onset (windowed
   autocorrelation); per-line phase re-locked on the dead-sector sync
   pulse. [risk-register items 1–2]
-- The dead sector is station-dependent within WMO §5.1.3.3: JMH/XSG send
-  a black sync pulse; VMW sends plain white (no pulse) — measured on
-  recordings 2026-08-12 (VMW locks: 0/1162 lines with the pulse
-  template). A white-sector matcher is required for VMW.
+- The dead sector is station-dependent within WMO §5.1.3.3: JMH/XSG/JSC
+  and both satellite recordings send a black sync pulse; VMW, NMC and GYA
+  send plain white. Which one a recording carries is measured, not
+  configured: the dead sector is the only part of a line that looks the
+  same on every line, so a per-position across-line consistency profile
+  finds it, and the black->white *shape* (not the level) says whether the
+  optional pulse is there. Library separation, session 4: pulse stations
+  0.48–0.94, white-only 0.14–0.34.
+- **A white-only dead sector carries no per-line phase information.**
+  Session 3 assumed a "white-sector matcher" would fix VMW; session 4
+  built two and measured both to be worse than not tracking at all — they
+  match the chart's own white margin, tear the picture into strips or
+  slant it, and corrupt the fitted clock (VMW 2215Z: −121 → −285 ppm).
+  There is nothing in a white dead sector that the paper does not also
+  contain. Such stations are decoded on the measured clock and report
+  zero locks; per-line sync for them would have to come from the phasing
+  stage [WMO §5.2.3.4], which is M3 work.
 - ±150 Hz LF mode is a deviation setting, same code path as ±400 Hz.
   [ISO §4.2.2 "and/or"]
 - Phasing waveform may be 5/95 asymmetric — detectors must accept both.

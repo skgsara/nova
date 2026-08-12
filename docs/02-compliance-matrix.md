@@ -18,7 +18,8 @@ information.
 | §4.2.3 | IOC 576 and 288, automatic or manual | IOC auto from 300/675 Hz tone + manual override | synthetic decode both IOCs (roundtrip [4]); auto-from-tone pending (M3) | partial |
 | §4.2.4 | Scan speeds 60/90/120 spm, automatic and manual | lpm auto from phasing rate + manual override | synthetic 3 rates, auto-detected (roundtrip [1][4][5]) | synthetic ✓ |
 | §4.2.5 | Auto respond to 300/675 Hz start (via line-sync detection) and 450 Hz stop | tone detectors + state machine; hysteresis; false-start rejection | pending (M3) | pending |
-| §4.2.6 | Sync accuracy ±2×10⁻⁶, stability ±2×10⁻⁵; phasing automatic with manual adjustment | clock-rate from median line-period fit + per-line dead-sector template lock; manual phase nudge pending GUI | synthetic +100 ppm corrected (roundtrip [2]); real JMH fixture (~-100 ppm) straight | synthetic+fixture ✓, manual adj. pending |
+| §4.2.6 | Sync accuracy ±2×10⁻⁶, stability ±2×10⁻⁵; phasing automatic with manual adjustment | clock-rate from median line-period fit + per-line dead-sector template lock, with whole-line re-acquisition after a run of misses; manual phase nudge pending GUI | synthetic +100 ppm corrected (roundtrip [2]); real JMH fixture (~-100 ppm) straight; `fixture_warp` re-acquires across a stream time-skip (max_step 0.75 px) | synthetic+fixture ✓, manual adj. pending |
+| §4.2.6 (cont.) | …on stations that send no sync pulse | Dead-sector style measured per recording [WMO §5.1.3.3]; white-only stations decode on the measured clock with **no** per-line lock — the sector carries no phase information (session 4 measurement, docs/01 §5) | `fixture_white_sector` (VMW): style detected, zero locks claimed | met, with the limit stated |
 | §4.2.7 | Pitch of scanning trace within ±25% | line rate held by design (resampled) | trivially met; assertion in line assembly | met |
 | §5.4.2 | Recorder produces chart identical to transmitted for all IOC/speed combos | decode synthetic full matrix {288,576}×{60,90,120} | 576/120, 288/60, 576/90 covered; full matrix pending | partial |
 
@@ -28,3 +29,7 @@ Notes:
   first-class mode, not an afterthought.
 - WMO §5.2.3.2's two phasing waveforms (50/50 and 5/95) are covered
   under the §4.2.6 phasing row.
+- WMO §5.1.3.3 makes the dead sector's black pulse *permitted*, not
+  required. Five of twenty library recordings send none. That is a
+  property of the signal, not a decoder shortfall, and §4.2.6's sync
+  figures are met for those stations by clock accuracy alone.
