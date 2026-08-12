@@ -123,6 +123,29 @@ Done (session 7) — sequencing, wired and verified against pictures:
   sector into the line, 4.97% — reads 0.00% with the old anchor),
   `fixture_phasing_boundary` (a real phasing→image transition).
 
+Done (session 8) — the anchor question closed on evidence:
+- **A pulse station keeps its tracked anchor.** Session 7 argued it; JSC2
+  decides it. That recording's phasing anchor sits 234 samples (106 px of
+  1810) from the tracked one, and the tracked one draws the correct picture,
+  because its timebase steps and a fixed reference propagated on a fitted
+  clock cannot survive that. Now asserted, not assumed.
+- **The two anchors are pinned against each other** on pulse stations, where
+  the phasing anchor is measured but never used and so nothing else in the
+  suite corroborates either. Bands from the whole library: −66.1 to −114.3
+  samples of 4000, repeats of one transmitter within ~7.
+- **Why two recordings disagreed.** JSC2 and JSC3 carry ~21-sample timebase
+  steps every few lines — in the audio, still there at 44.1 kHz through a
+  separate demodulator, absent from all 18 other recordings. Their true
+  porch, measured across the phasing→image boundary with no clock model in
+  between, is normal (−46 and −3). `clock_ppm` on those two files is the
+  clock plus the mean insertion rate. [docs/01 §5]
+- New fixture `xsg-phasing-image-100s.wav`: the library's only SYMMETRIC
+  50/50 phasing station, whose anchor no fixture had covered.
+- Screamers: `fixture_anchor_delta_jmh` (5/95), `fixture_anchor_delta_xsg`
+  (50/50). Both fixtures have an even number of phasing lines on purpose —
+  reverting session 7's integer-line anchor fix moves them half a line out
+  and both fail.
+
 Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
@@ -168,16 +191,24 @@ Pending:
   mid-stream time-skip would shift the picture with nothing to re-acquire.
   No library recording exercises it — the one time-skip case, himawari, is
   a pulse station that re-acquires — but M4 live decode will.
+  Session 8: reachable, not hypothetical. JSC2's timebase steps put its
+  propagated phase 160 samples out over the ~90 lines between its two
+  anchors. It is a pulse station, so tracking absorbs it; a white-only
+  station with that timebase would be drawn wrong and nothing would notice.
+- Timebase steps are neither detected nor reported (session 8). Two
+  recordings carry ~21-sample steps every few lines, which silently changes
+  what `clock_ppm` means on them and makes the anchor delta unusable there.
+  Two cheap symptoms are measured and neither is wired up: the phasing
+  spread (72 and 47 samples against 1–19 on every clean recording) and the
+  line-to-line step histogram. Matters most for M4, where a live stream is
+  the likeliest place to meet one.
 - Segmentation costs a full `detect_tones` pass over the recording
   (session 7): ~9 s on the 61-minute JSC4 against a 37 s decode. Fine
   offline, unbudgeted for M4, where the scan wants to be incremental.
-- `phasing_anchor_delta` is reported on every decode and asserted nowhere
-  (session 7). On pulse stations it measures the black porch and is stable
-  to 3 samples of 4000 across repeat recordings of one transmitter — a
-  screamer pinning the agreement of two independent anchors would be cheap
-  and would catch regressions neither existing test can see. Unexplained
-  while it stays unasserted: JSC2 reads −234 samples against JSC3's −55,
-  from the same transmitter.
+- ~~`phasing_anchor_delta` asserted nowhere~~ — closed session 8:
+  `fixture_anchor_delta_jmh` and `fixture_anchor_delta_xsg`. The JSC2/−234
+  vs JSC3/−55 disagreement that was filed here as unexplained is explained:
+  those two recordings' timebases step, and their true porch is normal.
 - 240 lpm: deliberately out of scope (not required by ISO 9876 §4.2.4).
 - 90 lpm real fixture: none in the library (session 3 batch survey).
 - IOC 288 real fixture: none found (no 675 Hz start tone anywhere).

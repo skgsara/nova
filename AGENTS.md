@@ -99,6 +99,18 @@ more likely right than one that agrees only with its own reasoning.
    sample.wav` carries a start tone" was an artifact of running an FFT on
    the raw AUDIO when the control signals are black/white alternations in
    VIDEO. The real answer is 14 of 20.
+   Session 8 closed the loose end: the two anchors are now pinned against
+   each other on pulse stations, on both phasing waveforms
+   (`fixture_anchor_delta_jmh` 5/95, `fixture_anchor_delta_xsg` 50/50), and
+   a pulse station keeps its tracked anchor on evidence rather than on
+   argument. **The lesson for the next agent: when two of your recordings
+   disagree, suspect the recording, not only the code.** JSC2 and JSC3 read
+   −234.5 and −54.8 against a family of −66 to −114 because those two files
+   carry ~21-sample timebase steps every few lines — real, in the audio,
+   present at 44.1 kHz through a separate demodulator, and absent from every
+   other recording in the library. `clock_ppm` on them is the clock plus the
+   insertion rate. Measured across the phasing→image boundary with no clock
+   model in between, both files' porch is normal. See docs/01 §5.
 4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only; no fixture.
 5. ~~Long recordings~~ — session 3: JSC4 61 min, XSG 23 min, Himawari
    17 min all decode end-to-end.
@@ -135,9 +147,21 @@ more likely right than one that agrees only with its own reasoning.
 - The phasing anchor is measured ONCE, at the middle of the interval, and
   then propagated on the fitted clock for the whole recording. That is a
   fixed reference, not a tracked one: on a white-only station a mid-stream
-  time-skip would shift the picture and nothing would re-acquire. No
-  library recording exercises this (the one time-skip case, himawari, is a
-  pulse station that re-acquires); it matters for M4 live decode.
+  time-skip would shift the picture and nothing would re-acquire.
+  **Session 8: no longer hypothetical.** JSC2 and JSC3 carry ~21-sample
+  timebase steps every few lines, and on JSC2 the propagated phase arrives
+  160 samples wrong across the ~90 lines between the two anchors. Both are
+  pulse stations, so tracking absorbs it and the pictures are right. Had
+  either been white-only, the picture would have been drawn wrong with
+  nothing to catch it. No white-only recording in the library steps — the
+  gap is still unexercised, and now it is known to be reachable.
+- Timebase steps are not detected or reported. Nothing in the decoder says
+  "this recording's timebase is not linear", so `clock_ppm` silently means
+  something different on JSC2/JSC3 than on every other file, and the
+  phasing-anchor delta is unusable there without a human noticing why.
+  Two cheap symptoms were measured in session 8 and neither is wired up:
+  the phasing spread (JSC2 72, JSC3 47 samples against 1–19 everywhere
+  else) and the line-to-line sync step histogram.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

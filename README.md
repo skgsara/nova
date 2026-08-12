@@ -78,6 +78,19 @@ reported on every decode, and on pulse stations it measures the black
 porch — two recordings of the same transmitter agree on it to 3 samples
 of 4000.
 
+That agreement is now a test, and chasing the two recordings that broke it
+turned up something about the library rather than the code: JSC2 and JSC3
+carry ~21-sample steps in their timebase every few lines — present in the
+recorded audio, still there at the source's native 44.1 kHz through a
+separately written demodulator, and absent from the other eighteen
+recordings. Measured across the phasing→image boundary, where no clock
+model stands between the two anchors, both files' porch is ordinary. What
+their `clock_ppm` reports is the clock plus the mean insertion rate. It is
+also the case that decides an open design question: a station sending a
+sync pulse keeps its tracked anchor, because a phase measured once and
+propagated on a fitted clock cannot survive a timebase that steps, and one
+re-measured every line absorbs it without being told.
+
 Manual override of everything [ISO §4.2.6] is still untouched and needs
 the GUI (M4).
 

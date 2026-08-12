@@ -145,7 +145,53 @@ library, so that registered gap stands.
   −1.65% to −2.86% of a line, and two recordings of one transmitter agree
   to **3 samples of 4000** (JMH −78.4/−75.7, XSG −114.3/−111.5). That is
   the porch: the dead sector is entered black, the sync pulse follows, and
-  the phasing wedge marks the entry, not the pulse.
+  the phasing wedge marks the entry, not the pulse. Pinned on both phasing
+  waveforms [`fixture_anchor_delta_jmh` 5/95, `fixture_anchor_delta_xsg`
+  50/50], on pulse stations, where nothing else corroborates either anchor.
+- **The porch is a property of the transmitter. The delta Nova reports is a
+  property of the recording as well.** Two recordings disagreed with the
+  family and with each other — JSC2 −234.5, JSC3 −54.8, against −66.1 to
+  −114.3 on the other eight pulse recordings (session 8). Neither anchor is
+  at fault. Measured across the phasing→image boundary itself — the last
+  phasing lines against the first image lines, three lines apart, 50%
+  crossings, no fold and no fitted period standing between them — JSC2's
+  porch is −46 samples and JSC3's −3, where himawari and the test chart read
+  ~0 by that same method. What the decoder reports instead compares a phase
+  measured at the middle of the phasing interval against an image profile
+  some 90 lines later, and carrying the first to the second assumes a linear
+  timebase. Those two recordings do not have one.
+- **Two library recordings carry a non-linear timebase: ~21-sample steps
+  every few lines.** Measured line to line on the phasing wedge against the
+  4000-sample nominal (session 8): JSC2 takes 5 steps of +21 in the 56
+  intervals of its phasing interval and 22 in 179 image lines, JSC3 takes 3.
+  Every other recording in the library — including all three white-only
+  stations, which is what would have hurt — sits inside 3999–4001 with no
+  step at all. The steps are in the recorded audio, not in Nova: they are
+  still there at the m4a's native 44.1 kHz (+111 to +124 samples) through a
+  separately written demodulator, and 2.6 ms is a fraction of an AAC frame
+  (23.2 ms), so the m4a decode cannot have made them. Where they come from —
+  capture, link, or the SDR's own audio pipeline — is not established.
+  Three consequences, all measured:
+  1. `clock_ppm` on those files is the clock PLUS the mean insertion rate.
+     JSC2 reads +167 ppm where every other recording of its family reads
+     about −85. Session 5 saw both numbers on this exact file (−75 ppm from
+     neighbouring lines, +175 from long pairs) and had no way to tell which
+     was the artifact; it is the long-pair figure, and it is the right one
+     to draw with — the insertions are real displacements of the paper.
+  2. A phase measured once and propagated on one fitted period arrives
+     wrong: 160 samples over the ~90 lines between JSC2's two anchors.
+  3. Pass B's step cut (0.02 of a line = 80 samples) does not fire on a
+     21-sample step, and could not usefully — at one step per eight lines
+     no segment would survive to fit. Averaging them into the rate is the
+     correct answer, and both pictures decode straight and correctly phased.
+- **A pulse station keeps its tracked anchor; the phasing anchor is measured
+  there but never preferred.** Argued in session 7 on the grounds that a
+  tracked reference beats a fixed one, tested in session 8. JSC2 is the case
+  that decides it: its phasing anchor sits 234 samples — 106 px of 1810 —
+  from the tracked one, and the tracked one is the one that draws the
+  correct picture. A fixed reference propagated on a fitted clock cannot
+  survive a timebase that steps; a per-line tracked one absorbs it without
+  being told it is there.
 - **On a white-only station the image anchor is not the dead sector, and
   the phasing anchor is.** The white-only anchor scores the rising edge of
   always-white, which is dead-sector entry only when nothing else on the

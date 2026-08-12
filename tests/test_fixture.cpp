@@ -57,11 +57,17 @@
 //     wrapped around to the left edge (session 7). The check below —
 //     picture content begins one dead sector into the line — reads 4.97%
 //     with the phasing anchor and 0.00% without it.
+//   xsg-phasing-image-100s.wav — XSG (Shanghai) ASPN, 60..160 s: a PULSE
+//     station whose phasing interval is SYMMETRIC 50/50 [WMO §5.2.3.1] —
+//     the only one in the library, and until session 8 no fixture covered
+//     that waveform's anchor at all. Both anchors exist on it, so it is one
+//     of the two two-anchor agreement screamers (--expect-anchor-delta).
 //
 // Bounds are set between measured-known-good and clearly-broken values.
 // Usage: nova-test-fixture <path> <lpm> <min_lines> <max_lines>
 //                        <clock_lo_ppm> <clock_hi_ppm> <min_locked_frac>
 //                        [--expect-white-only] [--expect-phasing-anchor]
+//                        [--expect-anchor-delta <lo_smp> <hi_smp>]
 //        nova-test-fixture --expect-reject <path>
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
@@ -90,20 +96,32 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (argc < 8 || argc > 9) {
+    if (argc < 8) {
         std::fprintf(stderr,
                      "usage: nova-test-fixture <path> <lpm> <min_lines>"
                      " <max_lines> <clock_lo> <clock_hi> <min_locked_frac>"
-                     " [--expect-white-only]\n"
+                     " [--expect-white-only] [--expect-phasing-anchor]"
+                     " [--expect-anchor-delta <lo> <hi>]\n"
                      "       nova-test-fixture --expect-reject <path>\n");
         return 2;
     }
     bool want_white_only = false, want_phasing_anchor = false;
+    bool want_delta = false;
+    double delta_lo = 0.0, delta_hi = 0.0;
     for (int i = 8; i < argc; i++) {
         if (!std::strcmp(argv[i], "--expect-white-only"))
             want_white_only = true;
         else if (!std::strcmp(argv[i], "--expect-phasing-anchor"))
             want_white_only = want_phasing_anchor = true;
+        else if (!std::strcmp(argv[i], "--expect-anchor-delta") &&
+                 i + 2 < argc) {
+            want_delta = true;
+            delta_lo = std::atof(argv[++i]);
+            delta_hi = std::atof(argv[++i]);
+        } else {
+            std::fprintf(stderr, "nova-test-fixture: bad arg %s\n", argv[i]);
+            return 2;
+        }
     }
     const char* path = argv[1];
     const int want_lpm = std::atoi(argv[2]);
@@ -184,6 +202,47 @@ int main(int argc, char** argv) {
                         first_content, im.width, pct);
             check(pct >= 2.0 && pct <= 8.0,
                   "picture begins one dead sector into the line");
+        }
+
+        // The two-anchor agreement, on a PULSE station (session 8). The
+        // phasing white leading edge and the image dead sector are the same
+        // feature [WMO §5.2.3.4], found by two detectors that share no code:
+        // one fits a wedge over 30 s of control signal, the other counts
+        // across-line dark consistency over 120 lines of picture. Nothing
+        // else in the suite corroborates either of them on a pulse station —
+        // the picture check above runs only where the phasing anchor is USED,
+        // which is never here.
+        //
+        // Measured, whole library, on the eight pulse recordings with a
+        // linear timebase: -66.1 to -114.3 samples of 4000, and repeats of
+        // one transmitter agree to a few samples (JMH -71.1/-74.1/-75.5/
+        // -75.7/-78.4 across two receivers and four cuts; XSG -107.2/-111.5/
+        // -114.3). The sign is the black porch: the phasing edge marks dead
+        // sector ENTRY, the image anchor is the darkest pulse-width window
+        // inside the black run, which starts later. Bands below are ~7x the
+        // observed scatter, and still tight enough that a slip of one dead
+        // sector (180 smp) or one wedge (200 smp) fails, as does the
+        // half-line error session 7 found (~2000 smp).
+        //
+        // NOT usable on JSC2/JSC3: those two recordings carry ~21-sample
+        // timebase steps every few lines (session 8), so a phase measured at
+        // one epoch and propagated on one fitted period arrives wrong — they
+        // read -234.5 and -54.8 while their local, zero-lever-arm porch is
+        // normal. See docs/01 §5.
+        if (want_delta) {
+            const double period_smp = r.line_period_s * w.sample_rate;
+            std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp "
+                        "(%.2f%% of a line)  from_phasing=%d\n",
+                        r.phasing_t_start, r.phasing_t_end,
+                        r.phasing_anchor_delta,
+                        100.0 * r.phasing_anchor_delta / period_smp,
+                        r.anchor_from_phasing ? 1 : 0);
+            check(r.phasing_found, "phasing interval found");
+            check(!r.anchor_from_phasing,
+                  "pulse station keeps its tracked anchor");
+            check(r.phasing_anchor_delta >= delta_lo &&
+                      r.phasing_anchor_delta <= delta_hi,
+                  "phasing and image anchors agree within the black porch");
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "fixture test error: %s\n", e.what());

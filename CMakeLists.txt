@@ -79,6 +79,23 @@ add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
 add_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav 120 240 250 -90 -50 0.0
   --expect-phasing-anchor)
+# Session 8: the two independent anchors must agree, on a PULSE station,
+# where the phasing anchor is measured but never used — so nothing else in
+# the suite corroborates either of them there. Bands measured across the
+# library (see the note in test_fixture.cpp); one covers each of the two
+# phasing waveforms WMO §5.2.3.1-.2 permits, because the edge convention is
+# what is being pinned and the two waveforms reach it by different code.
+# Both fixtures have an EVEN number of phasing lines, deliberately: reverting
+# session 7's integer-line anchor fix moves them to +1928.7 and +1892.6, half
+# a line out, and both tests fail. The obvious third candidate,
+# test-chart-jmh-kiwisdr-60s.wav, is NOT used here — its run is 45 lines,
+# and an odd run is the one case that bug cannot reach.
+add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75
+  --expect-anchor-delta -125 -25)
+add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 138 148 -130 -60 0.85
+  --expect-anchor-delta -160 -55)
 
 # M3 control-signal suite: start/stop tone and phasing detection.
 # [4], [5] and [9] are the false-start screamers — picture content with no

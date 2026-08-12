@@ -7,6 +7,125 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 8: two recordings disagreed with the whole library, and the fault was in the recordings
+
+Agent: Claude Opus 5.
+
+**Task as accepted:** session 7's next step, in its order, with one change
+I proposed and Sara confirmed — look at the unexplained JSC2/JSC3
+disagreement FIRST, then write the screamer with a bound that reflects what
+it shows. Calibrating the test on a number that might itself be a bug is
+exactly the trap session 7 fell into. Sara also asked mid-session to finish
+the core before touching the GUI, which is where this already was.
+
+**No new algorithm was written this session, so the reuse rule had nothing
+to bind on** — the deliverables are two screamers, one fixture and a
+measurement. If the timebase-step detector in the next step gets built,
+prior art is owed first.
+
+**The question.** `phasing_anchor_delta` compares two anchors that share no
+code: a wedge fit over 30 s of phasing, and an across-line dark-consistency
+profile over 120 lines of picture. Eight pulse recordings put it at −66.1
+to −114.3 samples of 4000, repeats of one transmitter within ~7 (JMH
+−71.1/−74.1/−75.5/−75.7/−78.4 across two receivers and four cuts; XSG
+−107.2/−111.5/−114.3). JSC2 read −234.5 and JSC3 −54.8, from one
+transmitter. Session 7 filed that as unexplained.
+
+**It is neither anchor.** I ruled out the propagation arithmetic first: both
+anchors sit on the same `period0` grid and the refined period is good enough
+that the ~90 lines between them cost 1–3 samples, not 180. Then the
+pictures: both decode straight, correctly phased, and their column profiles
+put the dead-sector black in the SAME place (columns 1780→38 of 1810 on
+both), so the two image anchors agree with each other exactly. Then the raw
+signal, folded over the phasing region and the image region on one grid the
+way session 7 did — and the disagreement was there in the fold, so it was
+real and in the signal.
+
+**What it is: JSC2 and JSC3 have a non-linear timebase.** Tracking the
+phasing wedge line by line, the spacing is not one period. It is ~4000 with
+**5 steps of +21 samples in the 56 intervals of JSC2's phasing interval**,
+3 in JSC3's, and 22 more in 179 image lines of JSC2. Every other recording
+in the library sits inside 3999–4001 with no step — including all three
+white-only stations, which is where it would have hurt. The steps are in
+the recorded audio and not in Nova: they are still there at the m4a's
+native 44.1 kHz (+111 to +124 samples) measured through a demodulator I
+wrote separately in numpy, and 2.6 ms is a fraction of an AAC frame
+(23.2 ms), so the m4a decode cannot have produced them. Where they come
+from — capture, link, SDR audio pipeline — is not established, and I have
+not claimed it.
+
+**The porch is normal on both, measured properly.** With the lever arm
+removed — the last phasing lines against the first image lines, three lines
+apart, 50% crossings, no fold and no fitted period in between — JSC2 reads
+−46 samples and JSC3 −3, where himawari and the test chart read ~0 by the
+same method. The delta the decoder reports is the porch PLUS whatever the
+timebase did over the ~90 lines between the two measurement epochs: 160
+samples on JSC2, ~40 on JSC3, both matching the local step rate against the
+fitted one to within a few samples.
+
+**This retro-explains a session 5 measurement nobody could resolve.** That
+session recorded, on this exact file, "JSC2 reads −75 ppm at k≤8 and settles
+at +175 from k=128" and chose the long baseline. Both numbers are real:
+−75 ppm is the clock (the same family as every other recording), +175 is
+the clock plus the mean insertion rate. The long-baseline choice is the
+right one to draw with — the insertions are real displacements of the paper
+— but `clock_ppm` on those two files does not mean what it means elsewhere.
+
+**The second question, answered on evidence.** Should a pulse station ever
+prefer the phasing anchor? No, and JSC2 is the case that decides it: its
+phasing anchor is 234 samples — 106 px of 1810 — from the tracked one, and
+the tracked one draws the correct picture. A fixed reference propagated on a
+fitted clock cannot survive a timebase that steps; one re-measured every
+line absorbs it without being told it is there. Session 7's argument was
+sound and is now tested rather than asserted (`!anchor_from_phasing` is
+checked in both new screamers).
+
+**Tests:** 15 suites green, zero warnings (was 13). `fixture_anchor_delta_jmh`
+and `fixture_anchor_delta_xsg` pin the two-anchor agreement on pulse
+stations — the one place nothing else corroborates either anchor, since the
+picture check in `fixture_phasing_anchor` runs only where the phasing anchor
+is USED, which is never there. One test per phasing waveform, because the
+edge convention is what is pinned and 5/95 and 50/50 reach it through
+different code. New fixture `xsg-phasing-image-100s.wav` (XSG ASPN
+60–160 s), the library's only symmetric 50/50 station, whose anchor no
+fixture covered at all; it reproduces its parent's delta (−107.2 vs
+−111.5). Both fixtures were chosen with an EVEN number of phasing lines on
+purpose: reverting session 7's integer-line anchor fix moves them to
++1928.7 and +1892.6 and both fail. My first choice for the JMH slot,
+`test-chart-jmh-kiwisdr-60s.wav`, was wrong for that reason — its run is 45
+lines, and an odd run is the one case that bug cannot reach; it survived the
+revert unchanged at −74.1.
+
+**Contradictions found.** Two. (a) My own first choice of fixture above,
+caught only by running the revert check the standing rules demand rather
+than assuming a screamer screams. (b) The registered gap "the phasing anchor
+is propagated on the fitted clock… no library recording exercises this" is
+false as written: JSC2 exercises it, 22 times over. It is a pulse station so
+tracking hides it, but the gap is reachable in the library, not
+hypothetical. Both gap entries corrected.
+
+**Registered gaps added:** timebase steps are neither detected nor
+reported, so `clock_ppm` silently means something different on those two
+files and the anchor delta is unusable there without a human noticing why.
+Two cheap symptoms were measured and neither is wired up: the phasing
+spread (JSC2 72, JSC3 47 samples against 1–19 on every clean recording) and
+the line-to-line step histogram.
+
+**Next step:** M3 is closed except the manual override, which needs the GUI,
+and Sara's instruction is core-first — so the GUI is not the next step. Two
+candidates, in this order. First, **detect and report the timebase steps**:
+the phasing spread already separates the two stepping recordings from the
+other eighteen with a factor-of-three margin (72/47 against 1–19) and costs
+nothing, since it is already computed and thrown away; a `timebase_steps`
+flag on `DecodeResult` would stop `clock_ppm` from quietly meaning two
+different things, and it is exactly the condition M4's live decode is most
+likely to meet. Prior art first — fldigi, KiwiSDR and weatherfax_pi all
+consume live streams and must have met this. Second, the ±150 Hz LF
+deviation [ISO §4.2.2], which is the oldest untouched item in the risk
+register and still synthetic-only. Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 7: the anchor agreed with every picture I checked, and was still half a line wrong
 
 Agent: Claude Opus 5.
