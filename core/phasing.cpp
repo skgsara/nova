@@ -137,6 +137,38 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         }
         if (p.empty()) { i = next; continue; }
         const size_t len = p.size();
+
+        // Non-linearity of the timebase across the run, in samples.
+        //
+        // `spread` alone cannot answer that question. The per-line positions
+        // are measured in windows of the TRUNCATED period, so a clock that is
+        // off by even 90 ppm walks the edge 0.66 samples per line and 40
+        // samples across a 60-line interval — which is most of what `spread`
+        // reports on a perfectly linear recording (measured: FAXSignal, whose
+        // clock is exactly nominal, reads 1.0 where every -86 ppm recording
+        // reads 25-43). Removing the best straight line first leaves the part
+        // no constant clock can explain.
+        //
+        // Robust slope, session 5's lesson applied to a 60-line baseline:
+        // pairs half the run apart, median over them, so one bad line moves
+        // nothing and the quantization of a single position is divided by 30
+        // rather than by 1.
+        double nonlin = 0.0;
+        if (len >= 8) {
+            const size_t k = len / 2;
+            std::vector<double> sl;
+            for (size_t m = 0; m + k < len; m++)
+                sl.push_back((p[m + k] - p[m]) / static_cast<double>(k));
+            const double slope = median_of(sl);
+            std::vector<double> icpt;
+            for (size_t m = 0; m < len; m++)
+                icpt.push_back(p[m] - slope * static_cast<double>(m));
+            const double c = median_of(icpt);
+            std::vector<double> resid;
+            for (size_t m = 0; m < len; m++)
+                resid.push_back(p[m] - (c + slope * static_cast<double>(m)));
+            nonlin = spread_10_90(resid);
+        }
         int n_asym = 0;
         for (size_t l = i; l <= j; l++) n_asym += asym[l];
         const double med = median_of(p);
@@ -192,6 +224,7 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
             res.line_start = std::fmod(med + period, period);
             res.anchor = anchor;
             res.spread = sp;
+            res.nonlinearity = nonlin;
             res.asymmetric = n_asym * 2 >= static_cast<int>(len);
             res.score = median_of(sc);
         }

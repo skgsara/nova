@@ -47,6 +47,15 @@ enum class DeadSector {
     kWhiteOnly,   // plain white across the whole dead sector
 };
 
+// Whether the recording's time axis is the straight line the rest of the
+// decoder assumes. Not a property of the transmission: it is the capture
+// chain — SDR, link, sound card, file — that inserts or drops samples.
+enum class Timebase {
+    kUnknown,  // no phasing interval and no per-line sync: not measurable
+    kLinear,   // one period and one clock error describe the whole file
+    kSteps,    // the timebase jumps; clock_ppm is the clock PLUS that rate
+};
+
 struct DecodeResult {
     Image img;
     int lpm = 0;
@@ -67,6 +76,15 @@ struct DecodeResult {
     // --- phasing [WMO §5.2.3] ---------------------------------------------
     bool phasing_found = false;
     double phasing_t_start = 0.0, phasing_t_end = 0.0;
+    int phasing_lines = 0;
+    // 10-90% spread of the per-line white-edge positions across the phasing
+    // interval, in samples. The phasing signal is one edge repeated at
+    // exactly the line rate [WMO §5.2.3], so on a linear timebase this is
+    // the measurement noise and nothing else.
+    double phasing_spread = 0.0;
+    // ...with the best straight line removed, so a constant clock error is
+    // not counted as non-linearity. See PhasingResult::nonlinearity.
+    double phasing_nonlinearity = 0.0;
     // Where the phasing anchor sits relative to the anchor the image lines
     // gave, in samples, wrapped to ±half a line. Reported ALWAYS, even when
     // the phasing anchor is not the one used, because it is the only
@@ -76,6 +94,26 @@ struct DecodeResult {
     // True when the drawn picture is phased from the phasing interval
     // rather than from the image lines.
     bool anchor_from_phasing = false;
+
+    // --- timebase linearity -----------------------------------------------
+    // `clock_ppm` above is one number for the whole recording, which is only
+    // meaningful if the timebase IS one straight line. On a stepping
+    // recording it is the clock plus the mean insertion rate, and
+    // `phasing_anchor_delta` is the porch plus whatever the timebase did
+    // between the two measurement epochs — neither is comparable with the
+    // same number from a clean file. The picture is still drawn correctly
+    // wherever per-line sync exists: this reports, it does not repair.
+    Timebase timebase = Timebase::kUnknown;
+    // Lines the step rate was measured over. ZERO means the image-domain
+    // half of the test had nothing to work with (a white-only station, or
+    // too few drawn lines) — not that it looked and found nothing.
+    int timebase_lines = 0;
+    int timebase_step_lines = 0;    // drawn lines where the residual stepped
+    // ...per 1000 drawn lines. A FLOOR on the true insertion rate: the
+    // local median that makes a step visible is 17 lines wide, so steps
+    // closer together than that merge (synthetic: 90.9 inserted, 36.9
+    // reported). Good for convicting, not for counting.
+    double timebase_step_rate = 0.0;
 
     // --- segmentation [WMO §5.2.3 transmission sequence] -------------------
     // The picture actually drawn, in seconds into the recording. When no

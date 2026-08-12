@@ -111,7 +111,21 @@ more likely right than one that agrees only with its own reasoning.
    other recording in the library. `clock_ppm` on them is the clock plus the
    insertion rate. Measured across the phasing→image boundary with no clock
    model in between, both files' porch is normal. See docs/01 §5.
-4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only; no fixture.
+4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only, permanently: no
+   operating station is known to still carry it (Sara, session 9). Not a
+   risk to retire by finding a fixture; see registered gaps.
+   ~~Timebase linearity~~ — session 9: measured and reported, not assumed.
+   Every number the decoder produces about time — `clock_ppm`,
+   `line_period_s`, `phasing_anchor_delta` — presumes the recording has one
+   straight time axis, and six of twenty library recordings do not.
+   **The lesson for the next agent: a statistic that separates two files
+   you already suspect is not the same thing as a statistic that separates
+   them from everything else.** Session 8 proposed the phasing spread on
+   the strength of "72/47 against 1–19"; measured across the library with
+   the decoder's own detector it reads 24–43 on clean recordings and would
+   have convicted almost everything. What the raw spread mostly measures is
+   the clock (0.66 samples per line at −90 ppm), which is the very thing
+   the test is supposed to be independent of.
 5. ~~Long recordings~~ — session 3: JSC4 61 min, XSG 23 min, Himawari
    17 min all decode end-to-end.
 
@@ -131,7 +145,13 @@ more likely right than one that agrees only with its own reasoning.
   passed the looser first-pass thresholds and is rejected by the final
   ones. Deeply faded; whether it is a real partial phasing interval or
   dark content is not established either way.
-- ±150 Hz LF mode: no real-world source known; synthetic-only testing.
+- ±150 Hz LF mode: synthetic-only testing, and it will stay that way.
+  Session 9, Sara: she knows of no operating station still carrying it.
+  That is stronger than the old wording ("no real-world source known",
+  which was an absence of evidence): do not spend a session hunting for a
+  fixture. The code path is the same as ±400 Hz with one constant changed
+  [ISO §4.2.2 "and/or"], `roundtrip [6]` covers it, and the honest status
+  is "implemented, synthetic-only, untestable against the air".
 - Short windows of a deeply faded signal: the whole GYA 2300Z recording
   measures −116.8 ppm and draws straight, but individual 120 s windows of
   its faded stretch scatter from −1223 to +320 ppm. Baseline is the
@@ -155,13 +175,23 @@ more likely right than one that agrees only with its own reasoning.
   either been white-only, the picture would have been drawn wrong with
   nothing to catch it. No white-only recording in the library steps — the
   gap is still unexercised, and now it is known to be reachable.
-- Timebase steps are not detected or reported. Nothing in the decoder says
-  "this recording's timebase is not linear", so `clock_ppm` silently means
-  something different on JSC2/JSC3 than on every other file, and the
-  phasing-anchor delta is unusable there without a human noticing why.
-  Two cheap symptoms were measured in session 8 and neither is wired up:
-  the phasing spread (JSC2 72, JSC3 47 samples against 1–19 everywhere
-  else) and the line-to-line sync step histogram.
+- ~~Timebase steps are not detected or reported~~ — session 9: closed.
+  `DecodeResult::timebase` is kLinear / kSteps / kUnknown, decided by two
+  statistics that share no code (smoothed sync-residual step rate; phasing
+  edge non-linearity), either sufficient alone, and nova-decode says so in
+  words wherever it is not linear. **The library has six such recordings,
+  not two** — all six JSC files, including the three 60 lpm ones whose
+  +335/+343/+458 ppm clocks nobody had questioned. Of session 8's two
+  proposed symptoms, one was wrong as stated: the raw phasing spread does
+  NOT separate 72/47 from 1–19 when measured by the decoder's own detector
+  (clean recordings read 24–43, because that spread is dominated by clock
+  error at 0.66 samples/line). The residual about a fitted line does.
+  Remaining limits, all reported rather than hidden: the step RATE is a
+  floor, not a count (dense steps merge under the ±8-line median: 90.9
+  inserted reads 36.9); two recordings can be measured by neither statistic
+  (GYA 2300Z, VMW 2215Z — white-only with no phasing found) and report
+  kUnknown; and nothing repairs a stepping timebase, which costs ~3 px of
+  wobble in 1810 even where tracking works.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

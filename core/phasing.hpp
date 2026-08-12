@@ -64,6 +64,11 @@ struct PhasingResult {
     // fractional `period` passed in and is what decode_fax consumes.
     double anchor = 0.0;
     double spread = 0.0;    // 10-90% of per-line positions, in samples
+    // The same spread with the best straight line removed: what is left
+    // after any constant clock error is accounted for. `spread` is
+    // dominated by that clock (0.66 samples/line at -90 ppm), so it says
+    // little about whether the timebase is LINEAR; this does.
+    double nonlinearity = 0.0;
     bool asymmetric = true; // 5/95 [WMO §5.2.3.2] vs symmetric 50/50
     double score = 0.0;     // median per-line contrast of the run
 };

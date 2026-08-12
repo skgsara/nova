@@ -14,7 +14,7 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(15 test suites: two synthetic matrices + 13 real-fixture screamers.)
+(17 test suites: two synthetic matrices + 15 real-fixture screamers.)
 Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav out.pgm`
 See the control signals: `./build/nova-tones fixtures/vmw-start-phasing-100s.wav`
 See a white-only station phased from its phasing interval — the picture

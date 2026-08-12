@@ -46,6 +46,27 @@ constexpr double kPulseLock = 0.6;
 constexpr int kReacqMisses = 8;
 constexpr int kReacqEvery = 8;
 constexpr double kReacqStep = 4.0;
+// Half-width of the local median applied to the sync residual, in lines.
+// Used twice: by the assembly, to correct the line it draws, and by the
+// timebase test, which is asking whether that same correction moves in
+// steps. One constant so the two cannot drift apart.
+constexpr int kMedRad = 8;
+// Timebase linearity [§4d]. A step is a persistent move of the smoothed
+// sync residual bigger than kStepSec; a recording is called non-linear
+// above kStepRateLimit such steps per 1000 drawn lines, or when the
+// phasing edge deviates from a straight line by more than kNonlinSec.
+// All three sit mid-gap in the library measurement (session 9): step rate
+// 0.0-7.0 clean against 64.8-339.8 on the six JSC recordings; phasing
+// non-linearity 1.0-3.8 samples clean against 20.2-25.5. In seconds
+// because the quantity being measured is inserted or dropped SAMPLES,
+// which is a property of the capture chain and not of the line rate.
+constexpr double kStepSec = 0.25e-3;    // 2 samples at 8 kHz
+constexpr double kNonlinSec = 1.25e-3;  // 10 samples at 8 kHz
+constexpr double kStepRateLimit = 20.0;
+// Below this many drawn lines the rate is too noisy to convict on: at the
+// clean-recording rate a 64-line window sees a step about once in three
+// recordings, and one step in 64 lines already reads 15.6/1000.
+constexpr size_t kStepMinLines = 128;
 
 // Mean-downsample video to ~200 Hz for cheap autocorrelation.
 std::vector<float> to_200hz(const std::vector<float>& v, int fs) {
@@ -656,6 +677,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         if (ph.found) {
             res.phasing_t_start = ph.t_start;
             res.phasing_t_end = ph.t_end;
+            res.phasing_lines = ph.lines;
+            res.phasing_spread = ph.spread;
+            res.phasing_nonlinearity = ph.nonlinearity;
             const double phase =
                 std::fmod(std::fmod(ph.anchor - start, period0) + period0,
                           period0);
@@ -926,6 +950,90 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     for (int l = line_lo; l < line_hi; l++)
         if (sstr[l] >= lock) res.locked_lines++;
 
+    // --- 4d. is the timebase linear? --------------------------------------
+    // Everything upstream models the recording's time axis as ONE straight
+    // line: a period, an intercept, and a clock error in ppm. Two library
+    // recordings break that model — JSC2 and JSC3 carry ~21-sample steps
+    // every few lines, in the audio, present at 44.1 kHz through a separate
+    // demodulator (session 8) — and nothing said so, which left `clock_ppm`
+    // meaning the clock on eighteen files and the clock PLUS an insertion
+    // rate on two. This measures the difference instead of assuming it away.
+    //
+    // Prior art has nothing to reuse here (docs/00, session 9): JWX applies
+    // one operator-typed constant to every line; weatherfax_pi notices lost
+    // samples only where PortAudio hands it a paInputOverflow, which a file
+    // never does; fldigi accumulates a histogram of per-line shifts but
+    // collapses it to its mode. All three ABSORB a stepping timebase and
+    // none reports one.
+    //
+    // Two statistics, sharing no code, either of which can convict:
+    //
+    // (a) image domain, needs per-line sync. The tracked sync residual,
+    //     local-median smoothed exactly as the assembly below smooths it.
+    //     A jump between two neighbouring locked lines is mostly
+    //     measurement noise; an inserted sample is PERSISTENT, so it
+    //     survives the median and noise does not. Measured over the
+    //     library, rate per 1000 drawn lines of smoothed steps above
+    //     kStepSec: nine clean recordings 0.0-7.0, all six JSC 64.8-339.8.
+    //
+    // (b) phasing domain, needs a phasing interval. The phasing signal is
+    //     one edge repeated at exactly the line rate [WMO §5.2.3], so its
+    //     per-line positions must lie on a straight line; what is left
+    //     after removing the best one is non-linearity. Measured: eleven
+    //     clean recordings 1.0-3.8 samples, JSC2/3/4 20.2-25.5.
+    //
+    // Thresholds sit in the middle of both gaps, in SAMPLES OF TIME rather
+    // than fractions of a line, because an insertion is a fixed number of
+    // samples in someone's capture chain and knows nothing about the line
+    // rate — which is also why the same numbers separate 60 lpm and 120 lpm
+    // recordings without being rescaled.
+    //
+    // A verdict of kLinear is about the RECORDING, not the picture: every
+    // one of these files decodes correctly, because a per-line tracker
+    // absorbs steps without being told they are there. What it changes is
+    // the meaning of clock_ppm, and whether phasing_anchor_delta can be
+    // compared against the rest of the library at all.
+    {
+        const double step_min = kStepSec * fs;
+        std::vector<double> smoothed;
+        for (int l = line_lo; l < line_hi; l++) {
+            std::vector<double> r;
+            for (int k = std::max(0, l - kMedRad);
+                 k <= std::min(n_lines - 1, l + kMedRad); k++)
+                if (sstr[k] >= lock) r.push_back(spos[k] - (a + b * k));
+            if (!r.empty()) smoothed.push_back(median(r));
+        }
+        if (smoothed.size() >= kStepMinLines) {
+            res.timebase_lines = static_cast<int>(smoothed.size());
+            int n = 0;
+            for (size_t m = 1; m < smoothed.size(); m++)
+                if (std::fabs(smoothed[m] - smoothed[m - 1]) > step_min) n++;
+            res.timebase_step_lines = n;
+            res.timebase_step_rate =
+                1000.0 * n / static_cast<double>(smoothed.size() - 1);
+            res.timebase = res.timebase_step_rate > kStepRateLimit
+                               ? Timebase::kSteps
+                               : Timebase::kLinear;
+        }
+        // Either statistic can convict on its own; only one has to be
+        // available. They agree wherever both are (JSC2/3/4 both ways).
+        if (res.phasing_found && res.phasing_lines >= 8) {
+            const bool nonlin = res.phasing_nonlinearity > kNonlinSec * fs;
+            if (nonlin || res.timebase == Timebase::kUnknown)
+                res.timebase =
+                    nonlin ? Timebase::kSteps : Timebase::kLinear;
+        }
+        if (std::getenv("NOVA_DEBUG"))
+            std::fprintf(stderr,
+                         "dbg: timebase %s step_lines=%d rate=%.1f/1000 "
+                         "phasing_nonlin=%.1f smp\n",
+                         res.timebase == Timebase::kSteps ? "STEPS"
+                         : res.timebase == Timebase::kLinear ? "linear"
+                                                             : "unknown",
+                         res.timebase_step_lines, res.timebase_step_rate,
+                         res.phasing_nonlinearity);
+    }
+
     // --- 5. assembly: fit + local-median residual --------------------------
     // The template anchor is the sync-pulse start in image lines; in the
     // phasing region the best template match sits ~half a dead sector
@@ -943,13 +1051,12 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     const double corr_clamp = 0.03 * b;
     double prev_corr = 0.0;
     bool have_corr = false;
-    const int med_rad = 8;
     for (int l = line_lo; l < line_hi; l++) {
         double line_start = a + b * l;  // sync-anchor position
         if (opt.autolock) {
             std::vector<double> r;
-            for (int k = std::max(0, l - med_rad);
-                 k <= std::min(n_lines - 1, l + med_rad); k++) {
+            for (int k = std::max(0, l - kMedRad);
+                 k <= std::min(n_lines - 1, l + kMedRad); k++) {
                 const double rk = spos[k] - (a + b * k);
                 if (sstr[k] >= lock && std::fabs(rk) < 2.0 * search)
                     r.push_back(rk);

@@ -62,12 +62,24 @@
 //     the only one in the library, and until session 8 no fixture covered
 //     that waveform's anchor at all. Both anchors exist on it, so it is one
 //     of the two two-anchor agreement screamers (--expect-anchor-delta).
+//   kyodo-news-jsc2-steps-120s.wav — JSC2, 200..320 s: the NON-LINEAR
+//     TIMEBASE case, and the only fixture that isolates the image-domain
+//     half of that test. Pure image (JSC2's phasing runs 8-38 s, this cut
+//     starts at 200), so the phasing statistic is unavailable by
+//     construction and the verdict has to come from the tracked sync
+//     residual alone. Session 8 measured this recording's steps by hand —
+//     ~21 samples every few lines, still present in the 44.1 kHz original
+//     through a separate demodulator — and session 9 found the same fault
+//     in all six JSC recordings. 239 lines, 100% locked, +323 ppm: the
+//     clock figure is the clock PLUS this window's insertion rate, which
+//     is exactly what the flag exists to say (the whole file reads +167).
 //
 // Bounds are set between measured-known-good and clearly-broken values.
 // Usage: nova-test-fixture <path> <lpm> <min_lines> <max_lines>
 //                        <clock_lo_ppm> <clock_hi_ppm> <min_locked_frac>
 //                        [--expect-white-only] [--expect-phasing-anchor]
 //                        [--expect-anchor-delta <lo_smp> <hi_smp>]
+//                        [--expect-timebase linear|steps]
 //        nova-test-fixture --expect-reject <path>
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
@@ -101,13 +113,15 @@ int main(int argc, char** argv) {
                      "usage: nova-test-fixture <path> <lpm> <min_lines>"
                      " <max_lines> <clock_lo> <clock_hi> <min_locked_frac>"
                      " [--expect-white-only] [--expect-phasing-anchor]"
-                     " [--expect-anchor-delta <lo> <hi>]\n"
+                     " [--expect-anchor-delta <lo> <hi>]"
+                     " [--expect-timebase linear|steps]\n"
                      "       nova-test-fixture --expect-reject <path>\n");
         return 2;
     }
     bool want_white_only = false, want_phasing_anchor = false;
     bool want_delta = false;
     double delta_lo = 0.0, delta_hi = 0.0;
+    const char* want_timebase = nullptr;
     for (int i = 8; i < argc; i++) {
         if (!std::strcmp(argv[i], "--expect-white-only"))
             want_white_only = true;
@@ -118,6 +132,16 @@ int main(int argc, char** argv) {
             want_delta = true;
             delta_lo = std::atof(argv[++i]);
             delta_hi = std::atof(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--expect-timebase") &&
+                   i + 1 < argc) {
+            want_timebase = argv[++i];
+            if (std::strcmp(want_timebase, "linear") &&
+                std::strcmp(want_timebase, "steps")) {
+                std::fprintf(stderr,
+                             "nova-test-fixture: --expect-timebase takes "
+                             "linear|steps\n");
+                return 2;
+            }
         } else {
             std::fprintf(stderr, "nova-test-fixture: bad arg %s\n", argv[i]);
             return 2;
@@ -166,6 +190,23 @@ int main(int argc, char** argv) {
             check(r.locked_lines == 0, "no locks invented on a white sector");
         } else {
             check(!white_only, "black sync pulse detected");
+        }
+
+        if (want_timebase) {
+            const bool steps = r.timebase == nova::Timebase::kSteps;
+            std::printf("  timebase=%s steps=%d rate=%.1f/1000 "
+                        "phasing_nonlin=%.1f smp\n",
+                        steps ? "STEPS"
+                              : (r.timebase == nova::Timebase::kLinear
+                                     ? "linear"
+                                     : "unknown"),
+                        r.timebase_step_lines, r.timebase_step_rate,
+                        r.phasing_nonlinearity);
+            // A verdict of unknown fails either expectation: "not measured"
+            // must never pass for "measured and fine".
+            check(steps == !std::strcmp(want_timebase, "steps") &&
+                      r.timebase != nova::Timebase::kUnknown,
+                  "timebase verdict as expected");
         }
 
         if (want_phasing_anchor) {

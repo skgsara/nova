@@ -195,13 +195,34 @@ Pending:
   propagated phase 160 samples out over the ~90 lines between its two
   anchors. It is a pulse station, so tracking absorbs it; a white-only
   station with that timebase would be drawn wrong and nothing would notice.
-- Timebase steps are neither detected nor reported (session 8). Two
-  recordings carry ~21-sample steps every few lines, which silently changes
-  what `clock_ppm` means on them and makes the anchor delta unusable there.
-  Two cheap symptoms are measured and neither is wired up: the phasing
-  spread (72 and 47 samples against 1–19 on every clean recording) and the
-  line-to-line step histogram. Matters most for M4, where a live stream is
-  the likeliest place to meet one.
+  Session 9 narrows it: something would now notice — that combination is
+  built synthetically in `roundtrip [10]` and the phasing statistic
+  convicts it with no locks anywhere in the recording. The picture is still
+  drawn wrong; the difference is that the decoder now says the timebase is
+  not linear instead of reporting a confident clock figure.
+- ~~Timebase steps are neither detected nor reported~~ — closed session 9.
+  `DecodeResult::timebase` reports kLinear / kSteps / kUnknown from two
+  independent statistics, and the count is six recordings, not two: every
+  JSC file in the library steps, including the three 60 lpm ones. Three
+  limits remain, each registered rather than hidden:
+  - The reported step RATE is a floor, not a count. The ±8-line median that
+    makes a step visible is wider than the gap between dense steps, so they
+    merge: a synthetic inserting 90.9 per 1000 lines reports 36.9. Good for
+    convicting a recording, useless for measuring an insertion rate.
+  - Two recordings can be measured by neither statistic and report
+    kUnknown: GYA 2300Z and VMW 2215Z are white-only (no tracked residual)
+    with no phasing interval found (no edge to fit). A stepping timebase on
+    such a recording would still be invisible — which is precisely the
+    dangerous combination, since nothing tracks there either. A short cut of
+    a perfectly good pulse station reports kUnknown too: the rate needs 128
+    drawn lines, and a 60 s fixture at 120 lpm has 120. That is a floor on
+    what a rate can honestly be measured over, not a bug, but it means M4's
+    live decode has no verdict for the first minute of a transmission.
+  - Nothing repairs a stepping timebase. Where per-line sync exists the
+    picture still comes out with ~3 px of wobble in 1810 (measured
+    synthetically); where it does not, the paper moves. Repair — a piecewise
+    timebase fit, or per-line phase carried through the steps — is unbuilt
+    and is not a milestone. Report first; nobody has asked for repair.
 - Segmentation costs a full `detect_tones` pass over the recording
   (session 7): ~9 s on the 61-minute JSC4 against a 37 s decode. Fine
   offline, unbudgeted for M4, where the scan wants to be incremental.
@@ -212,4 +233,6 @@ Pending:
 - 240 lpm: deliberately out of scope (not required by ISO 9876 §4.2.4).
 - 90 lpm real fixture: none in the library (session 3 batch survey).
 - IOC 288 real fixture: none found (no 675 Hz start tone anywhere).
-- ±150 Hz LF mode: synthetic testing only; no known on-air source.
+- ±150 Hz LF mode: synthetic testing only, permanently. Sara (session 9)
+  knows of no operating station still carrying it, so this is not a gap to
+  close by finding a fixture — it is the honest end state.

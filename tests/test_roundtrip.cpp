@@ -313,6 +313,120 @@ int main() {
         check(mad < 20, "row 0 of the output is image line 0");
     }
 
+    std::printf("[10] timebase steps: detected, and not confused with a "
+                "clock error\n");
+    {
+        // Ground truth, which no recording can give: the signal is generated
+        // linear, then samples are inserted into it at a known rate. JSC2's
+        // measured signature (session 8) is the model — ~21 samples every
+        // ~11 lines at 8 kHz.
+        constexpr int kIns = 21, kEvery = 11;
+        nova::GenOptions g;
+        nova::Image content = nova::gen_test_pattern(1810, kLines);
+        const std::vector<float> clean = nova::gen_fax_signal(content, kLines, g);
+        const size_t line = static_cast<size_t>(g.fs * 60.0 / g.lpm);
+        std::vector<float> stepped;
+        stepped.reserve(clean.size() + clean.size() / line / kEvery * kIns);
+        for (size_t i = 0; i < clean.size(); i++) {
+            stepped.push_back(clean[i]);
+            // Mid-line, where the picture is: an insertion at the sync edge
+            // would be a kinder test than the real fault.
+            if (i % (line * kEvery) == line / 2)
+                for (int k = 0; k < kIns; k++) stepped.push_back(clean[i]);
+        }
+        nova::DecodeOptions d;
+        d.segment = false;
+        auto run_video = [&](const std::vector<float>& s) {
+            std::vector<float> v = nova::fm_demod(s, g.fs, 1900.0, g.deviation);
+            return nova::decode_fax(v, g.fs, d);
+        };
+        const nova::DecodeResult lin = run_video(clean);
+        const nova::DecodeResult stp = run_video(stepped);
+        std::printf("  linear: %s rate=%.1f/1000 nonlin=%.1f smp\n",
+                    lin.timebase == nova::Timebase::kSteps ? "STEPS" : "linear",
+                    lin.timebase_step_rate, lin.phasing_nonlinearity);
+        std::printf("  stepped: %s rate=%.1f/1000 nonlin=%.1f smp\n",
+                    stp.timebase == nova::Timebase::kSteps ? "STEPS" : "linear",
+                    stp.timebase_step_rate, stp.phasing_nonlinearity);
+        check(lin.timebase == nova::Timebase::kLinear,
+              "a linear timebase is called linear");
+        check(stp.timebase == nova::Timebase::kSteps,
+              "inserted samples are detected (screamer)");
+        // The reported rate is a FLOOR on the insertion rate, not an
+        // estimate of it: this signal inserts once every 11 lines (90.9 per
+        // 1000) and the detector reports 36.9, because the ±8-line median
+        // that makes a step visible at all is wider than the gap between
+        // steps, so neighbouring steps merge into one ramp. Measured the
+        // same way, JSC2 reports 74 against session 8's hand count of ~123.
+        // Pinned as a band so that both an over-count and a collapse to
+        // near-zero fail.
+        check(stp.timebase_step_rate > 1000.0 / kEvery * 0.3 &&
+                  stp.timebase_step_rate < 1000.0 / kEvery * 1.2,
+              "step rate is a floor on the insertion rate, same order");
+        // The picture survives but is not untouched: the local median that
+        // tracks the steps lags them by a few lines, so every insertion
+        // costs a few lines of misalignment. Both halves are pinned — a
+        // decoder that started throwing the picture away on these files
+        // would fail the upper bound, and one that silently stopped
+        // tracking would fail the lower.
+        const double sd_lin = edge_stdev(crop_rows(lin.img, 40, kLines));
+        const double sd_stp = edge_stdev(crop_rows(stp.img, 40, kLines));
+        std::printf("  bar stdev: linear=%.2f px stepped=%.2f px\n", sd_lin,
+                    sd_stp);
+        check(sd_stp < 5.0, "the picture still comes out (wobble < 5 px)");
+        check(sd_stp > 1.0,
+              "...but visibly wobbles, which is why the flag exists");
+
+        // The false positive that matters. A clock error IS a linear
+        // timebase, and it moves the phasing edge by 1 sample per line at
+        // 250 ppm — 30 samples across the interval, three times the
+        // non-linearity limit. Measuring the raw spread instead of the
+        // residual about the fitted line reads that as steps.
+        nova::GenOptions gc;
+        gc.ppm = 250;
+        nova::DecodeResult fast = run(gc, kLines, d);
+        std::printf("  +250 ppm: %s rate=%.1f/1000 nonlin=%.1f smp "
+                    "(spread would be ~%.0f)\n",
+                    fast.timebase == nova::Timebase::kSteps ? "STEPS"
+                                                            : "linear",
+                    fast.timebase_step_rate, fast.phasing_nonlinearity,
+                    fast.phasing_spread);
+        check(fast.timebase == nova::Timebase::kLinear,
+              "a +250 ppm clock is not called a stepping timebase");
+
+        // The case the risk register warns about, and the only one where
+        // the phasing statistic is the sole witness: a WHITE-ONLY station
+        // (VMW, NMC, GYA transmit this way) whose capture chain steps.
+        // There is no per-line sync to track, so the picture rides on the
+        // measured clock and a step displaces the paper permanently — and
+        // until this session nothing in the decoder would have said so.
+        // No library recording is both white-only and stepping, so the
+        // combination only exists here.
+        nova::GenOptions gw;
+        gw.dead_pulse = false;
+        const std::vector<float> w_clean =
+            nova::gen_fax_signal(content, kLines, gw);
+        std::vector<float> w_stepped;
+        for (size_t i = 0; i < w_clean.size(); i++) {
+            w_stepped.push_back(w_clean[i]);
+            if (i % (line * kEvery) == line / 2)
+                for (int k = 0; k < kIns; k++) w_stepped.push_back(w_clean[i]);
+        }
+        const nova::DecodeResult wl = run_video(w_clean);
+        const nova::DecodeResult ws = run_video(w_stepped);
+        std::printf("  white-only: linear=%s stepped=%s (locks %d/%d, "
+                    "nonlin %.1f smp, bar stdev %.1f px)\n",
+                    wl.timebase == nova::Timebase::kSteps ? "STEPS" : "linear",
+                    ws.timebase == nova::Timebase::kSteps ? "STEPS" : "linear",
+                    ws.locked_lines, ws.lines, ws.phasing_nonlinearity,
+                    edge_stdev(crop_rows(ws.img, 40, kLines)));
+        check(ws.locked_lines == 0,
+              "white-only: no per-line sync, as designed");
+        check(wl.timebase == nova::Timebase::kLinear &&
+                  ws.timebase == nova::Timebase::kSteps,
+              "white-only: phasing alone convicts a stepping timebase");
+    }
+
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",
                 failures);
     return failures ? 1 : 0;

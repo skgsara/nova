@@ -91,6 +91,28 @@ sync pulse keeps its tracked anchor, because a phase measured once and
 propagated on a fitted clock cannot survive a timebase that steps, and one
 re-measured every line absorbs it without being told.
 
+**The decoder now says when a recording's timebase is not a straight line
+(2026-08-12).** Every time figure it reports — the clock, the line period,
+the anchor delta — assumes one constant rate, so where that assumption
+fails the numbers quietly change meaning. Nova measures it two ways that
+share no code: the tracked sync residual, local-median smoothed, whose
+step rate runs 0.0–7.0 per 1000 lines on clean recordings against
+64.8–339.8 on the affected ones; and the phasing edge's departure from a
+straight line, 1.0–3.8 samples against 20.2–25.5. Either is enough on its
+own, so a station sending no sync pulse is still covered, and where
+neither is available the decoder says "not measurable" instead of
+guessing.
+
+Run over the library, that turned the count from two recordings into
+**six** — every JSC file, including the three at 60 lpm whose +335 to +458
+ppm clocks nobody had questioned. None of the mature decoders reports this
+condition: JWX applies one operator-typed constant to every line,
+weatherfax_pi hears about lost samples only when PortAudio tells it, and
+fldigi builds the histogram that would show it and then keeps only its
+peak. The pictures still come out — a per-line tracker absorbs the steps,
+at a cost of about 3 px of wobble in 1810 — so this reports rather than
+repairs.
+
 Manual override of everything [ISO §4.2.6] is still untouched and needs
 the GUI (M4).
 

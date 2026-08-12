@@ -52,3 +52,14 @@ Notes:
   synthetic round-trip meets it outright (−137.00 against −137); on real
   recordings the honest statement is the residual shear bound above,
   because no ground-truth clock exists for an off-air recording.
+- §4.2.6's stability figure (±2×10⁻⁵ = ±20 ppm) presumes the recording has
+  ONE rate to be stable about. Six of twenty library recordings do not:
+  their capture chain inserts samples, so the measured clock is the
+  transmitter's clock plus an insertion rate and no single figure describes
+  the file (session 9, docs/01 §5). Nova does not repair this — it detects
+  and reports it (`DecodeResult::timebase`), so the clock figure is never
+  read as a stability measurement when it is not one. Compliance is
+  therefore claimed against the recording's timebase where that timebase is
+  linear, and the non-linear case is *reported* rather than quietly
+  averaged. `roundtrip [10]`, `fixture_timebase_steps`,
+  `fixture_timebase_linear`.

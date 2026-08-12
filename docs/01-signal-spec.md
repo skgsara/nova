@@ -184,6 +184,43 @@ library, so that registered gap stands.
      21-sample step, and could not usefully — at one step per eight lines
      no segment would survive to fit. Averaging them into the rate is the
      correct answer, and both pictures decode straight and correctly phased.
+- **Six, not two — and the decoder now says so.** Session 8's "every other
+  recording sits inside 3999–4001 with no step" was true of the recordings
+  it examined and false of the library: measured with two statistics in
+  session 9, **all six JSC recordings step**, and nothing else does. The
+  correction matters because JSC1, JSC5 and JSC6 are the library's 60 lpm
+  material, and their clocks (+335, +343, +458 ppm against a −130…0 family)
+  were being read as clock error by every reader of that number.
+  Two statistics decide it, sharing no code, either sufficient alone:
+  1. *Image domain, needs per-line sync.* The tracked sync residual, local-
+     median smoothed over ±8 lines. A jump between neighbouring locked
+     lines is mostly measurement noise; an inserted sample is PERSISTENT,
+     so it survives the median. Rate per 1000 drawn lines of smoothed steps
+     over 2 samples: nine clean recordings **0.0–7.0**, six JSC **64.8–339.8**.
+  2. *Phasing domain, needs a phasing interval.* Phasing is one edge
+     repeated at exactly the line rate [WMO §5.2.3], so its per-line
+     positions must lie on a straight line, and what remains after removing
+     the best one is non-linearity. Eleven clean recordings **1.0–3.8**
+     samples, JSC2/3/4 **20.2–25.5**.
+  The raw phasing spread cannot do job 2 — it is dominated by the clock, at
+  0.66 samples per line at −90 ppm and so ~40 samples across a 60-line
+  interval. That is why session 8's "phasing spread 72/47 against 1–19"
+  does not reproduce against the decoder's own detector, which reads
+  24–43 on clean recordings: the two were measuring different things.
+  Thresholds sit mid-gap and are expressed in SAMPLES OF TIME, not
+  fractions of a line, because an insertion is a fixed number of samples in
+  a capture chain and knows nothing about the line rate — the same numbers
+  separate 60 lpm and 120 lpm without rescaling.
+  [`roundtrip [10]`, `fixture_timebase_steps`, `fixture_timebase_linear`]
+- **The picture survives a stepping timebase, but not untouched.** Session
+  8 recorded that JSC2 and JSC3 "decode straight". Measured against a
+  synthetic with known ground truth (21 samples inserted every 11 lines),
+  the tracked picture's straight-edge scatter is **3.35 px of 1810** where
+  the same signal without insertions reads 0.00: the local median that
+  tracks the steps lags them by a few lines, so each insertion costs a few
+  lines of misalignment. Both bounds are pinned. On a white-only station,
+  where nothing tracks, the same signal is convicted by the phasing
+  statistic alone — the case no library recording covers.
 - **A pulse station keeps its tracked anchor; the phasing anchor is measured
   there but never preferred.** Argued in session 7 on the grounds that a
   tracked reference beats a fixed one, tested in session 8. JSC2 is the case

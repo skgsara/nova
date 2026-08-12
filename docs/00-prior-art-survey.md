@@ -171,6 +171,36 @@ KiwiSDR/weatherfax_pi do run their wedge fit inside a phasing stage the
 tone state machine has already entered, which is the shape Nova follows
 for segmentation (opening sequence → image → stop). Nothing copied.
 
+### Session 9 — does any mature decoder notice a non-linear timebase?
+
+Checked, sources read rather than recalled: **JWX** (`DecodeFax.java`,
+`CommonCode.java`, parent folder), **weatherfax_pi** (`src/FaxDecoder.cpp`),
+**KiwiSDR** (`extensions/FAX/FaxDecoder.cpp`), **fldigi**
+(`src/wefax/wefax.cxx`).
+
+**None of them detects or reports one.** The four positions:
+
+| | what it does about a timebase that steps |
+|---|---|
+| JWX | Nothing. `clock_correct_line(a, line, delta)` applies ONE operator-typed constant (`CalibrationController` is a text field) uniformly to every line — a pure linear model with no estimate and no residual. |
+| weatherfax_pi | The only one that acknowledges lost samples at all, and at the wrong layer: `if(err == paInputOverflow) wxLogMessage("Port audio overflow on input, some data lost!")`. That is PortAudio telling it; a recording read from a file never does, and nothing in the decoder measures the consequence. |
+| KiwiSDR | Inherits the above. Its `(ninety_pct - ten_pct) > m_SamplesPerLine/6` test on the phasing positions is the same *statistic* Nova uses for the phasing half, but it is a false-phasing filter, at a threshold 24x looser, and it is never read as a timebase diagnostic. |
+| fldigi | The richest machinery, used to absorb rather than to report: `correlation_shift()` searches 1..100 samples for the local max of line-to-line correlation and accumulates a HISTOGRAM over the whole reception, then takes its mode after 100+ calls ("Specific to the antenna and the reception"). A stepping timebase is exactly a multi-modal or drifting version of that histogram — fldigi computes the distribution and throws away everything but its peak. |
+
+So the reusable finding is again a negative one, and the specific ideas
+taken are: KiwiSDR's phasing-position spread as the statistic to look at
+(reinterpreted — the residual about a fitted line, not the raw spread,
+which is dominated by clock error), and fldigi's insight that per-line
+shift is worth a *distribution* rather than a single number. The
+smoothed-residual step rate is new here and is written down as such.
+Nothing copied; the ledger below is unchanged.
+
+Worth recording because it contradicts a natural assumption: a live
+decoder is MORE exposed to this than an offline one — every one of these
+runs on a live stream where an overrun inserts or drops samples silently —
+and none of them looks. Nova is offline today and looks anyway, which is
+the right way round for M4.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

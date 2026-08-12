@@ -68,6 +68,58 @@ int main(int argc, char** argv) {
                                               : "image anchor used");
         else
             std::printf("  phasing none\n");
+        switch (r.timebase) {
+            case nova::Timebase::kSteps:
+                // Loud, because it changes what the line above it means.
+                if (r.timebase_lines > 0)
+                    std::printf("  timebase NOT LINEAR: %d stepped line(s), "
+                                "%.1f per 1000 over %d.\n",
+                                r.timebase_step_lines, r.timebase_step_rate,
+                                r.timebase_lines);
+                else
+                    std::printf("  timebase NOT LINEAR: phasing edge %.1f "
+                                "smp off straight.\n",
+                                r.phasing_nonlinearity);
+                std::printf("           The clock figure above is this "
+                            "recording's clock PLUS its insertion rate, and "
+                            "the anchor delta\n"
+                            "           is not comparable with other "
+                            "recordings. Where lines lock the picture still "
+                            "comes out, with\n"
+                            "           a few px of wobble at each step "
+                            "(3.3 px of 1810, measured synthetically).\n");
+                break;
+            case nova::Timebase::kLinear:
+                // Only the evidence that exists. A white-only station has
+                // no tracked residual to measure, and a recording with no
+                // phasing interval has no edge to fit — printing 0.0 for
+                // either would read as a measurement rather than a gap.
+                std::printf("  timebase linear (");
+                if (r.timebase_lines > 0)
+                    std::printf("%.1f step(s) per 1000 lines over %d",
+                                r.timebase_step_rate, r.timebase_lines);
+                else
+                    std::printf("no per-line sync to track");
+                if (r.phasing_found)
+                    std::printf("; phasing edge %.1f smp off straight)\n",
+                                r.phasing_nonlinearity);
+                else
+                    std::printf("; no phasing interval)\n");
+                break;
+            case nova::Timebase::kUnknown:
+                // Say WHICH witness is missing. "No per-line sync" and
+                // "the recording is too short to measure a rate over" are
+                // different facts, and a 60 s cut of a pulse station hits
+                // the second while looking like the first.
+                std::printf("  timebase not measurable (%s; %s)\n",
+                            !r.per_line_sync
+                                ? "no per-line sync to track"
+                                : "too few drawn lines for a step rate",
+                            r.phasing_found
+                                ? "phasing interval too short to fit"
+                                : "no phasing interval");
+                break;
+        }
         if (r.segmented)
             std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
                         "start/phasing, %d of stop)\n",

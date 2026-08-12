@@ -7,6 +7,150 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 9: the symptom session 8 recommended was the wrong one, and the library has six bad recordings, not two
+
+Agent: Claude Opus 5.
+
+**Task as accepted:** session 8's next step, first item — detect and report
+the timebase steps — with prior art checked first, as the reuse rule
+requires. Sara confirmed the step and added a fact about the second item
+(below). The GUI stays untouched; core first, as instructed in session 8.
+
+**Prior art, checked first, sources read rather than recalled.** JWX
+(local), fldigi `wefax.cxx`, KiwiSDR and weatherfax_pi `FaxDecoder.cpp`.
+**None of the four detects or reports a non-linear timebase**, and the way
+each fails to is informative (docs/00, session 9 section). JWX applies one
+operator-typed constant to every line. weatherfax_pi is the only one that
+acknowledges lost samples at all and does it at the wrong layer — a
+PortAudio `paInputOverflow` log line, which a recording read from a file
+can never produce. KiwiSDR carries weatherfax_pi's phasing-spread test but
+uses it as a false-phasing filter at a 24x looser threshold. fldigi comes
+closest and then throws the evidence away: `correlation_shift()` builds a
+histogram of per-line shifts over the whole reception and keeps only its
+mode. Two ideas taken (KiwiSDR's phasing-position spread as the statistic
+to look at; fldigi's per-line shift deserving a distribution), both
+reinterpreted, nothing copied, ledger unchanged. Worth recording: a live
+decoder is *more* exposed to this than an offline one, and none of them
+looks.
+
+**Session 8's recommended symptom does not work, and I did not find that
+out by arguing.** It proposed the phasing spread on the strength of "JSC2
+72, JSC3 47 against 1–19 everywhere else". Measured across the library
+through the decoder's own detector, clean recordings read **24–43** — the
+margin is not there. The reason is arithmetic: per-line phasing positions
+are measured in windows of the TRUNCATED period, so a −90 ppm clock walks
+the edge 0.66 samples per line and ~40 samples across a 60-line interval,
+and that walk is most of what the raw spread reports. FAXSignal, whose
+clock is exactly nominal, reads 1.0 where every −86 ppm recording reads
+25–43. The fix is to remove the best straight line first and measure what
+remains: **clean 1.0–3.8 samples, JSC2/3/4 20.2–25.5.** Had I calibrated
+the screamer on session 8's number I would have shipped a test that
+convicts the whole library — which is the trap session 8 itself described
+one session earlier.
+
+**Two statistics, sharing no code, either sufficient alone.** (a) *Image
+domain*, needs per-line sync: the tracked sync residual, local-median
+smoothed over ±8 lines — a jump between neighbouring locked lines is mostly
+measurement noise, an inserted sample is PERSISTENT and survives a median.
+Rate per 1000 drawn lines of steps over 2 samples: nine clean recordings
+**0.0–7.0**, six JSC **64.8–339.8**. (b) *Phasing domain*, needs a phasing
+interval: the residual above. Thresholds sit mid-gap and are in samples of
+TIME, not fractions of a line, because an insertion is a fixed number of
+samples in someone's capture chain and knows nothing about the line rate —
+which is also why the same two numbers separate 60 lpm and 120 lpm without
+being rescaled. `DecodeResult::timebase` is kLinear / kSteps / kUnknown,
+and kUnknown is a real answer: GYA 2300Z and VMW 2215Z are white-only with
+no phasing found, so neither statistic exists and the decoder says so
+rather than reporting a clean bill.
+
+**The library has six stepping recordings, not two.** All six JSC files,
+including the three at 60 lpm — JSC1, JSC5 and JSC6, whose clocks read
++335, +343 and +458 ppm against a −130…0 family and had never been
+questioned. The two statistics agree wherever both exist (JSC2/3/4), which
+is the corroboration this project asks for. Session 8's "every other
+recording sits inside 3999–4001 with no step" was true of what it examined
+and false of the library; docs/01 §5 is corrected, and the risk register
+now carries the general lesson: **a statistic that separates two files you
+already suspect is not the same thing as one that separates them from
+everything else.**
+
+**Tests:** 17 suites green, zero warnings (was 15). `roundtrip [10]` is the
+ground-truth screamer no recording can be — a generated signal, linear,
+then samples inserted into it at a known rate (21 every 11 lines, JSC2's
+measured signature). It pins detection, the +250 ppm false positive (a
+clock error IS linear, and the raw-spread version of this test fails
+here), and the white-only case that exists nowhere in the library: a
+station with no sync pulse whose capture chain steps, convicted by the
+phasing statistic with zero locks in the recording. `fixture_timebase_steps`
+is the new fixture `kyodo-news-jsc2-steps-120s.wav` (JSC2 200–320 s), pure
+image by construction so the phasing statistic cannot exist and the image
+statistic has to carry it alone; `fixture_timebase_linear` is the
+adversarial negative — himawari-jmh-warp-120s carries the library's largest
+single phase jump (~595 px) and must NOT be called a stepping timebase,
+because one skip is not a rate.
+
+**Revert checks run, all three scream.** Raw spread instead of the residual
+→ roundtrip [10] fails twice, including the +250 ppm false positive.
+Image statistic disabled → `fixture_timebase_steps` fails and nothing else
+does. Phasing statistic disabled → the white-only case fails and nothing
+else does. Each half of the test is pinned by exactly one screamer.
+
+**Contradictions found.** Three. (a) Session 8's phasing-spread margin, above.
+(b) Session 8 recorded that JSC2 and JSC3 "decode straight"; measured
+against a synthetic with known ground truth, a tracked picture under
+insertions has **3.35 px of straight-edge scatter in 1810** where the same
+signal without them reads 0.00 — the local median lags each step by a few
+lines. The picture survives; it is not untouched, and both bounds are now
+pinned. I had already written "the picture is unaffected" into the CLI text
+before measuring it, and corrected it. (c) My own first framing of the
+threshold as a fraction of the line was wrong for the same reason the
+insertions are: at 60 lpm it put JSC4 within 1% of the boundary, where
+absolute samples put it mid-gap.
+
+**One thing the pictures caught that the tests did not.** Decoding the
+primary fixture to look at it — the standing rule, not a formality — showed
+`timebase not measurable (no per-line sync and no phasing interval)` on a
+pulse station with 117 locks of 120. The verdict was right (120 lines is
+under the 128-line floor a rate can honestly be measured over); the reason
+given was a lie. The message now names which witness is missing, and
+distinguishes "too short" from "nothing to measure with". No test would
+have caught that, because both readings are kUnknown.
+
+**Registered gaps added / narrowed:** the reported step rate is a FLOOR,
+not a count — dense steps merge under the ±8-line median (synthetic: 90.9
+inserted reads 36.9), so it convicts a recording but does not measure an
+insertion rate; two recordings are measurable by neither statistic and
+report kUnknown; nothing repairs a stepping timebase, and repair is not a
+milestone. The session-7 gap about the phasing anchor being propagated on a
+fitted clock is narrowed rather than closed: the white-only-plus-stepping
+combination is now detected (`roundtrip [10]`), but the picture is still
+drawn wrong — what changed is that the decoder no longer reports a
+confident clock instead.
+
+**Sara's fact about the ±150 Hz LF deviation, recorded as a decision.** She
+knows of no operating station still carrying it. The old wording ("no
+real-world source known") was an absence of evidence; this is stronger, and
+it means the item is not a gap to close by hunting for a fixture. It is
+implemented, synthetic-only [`roundtrip [6]`], and that is the honest end
+state. Risk-register item 4 and both gap lists say so now, so no future
+session spends itself looking.
+
+**Next step:** the timebase work is done and reported; M3 is still closed
+except the manual override, which needs the GUI. Two candidates, in this
+order. First, **make the kUnknown verdict rarer** — GYA 2300Z and VMW 2215Z
+are unmeasurable because no phasing interval is found in them, and GYA
+2300Z has a registered 18-line phasing candidate at 15.5–24.5 s that scores
+0.77 and is rejected by the final thresholds; deciding that one case either
+way would close a gap and shrink the blind spot, and it needs no new
+algorithm. Second, and larger, **M4**: the GUI plus live audio, where the
+manual override lives and where the incremental-`detect_tones` cost noted
+in session 7 comes due. Note for whoever takes M4: the timebase test as
+built is offline — it needs the drawn segment and the whole phasing
+interval — so a live decoder needs an incremental form of it, and the
+prior art has nothing to offer. Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 8: two recordings disagreed with the whole library, and the fault was in the recordings
 
 Agent: Claude Opus 5.

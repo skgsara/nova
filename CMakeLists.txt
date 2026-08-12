@@ -96,6 +96,28 @@ add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
 add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 138 148 -130 -60 0.85
   --expect-anchor-delta -160 -55)
+# Session 9: is the recording's timebase the straight line everything
+# upstream assumes? Two fixtures, chosen so that each isolates one half of
+# the test and neither can pass by accident.
+#
+#   JSC2 200-320 s is pure image, so the phasing statistic does not exist
+#   on it and only the tracked sync residual can convict: it reads 88.2
+#   steps per 1000 lines against 0.0-7.0 on every clean recording in the
+#   library. Its +323 ppm clock is out of the -130..0 family precisely
+#   because a stepping recording's clock_ppm is clock PLUS insertion rate,
+#   so the clock band here is wide and deliberately NOT a linearity claim.
+#
+#   himawari-jmh-warp-120s is the adversarial LINEAR case: it carries a
+#   real KiwiSDR stream time-skip of ~595 px, the largest single phase jump
+#   in the fixture set. One skip is not a stepping timebase, and a detector
+#   that convicts on max_step or on any single event calls this file
+#   non-linear and fails here. (Its rate is 1.6/1000.)
+add_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav 120 230 245 150 450 0.95
+  --expect-timebase steps)
+add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
+  --expect-timebase linear)
 
 # M3 control-signal suite: start/stop tone and phasing detection.
 # [4], [5] and [9] are the false-start screamers — picture content with no
