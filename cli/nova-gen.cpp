@@ -12,7 +12,7 @@ void usage() {
                  "usage: nova-gen out.wav [--lpm 60|90|120] [--ioc 288|576]\n"
                  "       [--lines N] [--ppm X] [--noise X] [--dev 150|400]\n"
                  "       [--fs N] [--no-start] [--no-stop] [--no-phasing]\n"
-                 "       [--no-pulse]\n");
+                 "       [--no-pulse] [--phasing-sym]\n");
 }
 }  // namespace
 
@@ -44,6 +44,8 @@ int main(int argc, char** argv) {
             opt.stop_tone = false;
         else if (!std::strcmp(argv[i], "--no-phasing"))
             opt.phasing = false;
+        else if (!std::strcmp(argv[i], "--phasing-sym"))
+            opt.phasing_symmetric = true;  // 50/50 [WMO §5.2.3.2]
         else if (!std::strcmp(argv[i], "--no-pulse"))
             opt.dead_pulse = false;  // white-only dead sector
         else {

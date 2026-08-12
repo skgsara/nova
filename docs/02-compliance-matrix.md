@@ -17,7 +17,8 @@ information.
 | §4.2.2 | Accept AF input −10…+10 dBm, shifts ±150 and/or ±400 Hz about 1900 Hz | Wide usable input-level range (AGC/normalization); both deviation modes supported | synthetic: both deviations decode (roundtrip [6]); level-range test pending | partial |
 | §4.2.3 | IOC 576 and 288, automatic or manual | IOC auto from 300/675 Hz tone + manual override | synthetic decode both IOCs (roundtrip [4]); auto-from-tone pending (M3) | partial |
 | §4.2.4 | Scan speeds 60/90/120 spm, automatic and manual | lpm auto from phasing rate + manual override | synthetic 3 rates, auto-detected (roundtrip [1][4][5]) | synthetic ✓ |
-| §4.2.5 | Auto respond to 300/675 Hz start (via line-sync detection) and 450 Hz stop | tone detectors + state machine; hysteresis; false-start rejection | pending (M3) | pending |
+| §4.2.5 | Auto respond to 300/675 Hz start (via line-sync detection) and 450 Hz stop | Purity-based detection on demodulated video (`core/tones.cpp`): Goertzel power in the tone's own bin as a fraction of the window's AC power, run coherence by 10–90% frequency spread. False-start rejection is the purity margin itself | `tones` [1][2][3] start 576/288 and stop, each within the ±1% of WMO §5.2.6; [4][5] no event from picture content; [6] survives noise. `tones_fixture_vmw`: real 300 Hz start in an off-air recording. `tones_fixture_no_false_start`: zero events on 120 s of real newspaper text. Library: 14/20 recordings' tones found, zero false positives in 5.9 h | detection ✓, **sequencing pending** |
+| §4.2.3 / §4.2.4 (auto) | IOC and scan speed selected automatically | IOC from 300 vs 675 Hz start tone; lpm from the phasing rate 1.0/1.5/2.0 Hz [WMO §5.2.3.1] | `tones` [7] recovers 60/90/120 from phasing alone; [8] accepts the symmetric waveform [WMO §5.2.3.2]; `tones_fixture_vmw` recovers 120 lpm from a real phasing interval | measured ✓, not yet consumed by the decoder |
 | §4.2.6 | Sync accuracy ±2×10⁻⁶, stability ±2×10⁻⁵; phasing automatic with manual adjustment | clock-rate from a median line-period fit over pairs of locked lines an eighth of the recording apart, segmented at every step in sync position; per-line dead-sector template lock with whole-line re-acquisition after a run of misses; manual phase nudge pending GUI | synthetic +100 ppm corrected (roundtrip [2]); −137 ppm recovered as −137.00 (roundtrip [8]); residual shear of the decoded image ≤10 ppm on all 20 library recordings, measured against the picture, not the metric (session 5); `fixture_warp` re-acquires across a stream time-skip (max_step 5.2 px) | synthetic+fixture ✓, manual adj. pending |
 | §4.2.6 (cont.) | …on stations that send no sync pulse | Dead-sector style measured per recording [WMO §5.1.3.3]; white-only stations decode on the measured clock with **no** per-line lock — the sector carries no phase information (session 4 measurement, docs/01 §5). The clock they ride on is measured by folded-block phase drift, which needs no locks at all (session 5) | `fixture_white_sector` (VMW): style detected, zero locks claimed. `fixture_weak_white` (GYA, weak *and* white-only): clock bound is the picture screamer, and fails at −51.6 ppm if the fold is removed. Roundtrip [7]: white-only generated at +250 ppm, decoded +250.0, zero locks | met, with the limit stated |
 | §4.2.7 | Pitch of scanning trace within ±25% | line rate held by design (resampled) | trivially met; assertion in line assembly | met |
@@ -28,7 +29,13 @@ Notes:
 - §4.2.2's "±150 Hz and/or ±400 Hz" is why LF deviation is a
   first-class mode, not an afterthought.
 - WMO §5.2.3.2's two phasing waveforms (50/50 and 5/95) are covered
-  under the §4.2.6 phasing row.
+  under the §4.2.6 phasing row. Both are now detected and distinguished
+  (`tones` [7][8]); the library's XSG recordings are the real 50/50 case.
+  §4.2.6's "phasing automatic" is **half met** as of session 6: the
+  phasing interval and its line-start reference [WMO §5.2.3.4] are found
+  and measured, but `decode_fax` does not yet consume them — it still
+  derives its anchor from image lines. Until it does, the row's status is
+  detection-only, and this note is the honest statement of that.
 - WMO §5.1.3.3 makes the dead sector's black pulse *permitted*, not
   required. Five of twenty library recordings send none. That is a
   property of the signal, not a decoder shortfall, and §4.2.6's sync

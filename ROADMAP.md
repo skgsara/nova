@@ -75,11 +75,42 @@ register are milestone entries, not intentions (SOP P1.5).
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
-## M3 — full auto sequencing  [pending]
-- 300/675 Hz start, 450 Hz stop [ISO §4.2.5], phasing align with
-  wedge-fit + median + spread rejection (KiwiSDR approach), manual
-  override for everything [ISO §4.2.6 "facility for manual adjustment"].
-- False-start rejection on text-heavy content.
+## M3 — full auto sequencing  [detection done, sequencing pending]
+
+Done (session 6) — detection, measured against the library:
+- Start/stop tones [ISO §4.2.5]: `core/tones.cpp`. Accept test is spectral
+  **purity** in the tone's own bin, not a transition rate, because a rate
+  test cannot tell a 300 Hz square wave from text that averages 300
+  transitions/s. Library separation: content ≤ 0.16, tones 0.68–0.99,
+  threshold 0.35. Zero false positives in 5.9 hours; 14 of 20 recordings
+  carry a start tone, all measuring 299.8 Hz, all stops 450.5 Hz — inside
+  the ±1% of WMO §5.2.6.
+- Phasing [WMO §5.2.3]: `core/phasing.cpp`. Wedge fit, median, 10–90%
+  spread rejection (KiwiSDR shape) plus a duration cap from the spec.
+  Found on 15 of 20 recordings, 30.0 s long, spread 4–73 samples of 4000.
+  Recovers the line rate (60/90/120) and both waveforms (5/95 and 50/50 —
+  XSG is the real symmetric case).
+- **This corrected session 3's tone survey.** That survey searched the raw
+  audio, where these signals only appear as incidental envelope ripple,
+  and concluded one recording in twenty carried a start tone. The correct
+  domain is demodulated video, and the answer is 14 of 20.
+- Screamers: `tones` [1]–[10], `tones_fixture_vmw` (real start tone +
+  phasing in an off-air white-only recording), `tones_fixture_no_false_start`
+  (zero events on 120 s of real newspaper text).
+
+Pending:
+- **Sequencing itself: nothing consumes the detections yet.** `decode_fax`
+  still finds its anchor from image lines. Wiring the phasing line-start
+  in is the payoff — it is the only per-line phase source that exists for
+  the white-only stations (VMW/NMC/GYA), which report zero locks by design.
+- Blocker to resolve first: which edge of the dead sector the phasing
+  `line_start` marks. On JMH Test Chart it agrees with `fax.cpp`'s
+  image-derived anchor to ~23 samples of 4000 (0.6% of a line) once the
+  black porch is accounted for — close enough to be the same feature,
+  not close enough to call the convention settled. Arithmetic cannot
+  settle it; a decoded picture can.
+- Manual override for everything [ISO §4.2.6 "facility for manual
+  adjustment"] — still untouched, needs the GUI (M4).
 
 ## M4 — GUI + live audio  [pending]
 - FLTK GUI, RtAudio capture, spectrum/waterfall, image tools,

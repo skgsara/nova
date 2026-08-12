@@ -81,6 +81,55 @@ mature decoder does when the signal carries no sync it can trust. Nova's
 claim to do it automatically is only as good as the screamer behind it
 (`fixture_weak_white`, roundtrip group [7]).
 
+**Control-tone detection and phasing (session 6, M3).** All three mature
+decoders were read before writing anything, and they disagree:
+
+| | what it measures | window | accept rule |
+|---|---|---|---|
+| JWX | Goertzel power at 300 Hz on the **video** signal (`gstart`/`gend`, `DecodeFax.setup`) | `sample_rate/4` = 250 ms | power ≥ 0.5; edge-triggered — WAITSTB waits for active, WAITSTE for inactive |
+| weatherfax_pi / KiwiSDR | per-line type vote (`typecount`) | 1 line | `m_StartStopLength*lpm/60 − leewaylines`, `threshold = 5` ("pretty arbitrary but works in practice") |
+| fldigi | black↔white transition count with hysteresis (`x>215` / `x<40`) | `sample_rate/2` = 500 ms | derived freq within ±8 Hz of nominal, on **two consecutive** windows |
+
+Two things Nova takes. (a) All three run the detector on **demodulated
+video**, not audio — correct, because the control signals are alternating
+black/white at a rate, not audio tones [WMO §5.2.2]. Session 3's library
+tone survey ran an FFT on the raw audio and concluded only `jmh sample.wav`
+carried a start tone; re-measured in the video domain, 14 of 20 recordings
+do. The old method saw the tone only through incidental envelope ripple.
+(b) fldigi's "two consecutive windows must agree on the frequency" is the
+right shape of coherence test, and Nova generalizes it to a 10–90% spread
+over the whole run.
+
+One thing Nova adds, because none of the three has it. Every one of these
+accepts on **rate** — Goertzel power, a type vote, or a transition count.
+A transition counter cannot distinguish a clean 300 Hz square wave from
+dense weather text that merely averages 300 transitions per second, and
+text-heavy content is the named false-start trap for this milestone.
+Nova's accept test is spectral **purity**: the fraction of a window's AC
+power sitting in the tone's own bin, normalized so a pure sinusoid reads
+1.0 and an ideal square wave reads 8/π² = 0.811. Measured over the whole
+library (5.9 hours): picture content never exceeds **0.16** in any control
+band, real tones run **0.68–0.99**, and the threshold sits at 0.35 in a gap
+neither population comes near. fldigi's need for a separate "ignore the
+stop tone during start" guard, and its correlation-based bail-out, are both
+symptoms of the discrimination its transition counter cannot do.
+
+Where Nova deviates from KiwiSDR's phasing constants, and why. The wedge
+fit over a fraction of the line, the median over ~40 lines, and the 10–90%
+spread rejection are all taken as ideas. But KiwiSDR rejects only when the
+spread exceeds `m_SamplesPerLine/6` (667 samples on a 4000-sample line),
+and at that limit Nova reported 439 s and 481 s of "phasing" on satellite
+imagery whose dark lines fit a 5%-white template by accident. The
+difference is architectural: KiwiSDR only ever runs this **inside** a
+phasing stage its tone state machine has already entered, so a loose
+constant costs it nothing, while Nova scans a whole recording blind. Nova
+uses 1/24 (167 samples) plus a duration cap from the spec itself — phasing
+is ~30 s [WMO §5.2.3], so a 480 s run is falsified by its length alone,
+whatever it scores. Measured separation across the library: true phasing
+spread 14–73 samples and score 0.88–0.97, false runs 288–635 and 0.48–0.62.
+
+Nothing was copied in either case; the ledger below is unchanged.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

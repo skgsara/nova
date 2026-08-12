@@ -57,6 +57,17 @@ about 1900 Hz. Nova's deviation mode implements exactly that.
 | Control-signal freq tolerance | ±1% | WMO §5.2.6 |
 | Auto start may also trigger on | IOC-select OR phasing signal alone | WMO §5.2.1 |
 
+**Measured in the library (session 6), correcting session 3.** The control
+signals are alternating black/white *in video*, so they must be looked for
+in the demodulated video; session 3's survey looked in the raw audio and
+found a start tone on one recording out of twenty. Re-measured properly:
+**14 of 20 carry a 300 Hz start tone and 15 of 20 a detectable phasing
+interval.** Every measured start read 299.8 Hz and every stop 450.5 Hz —
+inside the ±1% of WMO §5.2.6. Durations match the spec: starts 4–10 s
+against the specified 5–10 s (JSC4 is the outlier at 30 s), stops ~5 s,
+phasing 30.0 s. No 675 Hz IOC-288 start tone exists anywhere in the
+library, so that registered gap stands.
+
 ## 4. Transmission sequence
 
 1. (optional) start/IOC-select tone, 5–10 s
@@ -106,6 +117,24 @@ about 1900 Hz. Nova's deviation mode implements exactly that.
   finds it, and the black->white *shape* (not the level) says whether the
   optional pulse is there. Library separation, session 4: pulse stations
   0.48–0.94, white-only 0.14–0.34.
+- **Control tones are separated from picture content by spectral purity,
+  not by rate.** The fraction of a window's AC power lying in the tone's
+  own bin reads 1.0 for a pure sinusoid and 8/π² = 0.811 for an ideal
+  square wave. Library measurement (session 6): picture content ≤ 0.16,
+  real tones 0.68–0.99, threshold 0.35. A transition-rate test — which is
+  what the prior art uses — cannot make this distinction, because dense
+  weather text can average the right number of transitions per second
+  without being a tone. [WMO §5.2.2, §5.2.5; docs/00]
+- **The phasing stage is where a white-only station's line phase lives.**
+  Phasing is ~30 s of alternating black/white at the line rate whose white
+  leading edge marks dead-sector entry [WMO §5.2.3.4] — content-free by
+  construction, which is why weatherfax_pi, KiwiSDR and JWX all locate the
+  anchor there. Measured (session 6): phasing found on 15 of 20 library
+  recordings including the white-only VMW and NMC, 30.0 s long, per-line
+  positions agreeing to 4–73 samples of a 4000-sample line. Where a start
+  tone is also present, the phasing begins where the start tone ends in 11
+  of 14 recordings — two detectors sharing no code agreeing on a boundary
+  neither was told about.
 - **A white-only dead sector carries no per-line phase information.**
   Session 3 assumed a "white-sector matcher" would fix VMW; session 4
   built two and measured both to be worse than not tracking at all — they

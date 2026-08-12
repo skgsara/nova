@@ -7,6 +7,134 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 6: the tones were always there; we had been listening in the wrong domain
+Agent: Claude Opus 5.
+
+**Task as accepted:** M3 — start/stop tone detection and auto sequencing
+(session 5's next step), prior art first per Sara's reuse rule.
+
+**Prior art, checked first.** JWX, weatherfax_pi/KiwiSDR and fldigi all
+detect the control tones, and all three disagree about how: JWX runs a
+250 ms Goertzel at 300 Hz with a 0.5 power threshold and edge-triggers on
+it; KiwiSDR votes per line and needs `5s×lpm/60 − 4` lines; fldigi counts
+black↔white transitions with 215/40 hysteresis over 500 ms and demands two
+consecutive windows within ±8 Hz. Full comparison table in docs/00.
+
+They agree on the one thing that mattered most: **all three run the
+detector on demodulated VIDEO, not audio.** The control signals are
+alternating black/white at a rate [WMO §5.2.2], not audio tones.
+
+**That is what session 3 got wrong, and it had been in the risk register
+ever since.** Session 3's library tone survey ran a Welch FFT on the raw
+audio and concluded that only `jmh sample.wav` carried a start tone — a
+finding that shaped the whole plan for this milestone ("synthetic-first
+with one real check is the likely shape", session 5's next step). Measured
+in the video domain: **14 of 20 recordings carry a 300 Hz start tone, 16
+carry a 450 Hz stop, and 15 carry a full phasing interval.** The audio
+survey saw its one tone only through incidental envelope ripple. A
+constant-envelope FM signal has no component at the modulation rate; there
+was never a good reason to expect one.
+
+**The generator was emitting tones that were not control signals.**
+`push_tone` truncated its half-period to whole samples, so at fs=8000 it
+produced 307.7 Hz for 300, **500 Hz for 450, and 800 Hz for 675** — the
+last two nowhere near the ±1% of WMO §5.2.6. Measured with the new tool
+before touching it (306.0 / 499.0 / 800.5) rather than inferred from the
+arithmetic. Had I calibrated the detector against this first, I would have
+widened its search band to ±20% to "make it work" and shipped something
+that accepted almost anything. Fixed, re-measured, and pinned by `tones`
+[1][2][3], which assert the ±1% directly.
+
+**What Nova adds to the prior art: purity, not rate.** Every one of the
+three accepts on a rate — power at a bin, a line vote, a transition count.
+None can separate a clean 300 Hz square wave from dense weather text that
+merely averages 300 transitions per second, which is precisely M3's named
+false-start trap. Nova's test is the fraction of a window's AC power in
+the tone's own bin, normalized so a pure sinusoid reads 1.0 and an ideal
+square wave 8/π² = 0.811. Hann-windowed, because rectangular leakage would
+spill exactly the broadband content this is meant to reject into the bin.
+
+**Measured separation, 5.9 hours of library audio:** picture content never
+exceeds **0.16** in any control band; real tones run **0.68–0.99**;
+threshold 0.35 sits in an empty gap two orders of magnitude wide on the
+text-heavy JSC newspaper faxes (max 0.12). **Zero false positives.**
+
+**The survey found the opposite failure instead — false negatives.** Four
+recordings showed purity 0.73–0.96 outside any accepted event. All four
+were real tones my run-assembly rules had discarded: a one-window gap
+tolerance cannot survive HF fading, and the frequency-coherence test
+rejected spreads above 3 Hz while the probe grid was spaced 4 Hz — a test
+finer than its own resolution. Fixed with a 2 s gap tolerance, a hot-
+fraction floor, and parabolic interpolation of the peak frequency. VMW
+2230Z's stop tone went from rejected to 5.12 s; NMC's from 3.38 s to 5.12;
+JMH Test Chart's start from two fragments to a single 10.00 s event.
+
+**Phasing detection, and the payoff for white-only stations.** Wedge fit,
+median, 10–90% spread rejection — the KiwiSDR shape — but their spread
+limit of `SamplesPerLine/6` let satellite imagery report **439 s and 481 s
+of "phasing"**. That is not a bad constant on their part: KiwiSDR only ever
+runs this inside a phasing stage its tone state machine has already
+entered, while Nova scans blind. Tightened to 1/24 plus a duration cap
+from the spec itself (phasing is ~30 s [WMO §5.2.3], so 480 s is falsified
+by length alone, whatever it scores).
+
+Tightening did not just remove the false runs — it **recovered the real
+ones underneath them**, because the candidate rule had been "longest run,
+then test it" when it should have been "test every run, then take the best
+valid one". himawari 233 s/spread 288 → 30.0 s/spread 19. jmh sample
+91 s/360 → 30.0 s/**4**. XSG FYCI 146 s/635 → 30.0 s/12.
+
+**The structural corroboration nothing in the code enforces:** where a
+recording carries both, the phasing interval begins where the start tone
+ends in **11 of 14** cases — VMW 2230Z 62.00→62.00, JSC4 57.00→57.00, XSG
+FYCI 132.12→132.00 — and runs for exactly 30.0 s. Two detectors sharing no
+code, agreeing on a boundary neither was told about, reproducing the
+transmission sequence of WMO §5.2.3 from off-air recordings. VMW and NMC
+are **white-only stations**: they have reported zero locks since session 4
+because their dead sector holds no phase, and their phasing intervals are
+right there, 60 lines each, spread 16–17 samples of 4000.
+
+**Contradictions found.** Two, both mine, both caught by measurement
+rather than reasoning. (a) I set the frequency-coherence limit at ±1% of
+nominal without checking it against the probe spacing that feeds it, and
+it silently rejected real tones for three of the four false-negative
+cases. (b) My first phasing candidate rule took the longest run and tested
+it afterwards, which is wrong whenever a recording holds both a long false
+run and the real interval — it discarded five real phasing intervals that
+the corrected rule finds.
+
+**Tests:** 11 suites green, zero warnings (was 8). New `tones` [1]–[10]:
+both start tones, stop, false-start on picture content, the purity margin
+itself, noise, phasing rate recovery at 60/90/120, the symmetric 50/50
+waveform [WMO §5.2.3.2], no phasing from image content, and line_start
+against the known grid. New `tones_fixture_vmw` on a new 100 s fixture cut
+from VMW 2230Z — a real start tone plus a real phasing interval on a
+white-only station, asserting that phasing begins where the tone ends. New
+`tones_fixture_no_false_start`: zero events on 120 s of real newspaper
+text. The synthetic false-start test is deliberately not trusted on its
+own — generated content peaks at 0.001 where real content reaches 0.16.
+`nova-gen` gained `--phasing-sym`; the generator could not produce the
+symmetric waveform the spec permits and docs/01 demanded be accepted.
+
+**Registered gaps added:** which edge of the dead sector the phasing
+`line_start` marks (it agrees with `fax.cpp`'s independent image-derived
+anchor to ~23 samples of 4000 on JMH Test Chart, once the black porch is
+allowed for — the same feature, not a settled convention); and GYA 2300Z's
+18-line phasing candidate, which the final thresholds reject and which is
+not established either way. IOC 288 re-confirmed absent from the library
+by a detector that searches the right domain.
+
+**Next step:** wire it in — nothing consumes any of this yet. `decode_fax`
+still finds its anchor from image lines. Take the phasing `line_start` as
+the line-start reference [WMO §5.2.3.4] and use the tone events to segment
+start → phasing → image → stop. **Settle the edge convention against a
+decoded picture before trusting the anchor** — session 5's lesson applies
+directly here, and the honest test is VMW or NMC, where the phasing anchor
+is the only per-line phase that exists and the current decode has none.
+Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 5: the baseline was the bug; the library was not straight
 Agent: Claude Opus 5.
 

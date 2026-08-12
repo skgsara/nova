@@ -56,9 +56,24 @@ ppm and had been shearing three of the library's recordings by a third of
 a page while every lock metric stayed green — found by measuring decoded
 pictures rather than decoder statistics.
 
+**M3 in progress (2026-08-12):** the control signals — 300/675 Hz start,
+450 Hz stop [WMO §5.2.2, §5.2.5] and the 30 s phasing interval
+[WMO §5.2.3] — are detected and measured. Detection accepts on spectral
+*purity* rather than a transition rate, which is what lets it tell a
+control tone from dense weather text: across 5.9 hours of library audio,
+picture content never exceeds 0.16 in a control band while real tones run
+0.68–0.99. Zero false positives; 14 of the 20 recordings turn out to carry
+a start tone, and 15 a full phasing interval.
+
+Sequencing itself is not wired yet: nothing consumes the detections, and
+the decoder still takes its anchor from image lines. The prize when it
+lands is the phasing stage's line-start reference [WMO §5.2.3.4] — the
+only per-line phase that exists for stations sending a plain white dead
+sector.
+
 Synthetic tests cover 60/90/120 lpm, IOC 288/576, ±150/±400 Hz
 deviation, clock error to ±250 ppm (including a white-only signal with
-nothing to lock onto), and heavy noise.
+nothing to lock onto), heavy noise, and both phasing waveforms.
 See `ROADMAP.md` for the milestone map.
 
 ## Platforms

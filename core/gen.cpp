@@ -46,12 +46,18 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
     auto push_samples = [&](int n, float v) {
         vid.insert(vid.end(), static_cast<size_t>(n), v);
     };
-    // alternating black/white tone at freq f0 for `seconds`
+    // Alternating black/white tone at freq f0 for `seconds`.
+    // The half-period must stay fractional. Truncating it to whole samples
+    // (as this did until session 6) quantizes the tone to fs/(2k): at
+    // fs=8000 that turned 300 Hz into 307.7, 450 into 500 and 675 into 800
+    // — the last two far outside the ±1% of WMO §5.2.6, so the generator
+    // was not producing control signals at all. Measured with nova-tones
+    // before the fix: 306.0 / 499.0 / 800.5 Hz.
     auto push_tone = [&](double f0, double seconds) {
         const long total = static_cast<long>(seconds * fs);
-        const long half = static_cast<long>(fs / (2.0 * f0));
+        const double half = fs / (2.0 * f0);
         for (long i = 0; i < total; i++)
-            vid.push_back(((i / half) & 1) ? 1.0f : 0.0f);
+            vid.push_back((static_cast<long>(i / half) & 1) ? 1.0f : 0.0f);
     };
 
     if (opt.start_tone)
@@ -62,10 +68,12 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
     for (int l = 0; l < total_lines; l++) {
         std::vector<float> line(plen);
         if (l < phasing_lines) {
-            // asymmetric phasing: 5% white / 95% black; leading edge of
-            // white at dead-sector entry [WMO §5.2.3.2, §5.2.3.4]
+            // Phasing: leading edge of white at dead-sector entry
+            // [WMO §5.2.3.4]. The white run is either the 5% asymmetric
+            // wedge or a symmetric half-line [WMO §5.2.3.2].
+            const double wlen = opt.phasing_symmetric ? 0.5 * plen : dead;
             for (int i = 0; i < plen; i++)
-                line[i] = (i < dead) ? 1.0f : 0.0f;
+                line[i] = (i < wlen) ? 1.0f : 0.0f;
         } else {
             // image line, measured JMH layout (session 3): sync pulse
             // (black) 1.5%, white gap to 3.6%, picture to 98.4%, then a

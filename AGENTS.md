@@ -80,16 +80,40 @@ more likely right than one that agrees only with its own reasoning.
    zero locks BY DESIGN — a measured negative result, not a gap to close
    (docs/01 §5); their per-line phase, if it is recoverable at all, has
    to come from the phasing stage in M3.
-3. Start/stop tone detection + auto sequencing (M3) — untouched;
-   false-start on text-heavy content is the known trap. Library tone
-   survey (session 3): only `jmh sample.wav` carries a start tone.
+3. ~~Start/stop tone detection~~ + auto sequencing (M3) — session 6:
+   detection built and measured, **sequencing not yet wired; nothing
+   consumes the detections**. The false-start trap is closed by spectral
+   purity rather than transition rate (content ≤ 0.16, tones 0.68–0.99,
+   threshold 0.35; zero false positives across 5.9 hours). Phasing is
+   found on 15 of 20 recordings and carries the line-start reference
+   [WMO §5.2.3.4] — the only per-line phase source white-only stations
+   have.
+   **The lesson for the next agent: session 3's "only `jmh sample.wav`
+   carries a start tone" was an artifact of measuring in the wrong
+   domain.** These are black/white alternations in VIDEO; that survey ran
+   an FFT on the raw AUDIO, where they appear only as incidental envelope
+   ripple, and it saw one of them. The real answer is 14 of 20. A negative
+   result is worth only as much as the domain it was measured in — and
+   this one had been sitting in the risk register for three sessions.
 4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only; no fixture.
 5. ~~Long recordings~~ — session 3: JSC4 61 min, XSG 23 min, Himawari
    17 min all decode end-to-end.
 
 ## Registered gaps
 - 90 lpm fixture: none in the library (batch survey, session 3).
-- IOC 288 fixture: none (no 675 Hz start tone found anywhere).
+- IOC 288 fixture: none. Re-confirmed session 6 with a detector that works
+  in the right domain and searches ±1.5% around 675 Hz: no IOC-288 start
+  tone anywhere in the library. IOC 288 remains synthetic-only.
+- Which edge of the dead sector the phasing `line_start` marks. It agrees
+  with `fax.cpp`'s image-derived anchor to ~23 samples of 4000 on JMH Test
+  Chart once the black porch is allowed for — the same feature, but not a
+  settled convention. Must be resolved against a decoded picture before
+  the phasing anchor drives the decoder (session 5's lesson: a number that
+  was never compared with the image is not evidence).
+- GYA 2300Z phasing: an 18-line candidate at 15.5–24.5 s scoring 0.77
+  passed the looser first-pass thresholds and is rejected by the final
+  ones. Deeply faded; whether it is a real partial phasing interval or
+  dark content is not established either way.
 - ±150 Hz LF mode: no real-world source known; synthetic-only testing.
 - Short windows of a deeply faded signal: the whole GYA 2300Z recording
   measures −116.8 ppm and draws straight, but individual 120 s windows of

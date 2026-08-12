@@ -22,6 +22,10 @@ struct GenOptions {
     bool start_tone = true;
     bool phasing = true;
     bool stop_tone = true;
+    // WMO §5.2.3.2 permits the phasing waveform to be symmetric (50/50) or
+    // asymmetric (5% white / 95% black). A detector has to accept both, so
+    // the generator has to be able to produce both.
+    bool phasing_symmetric = false;
     // false = white-only dead sector (the pulse is optional, WMO §5.1.3.3):
     // no per-line sync exists, so the picture rides entirely on the
     // measured clock. This is how VMW, NMC and GYA transmit.

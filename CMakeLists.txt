@@ -18,6 +18,8 @@ add_library(nova-core STATIC
   core/image.cpp
   core/fax.cpp
   core/gen.cpp
+  core/tones.cpp
+  core/phasing.cpp
 )
 target_include_directories(nova-core PUBLIC core)
 
@@ -26,6 +28,9 @@ target_link_libraries(nova-decode PRIVATE nova-core)
 
 add_executable(nova-gen cli/nova-gen.cpp)
 target_link_libraries(nova-gen PRIVATE nova-core)
+
+add_executable(nova-tones cli/nova-tones.cpp)
+target_link_libraries(nova-tones PRIVATE nova-core)
 
 enable_testing()
 add_executable(nova-test tests/test_roundtrip.cpp)
@@ -60,3 +65,24 @@ add_test(NAME fixture_weak_white COMMAND nova-test-fixture
   --expect-white-only)
 add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
   ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)
+
+# M3 control-signal suite: start/stop tone and phasing detection.
+# [4], [5] and [9] are the false-start screamers — picture content with no
+# control signals present must produce no events, and the purity margin
+# that makes that work is asserted rather than assumed.
+add_executable(nova-test-tones tests/test_tones.cpp)
+target_link_libraries(nova-test-tones PRIVATE nova-core)
+add_test(NAME tones COMMAND nova-test-tones)
+
+# M3 fixture screamers on real off-air signals. Bounds measured 2026-08-12
+# (session 6). The start/phasing case is VMW, a WHITE-ONLY station: it has
+# no per-line sync in its dead sector at all, so this fixture is the
+# evidence that its line-start phase is recoverable from the phasing stage.
+# The --expect-none case is the false-start trap on real newspaper text.
+add_executable(nova-test-tones-fixture tests/test_tones_fixture.cpp)
+target_link_libraries(nova-test-tones-fixture PRIVATE nova-core)
+add_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-start-phasing-100s.wav
+  --expect-start 56.88 1.0 --expect-phasing 120 50 40)
+add_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav --expect-none)
