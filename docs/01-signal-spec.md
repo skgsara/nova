@@ -71,9 +71,33 @@ about 1900 Hz. Nova's deviation mode implements exactly that.
 - Real recordings do not start with signal (leader/tuning tones, SDR
   stall-fill). Signal onset is detected by an odd-harmonic line-comb
   scan; no comb -> refuse to decode. [session 3 measurement]
-- Clock rate estimated from the whole signal after onset (windowed
-  autocorrelation); per-line phase re-locked on the dead-sector sync
-  pulse. [risk-register items 1–2]
+- Clock rate estimated from the whole signal after onset; per-line phase
+  re-locked on the dead-sector sync pulse. [risk-register items 1–2]
+- **Line-period accuracy comes from the BASELINE, not from lag
+  resolution or from averaging.** A period measured over a short span is
+  dominated by the quantization of its own position estimates; the error
+  only becomes visible as phase drift accumulated across the recording.
+  Both of Nova's estimators are built that way (session 5):
+  - *No locks (white-only stations).* Blocks of lines are folded into
+    profiles, consecutive profiles cross-correlated for the phase walk,
+    and the median pairwise slope taken within runs uncontaminated by a
+    picture restart. The 200 Hz autocorrelation it refines has a lag step
+    of 1% of the line — 10 000 ppm — and is wrong by 30–180 ppm on real
+    recordings (JSC6 +261 measured against +438 true).
+  - *With locks.* Pairs of locked lines an eighth of the recording apart,
+    median slope, cut at every step in the sync position. Neighbouring
+    lines cannot serve: a one-line slope is the period plus ~2 samples of
+    position noise, which on a 4000-sample line is ±500 ppm of scatter.
+    Measured on JSC2 from one spos array: −75 ppm from neighbours, +178
+    from long pairs, against +172 (fold) and +151 (image shear).
+  A long baseline is only meaningful inside one regime, so both estimators
+  segment first: phasing and image lines anchor the template a step apart
+  [WMO §5.2.3.4], stream time-skips do the same, and a new chart restarts
+  the paper at its own phase.
+- Consistency check available at no cost: two recordings of the same
+  station through the same receiver must yield the same clock. GYA
+  2300Z/2324Z now read −116.8/−118.5 ppm (before: −28.6/−54.3) and VMW
+  2215Z/2230Z −79.0/−79.6 (before: −38.3/−91.7).
 - The dead sector is station-dependent within WMO §5.1.3.3: JMH/XSG/JSC
   and both satellite recordings send a black sync pulse; VMW, NMC and GYA
   send plain white. Which one a recording carries is measured, not

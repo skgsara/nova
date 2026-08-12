@@ -50,5 +50,13 @@ add_test(NAME fixture_60lpm COMMAND nova-test-fixture
 add_test(NAME fixture_white_sector COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
   --expect-white-only)
+# Weak + white-only: the clock is the ONLY thing holding the picture
+# straight, so the clock bound IS the picture-quality screamer here. The
+# window is chosen so the old coarse-only estimate fails it: session 5
+# measured -51.6 ppm coarse against -118.4 from the fold, and the fold
+# reads -117 +/- 1.5 ppm on every window of this recording.
+add_test(NAME fixture_weak_white COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-weak-white-120s.wav 120 200 220 -135 -95 0.0
+  --expect-white-only)
 add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
   ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)

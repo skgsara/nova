@@ -47,15 +47,31 @@ register are milestone entries, not intentions (SOP P1.5).
   decoded on the measured clock and report zero locks. See docs/01 §5.
 - REMAINING: weak-signal period estimation (GYA 2300Z, still slanted).
 
-## M2 — automatic slant correction  [mostly done; one case open]
+## M2 — automatic slant correction  [DONE 2026-08-12, session 5]
 - Done in M0/M1b: clock-rate estimate from the whole signal, per-line
-  dead-sector re-lock [WMO §5.1.3.3], whole-line re-acquisition. The
-  library decodes straight without manual calibration, longest fixture
-  included (JSC4, 61 min).
-- OPEN: weak/faded signals. `GYA 2300Z` fits +3576 ppm and slants; it is
-  also white-only, so nothing per-line rescues it. Suspect is the coarse
-  autocorrelation period fit. Prior art to check first: JWX's
-  clock-corrected line accumulation (docs/00, session 4 note).
+  dead-sector re-lock [WMO §5.1.3.3], whole-line re-acquisition.
+- Session 5 — **the period was being measured over too short a baseline,
+  in both estimators.** Accuracy comes from drift accumulated across the
+  recording, not from lag resolution or averaging (docs/01 §5).
+  - No locks (white-only): folded-block phase tracking replaces the bare
+    200 Hz autocorrelation, whose lag step is 10 000 ppm and which was
+    wrong by 30–180 ppm on real recordings.
+  - With locks: pass B now pairs locked lines an eighth of a recording
+    apart instead of neighbours ≤10 lines.
+  - Both segment at discontinuities first (phasing↔image step, stream
+    time-skip, chart restart) — a long baseline is only meaningful
+    inside one regime.
+- The claim "the library decodes straight" was FALSE when it was written.
+  Measured residual shear, before → after: JSC2 −157 → +6 ppm, JSC3 −182
+  → −5, JSC4 −172 → +2 (a third of a page of drift, on the newspaper
+  faxes where it is hardest to see by eye), GYA 2300Z +50 → +4, VMW 2215Z
+  −399 → +0.2, NMC −79 → −9. Nothing regressed.
+- GYA 2300Z's frame line — a feature of the chart, not a statistic — is
+  now straight to +1.7 ppm over 1358 lines (was −23.4).
+- Screamers: `fixture_weak_white` (GYA 2324Z, fails at −51.6 ppm if the
+  fold is removed — verified by removing it), roundtrip [7] white-only at
+  a known +250 ppm with zero locks, roundtrip [8] −137.00 ppm measured
+  against −137 true.
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
@@ -81,6 +97,19 @@ register are milestone entries, not intentions (SOP P1.5).
   is the deliverable, since reuse is declared).
 
 ## Registered gaps
+- Short windows of a deeply faded signal. On the full recording GYA 2300Z
+  measures −116.8 ppm and draws straight, but 120 s windows of its faded
+  stretch give anything from −1223 to +320 ppm: with few blocks there is
+  no baseline to be accurate over. Live decoding (M4) will hit this, since
+  it cannot wait for the whole transmission. No screamer — the fixture
+  deliberately uses the stable recording (GYA 2324Z) instead.
+- Picture content that mimics the optional sync pulse. A dark run at a
+  fixed position on every line, followed by white, is by construction
+  indistinguishable from the pulse of WMO §5.1.3.3 — the synthetic test
+  pattern's own black bar and gradient strip produced 629 "locks" on a
+  signal generated with no pulse at all. No library recording does this
+  (session 4: white-only stations score 0.14–0.34), so it is registered,
+  not fixed.
 - 240 lpm: deliberately out of scope (not required by ISO 9876 §4.2.4).
 - 90 lpm real fixture: none in the library (session 3 batch survey).
 - IOC 288 real fixture: none found (no 675 Hz start tone anywhere).

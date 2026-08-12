@@ -7,6 +7,112 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 5: the baseline was the bug; the library was not straight
+Agent: Claude Opus 5.
+
+**Task as accepted:** weak-signal period estimation (session 4's next
+step) — GYA 2300Z, recorded as "+3576 ppm off and slanted", with JWX's
+clock-corrected accumulation as the prior art to check first.
+
+**Prior art, checked first (Sara's reuse-first rule).** JWX does **not**
+estimate the clock. Its calibration is a number the operator types in
+(`CalibrationController` is a text field; the alternative is right-clicking
+the two ends of a vertical feature), and `clock_correct_line` only applies
+it. Session 4's note pointed here expecting an estimator; there isn't one.
+The reusable idea is the accumulation itself, plus weatherfax_pi/KiwiSDR's
+median-with-spread-rejection. Nothing copied; reuse ledger unchanged,
+docs/00 updated with the finding — including that a mature decoder asking
+a human for this number is a fair design, not a defect.
+
+**The premise was stale, and the real bug was bigger.** GYA 2300Z no
+longer fits +3576 ppm — session 4's onset gate fixed that. What remained
+was a systematic error in how the period is measured, and it was not
+confined to weak signals:
+
+1. *Coarse fit.* `best_period` runs on 200 Hz video where one lag step is
+   1% of a line — **10 000 ppm** — so everything finer comes from a
+   parabola over three points. Measured against pass B across the library:
+   wrong by 30–180 ppm (JSC6 +261 vs +438).
+2. *Pass B.* Took the median slope over pairs of locked lines ≤10 apart.
+   A sync position is good to a sample or two, so a one-line slope is the
+   period ±500 ppm of noise, and the median of that does not recover the
+   period. From the very same `spos` array on JSC2: **−75 ppm from
+   neighbours, +178 ppm from pairs 500+ lines apart.**
+
+**Three independent methods, then the picture.** Fold: +172. Image shear
+at nominal clock: +151. Long-baseline fit of the sync positions: +178.
+Pass B: −73. So pass B was wrong — and JSC2's shipped decode was visibly
+sheared, the page border walking a third of a page before the local-median
+correction froze (residuals past `2*search` are dropped, so nothing
+downstream noticed). **`locked_lines` was 2192 of 2269 the whole time.**
+The roadmap's "the library decodes straight without manual calibration"
+was false when it was written; nobody had measured a decoded image.
+
+**Both estimators rebuilt on the same principle: accuracy is BASELINE.**
+- No locks → fold blocks of lines into profiles, cross-correlate
+  consecutive profiles, median pairwise slope. Works with zero locks,
+  which is the white-only case.
+- Locks → pairs an eighth of the recording apart.
+- Both segment first. A long baseline is only meaningful inside one
+  regime: the phasing↔image step (+167 samples on the 60 s fixture), a
+  stream time-skip, a chart restart. Each end of the baseline range was
+  measured, not chosen: JSC2 needs k≥128, Himawari's time-skip breaks at
+  k=1024 where every pair straddles it.
+
+**Residual shear, before → after (ppm):** JSC2 −157 → +6, JSC3 −182 → −5,
+JSC4 −172 → +2, GYA 2300Z +50 → +4, VMW 2215Z −399 → +0.2, NMC −79 → −9,
+GYA 2324Z −59 → +0.2. Nothing regressed. GYA 2300Z's frame line — the
+chart's own ink, not a statistic — is straight to +1.7 ppm over 1358
+lines, and is now findable on 81 of 84 bands instead of 53.
+
+**Free consistency check, worth keeping:** two recordings of one station
+through one receiver must give the same clock. GYA 2300Z/2324Z now read
+−116.8/−118.5 (were −28.6/−54.3); VMW 2215Z/2230Z −79.0/−79.6 (were
+−38.3/−91.7). Nothing in the code enforces this, which is what makes it
+evidence.
+
+**Contradictions found.** Three, all mine. (a) I reported a "75% bias" in
+the coarse fit measured through a 3-decimal printf — the bias is real but
+that measurement was not clean; print fixed, re-measured. (b) My first
+image-shear tool double-counted its own estimate each iteration and read
++100 ppm as −300, then −699 after a bad fix; a sign error, corrected and
+calibrated before any conclusion rested on it. (c) The first long-baseline
+pass B broke the two 60 s fixtures (+607 ppm) because half of a short
+fixture is phasing — which is exactly what session 4's short baselines
+were protecting against, and which I had read and not applied.
+
+**Tests:** 8 suites green, zero warnings. New `fixture_weak_white`
+(GYA 2324Z 180..300 s: weak *and* white-only, nothing to lock) — verified
+to fail (−51.6 ppm) when the fold is removed. New roundtrip [7]: a
+white-only signal generated at a known +250 ppm, decoded to +250.0 with
+zero locks. New roundtrip [8]: −137 ppm recovered as −137.00. `nova-gen`
+gained `--no-pulse`; generating a white-only line also had to drop the
+black porch, since porch and pulse are the two halves of one dead sector
+and the porch alone gave 629 phantom locks.
+
+**Doc contradiction fixed (found while sweeping docs at Sara's request):**
+`AGENTS.md` listed `SESSION-LOG.md` under "never commit" and START-HERE
+called it gitignored, but it has been tracked since commit e49834d by
+Sara's own session-1 decision. A future agent following the stale rule
+would have deleted the project's history from the repo. Both corrected.
+
+**Registered gaps added:** short windows of a deeply faded signal (GYA
+2300Z's 120 s windows scatter −1223…+320 ppm while the whole recording is
+solid — matters for live decode in M4); and picture content that mimics
+the optional sync pulse, which is indistinguishable from it by
+construction.
+
+**Next step:** M3 — start/stop tone detection and auto sequencing.
+300/675 Hz start, 450 Hz stop [ISO §4.2.5], phasing alignment by
+wedge-fit + median + spread rejection (the KiwiSDR approach, and the
+place where per-line phase for white-only stations may finally come
+from), false-start rejection on text-heavy content. Library tone survey
+from session 3 says only `jmh sample.wav` carries a start tone, so a
+synthetic-first approach with that one real check is the likely shape.
+Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 4: the anchor was the bug; a template that shouldn't exist
 Agent: Claude Opus 5.
 

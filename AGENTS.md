@@ -45,9 +45,13 @@ more likely right than one that agrees only with its own reasoning.
 - Every load-bearing claim cites a spec section (e.g. `[WMO §5.2.2.1]`,
   `[ISO §4.2.5]`) and names its screamer test. No screamer = registered
   gap, written down as such.
-- Never commit: `recordings/`, `*.m4a`, `*.pdf`, `SESSION-LOG.md`,
-  anything under the parent folder. The ISO PDF is a single-user
-  licensed document — it is cited, never copied or quoted at length.
+- Never commit: `recordings/`, `*.m4a`, `*.pdf`, anything under the
+  parent folder. The ISO PDF is a single-user licensed document — it is
+  cited, never copied or quoted at length. **`SESSION-LOG.md` IS
+  tracked** — Sara, session 1: "we don't need to hide anything as our
+  develop history" (commit e49834d). This line used to list it as
+  never-commit, which contradicted the decision and the repo; corrected
+  session 5.
 - WIP commits on a scratch branch are fine; `main` moves and pushes
   happen only when Sara asks — then don't leave it unpushed.
 - No flattery. Disagree when you have grounds. Say when you don't know.
@@ -57,10 +61,17 @@ more likely right than one that agrees only with its own reasoning.
 - Verify before claiming done: run the tests, look at the output image.
 
 ## Current risk register (top items)
-1. ~~Auto slant/clock correction~~ — proven synthetic (+100 ppm) and
-   across the library (session 3 batch: JMH, JSC, XSG, NMC, VMW...).
-   Residual: clock wander over long recordings (dead-sector diagonal
-   over 61-min JSC4) — bounded, cosmetic at current scope.
+1. ~~Auto slant/clock correction~~ — session 5: measured, not assumed.
+   The previous entry here claimed this was proven "across the library";
+   it was not. Nobody had measured the residual shear of the decoded
+   images, and JSC2/3/4 were drifting a third of a page. Both period
+   estimators were fitting over too short a baseline (docs/01 §5). Now:
+   residual shear ≤ 10 ppm on every library recording, two recordings of
+   the same station agree to ~1 ppm, and the synthetic round-trip
+   recovers −137 ppm as −137.00.
+   **The lesson for the next agent: a decoder metric that is never
+   compared against the picture is not evidence. `locked_lines` was
+   green on JSC2 for two sessions while the picture sheared.**
 2. ~~Per-line resync~~ — session 4: anchor found by across-line
    consistency, pass A re-acquires after 8 misses. 88-99% honest locks on
    every pulse station in the library; time-skips heal (warp fixture
@@ -80,5 +91,10 @@ more likely right than one that agrees only with its own reasoning.
 - 90 lpm fixture: none in the library (batch survey, session 3).
 - IOC 288 fixture: none (no 675 Hz start tone found anywhere).
 - ±150 Hz LF mode: no real-world source known; synthetic-only testing.
-- Weak/faded signals: GYA 2300Z's period estimate is +3576 ppm off and
-  the picture slants. Untouched.
+- Short windows of a deeply faded signal: the whole GYA 2300Z recording
+  measures −116.8 ppm and draws straight, but individual 120 s windows of
+  its faded stretch scatter from −1223 to +320 ppm. Baseline is the
+  instrument; a short window has none. Matters for live decode (M4).
+- Content that mimics the sync pulse (dark run at a fixed position on
+  every line, then white) is indistinguishable from it by design. See
+  ROADMAP registered gaps.

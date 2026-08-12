@@ -22,6 +22,10 @@ struct GenOptions {
     bool start_tone = true;
     bool phasing = true;
     bool stop_tone = true;
+    // false = white-only dead sector (the pulse is optional, WMO §5.1.3.3):
+    // no per-line sync exists, so the picture rides entirely on the
+    // measured clock. This is how VMW, NMC and GYA transmit.
+    bool dead_pulse = true;
 };
 
 // content: grayscale image whose width is the picture sector (any width;

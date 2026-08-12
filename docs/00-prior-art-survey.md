@@ -59,6 +59,28 @@ M3 lands: (a) do the anchor during phasing, as they do; (b) JWX's
 clock-corrected accumulation removes the smear that currently caps Nova's
 profile at 120 lines.
 
+**Line-period estimation for weak / white-only signals (session 5).**
+Checked JWX first, since session 4's note pointed at its clock-corrected
+accumulation as the prior art for this exact problem. **JWX does not
+estimate the clock at all: its calibration value is typed in by the
+operator** (`CalibrationController` is a text field; the alternative is
+right-clicking the two ends of a vertical feature in `ChartPanel`), and
+`clock_correct_line` merely applies it. So there is nothing there to
+reuse for an automatic estimate — the reusable idea is the accumulation
+itself, which lifts a stable line shape out of a fading signal, and that
+is what Nova's block fold does. weatherfax_pi/KiwiSDR contribute the
+median-with-spread-rejection treatment they apply to the phasing wedge
+over ~40 lines; Nova applies the same pattern to block pairs, because a
+picture restart in a long recording is the same kind of outlier as a bad
+wedge line. Both are ideas, not code: nothing is copied, so the reuse
+ledger below is unchanged.
+
+Worth recording for M3, since it contradicts a natural assumption: JWX's
+manual calibration is not a shortcoming of an old program, it is what a
+mature decoder does when the signal carries no sync it can trust. Nova's
+claim to do it automatically is only as good as the screamer behind it
+(`fixture_weak_white`, roundtrip group [7]).
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

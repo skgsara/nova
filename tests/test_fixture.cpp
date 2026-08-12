@@ -23,6 +23,13 @@
 //   kyodo-news-jsc1-60lpm-120s.wav — JSC1 (Kyodo News newspaper fax),
 //     60..180 s: the library's only 60 lpm signal (session 3 batch
 //     survey). 99% honest locks. The 60 lpm screamer.
+//   gya-weak-white-120s.wav — GYA (Charleville, AU) 2324Z, 180..300 s:
+//     WEAK and white-only at once. Nothing locks, so the measured clock is
+//     the only thing keeping the picture straight and its bound is the
+//     picture screamer. Pins the folded-block period estimate: the coarse
+//     autocorrelation reads -51.6 ppm on this window against the fold's
+//     -118.4, and the fold reads -117 +/- 1.5 ppm on every window of the
+//     recording, so a regression to coarse-only fails the bound.
 //   vmw-white-sector-120s.wav — VMW (Australian BOM) 200..320 s: a
 //     WHITE-ONLY dead sector, no sync pulse anywhere (session 4). Pins
 //     two things at once: the style is detected, and the decoder does NOT

@@ -42,8 +42,23 @@ WMO §5.1.3.3, and five of the twenty recordings do — decode on the
 measured clock and report **zero** locks rather than a number that
 flatters the decoder. See `docs/01-signal-spec.md` §5.
 
+**M2 done (2026-08-12):** the line period is measured from phase drift
+accumulated across the whole recording, which is the only thing that
+makes it accurate — over a short span the answer is dominated by the
+quantization of its own measurements. Two estimators share that
+principle: folded-block phase tracking, which needs no sync locks and so
+serves the white-only stations, and a long-baseline fit over locked lines
+for everyone else. Residual shear of the decoded image is ≤10 ppm across
+the library; a signal generated at −137 ppm is recovered as −137.00.
+
+This replaced a fit over neighbouring lines that was wrong by up to 250
+ppm and had been shearing three of the library's recordings by a third of
+a page while every lock metric stayed green — found by measuring decoded
+pictures rather than decoder statistics.
+
 Synthetic tests cover 60/90/120 lpm, IOC 288/576, ±150/±400 Hz
-deviation, +100 ppm clock error, and heavy noise.
+deviation, clock error to ±250 ppm (including a white-only signal with
+nothing to lock onto), and heavy noise.
 See `ROADMAP.md` for the milestone map.
 
 ## Platforms

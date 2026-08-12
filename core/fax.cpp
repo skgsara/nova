@@ -214,6 +214,179 @@ double median(std::vector<double> x) {
     return x[x.size() / 2];
 }
 
+// --- fine period by folded-block phase drift ------------------------------
+// `best_period` above runs on 200 Hz video, where ONE LAG STEP IS 1% of the
+// line — 10 000 ppm. Everything finer comes from a parabolic vertex over
+// three autocorrelation samples, and that interpolation is biased: measured
+// on synthetic signals (session 5), it recovers only ~75% of the true clock
+// error (+400 ppm reads +300, +137 reads +108, -213 reads -158) identically
+// at noise 0.0 and 0.3 — quantization, not noise.
+//
+// On a station that sends the black pulse this barely matters: pass B refits
+// the period from the locks. On a white-only station there are no locks, the
+// coarse number IS the drawn period, and the missing quarter slants the
+// picture (GYA 2300Z, VMW, NMC — all white-only).
+//
+// So measure the period where its error actually shows up: as phase drift
+// ACROSS THE RECORDING. Fold each block of lines into one profile (JWX's
+// clock-corrected accumulation idea, docs/00 — folding lifts a stable line
+// shape out of a fading signal; JWX's own clock value is hand-entered by the
+// operator, so only the accumulation is reusable), cross-correlate
+// consecutive profiles for the phase walk, and take the median pairwise
+// slope (the weatherfax_pi/KiwiSDR median-over-lines robustness). Precision
+// scales with the BASELINE, not with lag resolution: a ±2 sample profile
+// alignment over 1200 lines is 0.4 ppm.
+constexpr int kFoldMinLines = 40;    // lines per block; fewer will not fold
+constexpr int kFoldMaxBlocks = 16;
+constexpr double kFoldMinPeak = 0.20;  // normalized correlation of a pair
+// Spread rejection: how far one block pair may sit from the median shift
+// before it is treated as a picture restart rather than as clock drift.
+// 2% of a line tolerates ~200 ppm of block-to-block wander; a restart moves
+// the paper by a large fraction of a whole line.
+constexpr double kFoldSpread = 0.02;
+constexpr int kFoldPasses = 3;
+
+// Normalized circular cross-correlation of two mean-removed profiles over
+// lags in ±maxlag. Returns the shift of `b` relative to `a` (positive =
+// b's features sit LATER in the line, i.e. the true period is longer than
+// the one they were folded on), with the peak value in *peak.
+double fold_shift(const std::vector<double>& a, const std::vector<double>& b,
+                  int maxlag, double* peak) {
+    const int plen = static_cast<int>(a.size());
+    double na = 0.0, nb = 0.0;
+    for (int i = 0; i < plen; i++) {
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    const double nrm = std::sqrt(na * nb);
+    if (nrm <= 0.0) {
+        *peak = 0.0;
+        return 0.0;
+    }
+    double best = -1e300;
+    int best_lag = 0;
+    std::vector<double> c(2 * maxlag + 1, 0.0);
+    for (int lag = -maxlag; lag <= maxlag; lag++) {
+        double s = 0.0;
+        for (int i = 0; i < plen; i++)
+            s += a[i] * b[((i + lag) % plen + plen) % plen];
+        c[lag + maxlag] = s / nrm;
+        if (c[lag + maxlag] > best) {
+            best = c[lag + maxlag];
+            best_lag = lag;
+        }
+    }
+    *peak = best;
+    // A winner pinned to the edge of the search means the drift is larger
+    // than the window: report it as a miss rather than as a measurement.
+    if (best_lag <= -maxlag + 1 || best_lag >= maxlag - 1) {
+        *peak = 0.0;
+        return 0.0;
+    }
+    const double y0 = c[best_lag + maxlag - 1], y1 = c[best_lag + maxlag],
+                 y2 = c[best_lag + maxlag + 1];
+    const double den = y0 - 2.0 * y1 + y2;
+    double d = (den < 0.0) ? 0.5 * (y0 - y2) / den : 0.0;
+    d = std::max(-1.0, std::min(1.0, d));
+    return best_lag + d;
+}
+
+double refine_period(const std::vector<float>& v, size_t start, double period,
+                     int n_lines) {
+    const int nb = std::min(kFoldMaxBlocks, n_lines / kFoldMinLines);
+    if (nb < 3) return period;  // too short to see drift; coarse is all there is
+    const int per_block = n_lines / nb;
+
+    for (int pass = 0; pass < kFoldPasses; pass++) {
+        const int plen = static_cast<int>(period);
+        // Lag window: ±plen/8 covers ~1500 ppm of drift per block at any
+        // usable block length, and keeps the O(plen * lag) correlation cheap.
+        const int maxlag = std::max(4, plen / 8);
+        std::vector<std::vector<double>> prof(
+            nb, std::vector<double>(plen, 0.0));
+        for (int b = 0; b < nb; b++) {
+            for (int l = 0; l < per_block; l++) {
+                const double base =
+                    start + (static_cast<double>(b) * per_block + l) * period;
+                for (int i = 0; i < plen; i++)
+                    prof[b][i] += lerp_at(v, base + i);
+            }
+            double m = 0.0;
+            for (int i = 0; i < plen; i++) m += prof[b][i];
+            m /= plen;
+            for (int i = 0; i < plen; i++) prof[b][i] -= m;
+        }
+
+        // Consecutive-block shifts first, then a robust centre. A long
+        // recording is not one picture: each new chart restarts the paper at
+        // its own phase, and that step (up to half a line) is not clock
+        // drift. Measured (session 5): accumulating it blind put JSC2 at
+        // +180 ppm against pass B's -73. True drift is the same in every
+        // block, so the median of the consecutive shifts is it, and pairs
+        // that disagree with the median by more than a whole picture's worth
+        // of jitter are restarts, not measurements — median with spread
+        // rejection, the weatherfax_pi/KiwiSDR treatment of the phasing
+        // wedge (docs/00) applied to blocks instead of lines.
+        std::vector<double> sh(nb, 0.0);
+        std::vector<bool> good(nb, false);
+        for (int b = 1; b < nb; b++) {
+            double peak = 0.0;
+            sh[b] = fold_shift(prof[b - 1], prof[b], maxlag, &peak);
+            good[b] = peak >= kFoldMinPeak;
+        }
+        std::vector<double> gs;
+        for (int b = 1; b < nb; b++)
+            if (good[b]) gs.push_back(sh[b]);
+        if (gs.empty()) return period;
+        const double centre = median(gs);
+        const double tol = std::max(8.0, kFoldSpread * plen);
+        for (int b = 1; b < nb; b++)
+            if (good[b] && std::fabs(sh[b] - centre) > tol) good[b] = false;
+
+        // Phase walk, accumulated inside runs of surviving pairs. A fade or
+        // a restart must not invalidate the blocks after it, and must not
+        // have its unmeasured drift folded into the total: a rejected pair
+        // starts a new segment, and only within-segment pairs contribute
+        // slopes. The long baselines inside each segment are what make this
+        // precise; the segmentation is what keeps it honest.
+        std::vector<double> phase(nb, 0.0);
+        std::vector<int> seg(nb, 0);
+        for (int b = 1; b < nb; b++) {
+            if (!good[b]) {
+                seg[b] = seg[b - 1] + 1;
+                phase[b] = 0.0;
+            } else {
+                seg[b] = seg[b - 1];
+                phase[b] = phase[b - 1] + sh[b];
+            }
+        }
+        if (std::getenv("NOVA_DEBUG_FOLD")) {
+            for (int b = 1; b < nb; b++)
+                std::fprintf(stderr, "dbg: fold blk %2d shift %+9.2f %s\n", b,
+                             sh[b], good[b] ? "" : "REJECT");
+        }
+        std::vector<double> slopes;
+        for (int i = 0; i < nb; i++)
+            for (int j = i + 1; j < nb; j++)
+                if (seg[i] == seg[j])
+                    slopes.push_back((phase[j] - phase[i]) / (j - i));
+        if (slopes.empty()) return period;
+        const double drift = median(slopes);  // samples per block
+        const double next = period + drift / per_block;
+        if (std::getenv("NOVA_DEBUG"))
+            std::fprintf(stderr,
+                         "dbg: fold pass %d: %d blocks x %d lines, drift "
+                         "%+.2f samples/block -> period %.4f (%+.1f ppm)\n",
+                         pass, nb, per_block, drift, next,
+                         (next / period - 1.0) * 1e6);
+        // A "correction" of more than 3% is not a clock error, it is a
+        // misfolded signal; keep the coarse period rather than invent one.
+        if (std::fabs(next - period) > 0.03 * period) return period;
+        period = next;
+    }
+    return period;
+}
+
 }  // namespace
 
 DecodeResult decode_fax(const std::vector<float>& video, int fs,
@@ -315,18 +488,34 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     const double period_200 =
         best_period(pwin, nom200 * 0.97, nom200 * 1.03);
     if (std::getenv("NOVA_DEBUG"))
-        std::fprintf(stderr, "dbg: onset=%.1fs lpm=%d measured=%.3f\n",
-                     onset200 / 200.0, lpm, 60.0 * 200.0 / period_200);
+        std::fprintf(stderr, "dbg: onset=%.1fs lpm=%d coarse=%.5f lpm (%+.1f "
+                             "ppm)\n",
+                     onset200 / 200.0, lpm, 60.0 * 200.0 / period_200,
+                     (lpm * period_200 / (200.0 * 60.0) - 1.0) * 1e6);
     res.lpm = lpm;
 
     const size_t start = onset200 * static_cast<size_t>(fs) / 200;
-    const double period0 = period_200 * fs / 200.0;  // samples/line
     const double nominal = fs * 60.0 / lpm;
+
+    // Refine the coarse period against the whole recording before anything
+    // is measured on it. The coarse fit is off by 30-180 ppm on real
+    // signals (session 5, measured against pass B across the library: JSC6
+    // +261 coarse vs +438 fitted, XSG ASPN +26 vs -90). A pulse station
+    // survives that because pass B refits from its locks; a white-only
+    // station draws on it directly and slants by exactly that error.
+    const size_t avail = video.size() - start;
+    int n_lines0 = static_cast<int>(avail / (period_200 * fs / 200.0));
+    if (opt.max_lines > 0) n_lines0 = std::min(n_lines0, opt.max_lines);
+    const double period0 =
+        refine_period(video, start, period_200 * fs / 200.0, n_lines0);
+    if (std::getenv("NOVA_DEBUG"))
+        std::fprintf(stderr, "dbg: period refined to %.4f (%+.1f ppm)\n",
+                     period0, (period0 / nominal - 1.0) * 1e6);
+
     const double pulse = kPulseFrac * period0;
     const double dead = kDeadFrac * period0;
     const double search = opt.search_frac * period0;
 
-    const size_t avail = video.size() - start;
     int n_lines = static_cast<int>(avail / period0);
     if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
     if (n_lines < 4) throw std::runtime_error("decode_fax: too few lines");
@@ -507,20 +696,71 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     for (int l = 0; l < n_lines; l++)
         if (sstr[l] >= lock) res.locked_lines++;
 
-    // --- 4. pass B: robust period/phase from median slope ------------------
+    // --- 4. pass B: robust period/phase from median LONG-baseline slope ----
     // Least squares bends here by design of the signal: phasing lines and
     // image lines anchor the template ~half a dead sector apart (the wedge
     // is the mirror of the pulse), so a single fitted line through both
-    // regimes tilts the slope by tens of ppm. Consecutive-line slopes are
-    // regime-pure except at the one boundary, so the MEDIAN slope is the
-    // true line period. Intercept likewise from the median residual.
+    // regimes tilts the slope by tens of ppm. The median over pairs is what
+    // rejects that — but the pairs must be FAR APART.
+    //
+    // Until session 5 they were neighbours (<= 10 lines). A sync position is
+    // measured to a sample or two, so a one-line slope is the period plus
+    // ~2 samples of noise: on a 4000-sample line that is ±500 ppm of scatter
+    // around a signal of ~100 ppm, and the median of that distribution does
+    // not recover the period — measured on JSC2 from the very same spos
+    // array: neighbour pairs give -75 ppm, pairs 500+ lines apart give
+    // +178 ppm. The long baseline is confirmed by two independent methods
+    // (the block fold above: +172; image shear at nominal clock: +151) and
+    // by the picture, which was visibly slanted: JSC2 drifted a third of a
+    // page and the local-median correction froze once residuals passed
+    // 2*search, so nothing downstream caught it. Precision is baseline, not
+    // averaging: pairing each locked line with the one half a recording
+    // later turns the same ±2 samples into fractions of a ppm.
     double a = start + dead_start0, b = period0;
     {
+        std::vector<int> lk;
+        for (int l = 0; l < n_lines; l++)
+            if (sstr[l] >= lock) lk.push_back(l);
+        // Cut the locked lines at every STEP first. A long baseline is only
+        // meaningful inside one regime: phasing lines and image lines anchor
+        // the template a step apart (measured on the 60 s KiwiSDR fixture:
+        // +167 samples between line 39 and line 53), and a stream time-skip
+        // does the same mid-recording. A pair straddling a step reads that
+        // step as drift — on a short fixture, where most pairs straddle,
+        // that alone put the clock at +607 ppm against a true -88.
+        // Line-to-line jitter is a sample or two, so the cut is unambiguous.
+        // Test the TOTAL deviation over the gap, not a per-line slope: the
+        // step usually falls across unlocked lines (the fixture's lands
+        // between locked line 39 and locked line 53), and dividing 167
+        // samples by a 14-line gap hides it under any sane per-line
+        // threshold. period0 is the fold estimate, good to a few ppm, so
+        // genuine drift across a gap of even 100 lines is a few samples.
+        std::vector<size_t> cut{0};
+        for (size_t i = 1; i < lk.size(); i++) {
+            const double gap = lk[i] - lk[i - 1];
+            const double jump =
+                (spos[lk[i]] - spos[lk[i - 1]]) - period0 * gap;
+            if (std::fabs(jump) > 0.02 * period0) cut.push_back(i);
+        }
+        cut.push_back(lk.size());
+
+        // Baseline inside a segment: long enough that sample quantization in
+        // spos is small against the accumulated drift, short enough that one
+        // discontinuity contaminates only a minority of pairs. Both ends
+        // measured (session 5) by sweeping the baseline k: JSC2 reads -75 ppm
+        // at k<=8 and settles at +175 from k=128; the Himawari time-skip is
+        // invisible up to k=512 and swings the answer to -393 at k=1024,
+        // where every pair straddles it. An eighth of the segment sits inside
+        // both limits by construction and grows with the recording.
         std::vector<double> slopes;
-        for (int l = 1; l < n_lines; l++) {
-            for (int j = std::max(0, l - 10); j < l; j++) {
-                if (sstr[j] < lock || sstr[l] < lock) continue;
-                const double s = (spos[l] - spos[j]) / (l - j);
+        for (size_t c = 0; c + 1 < cut.size(); c++) {
+            const size_t lo = cut[c], hi = cut[c + 1];
+            const size_t n = hi - lo;
+            if (n < 16) continue;
+            const size_t k = std::min(std::max<size_t>(64, n / 8), n / 2);
+            for (size_t i = lo; i + k < hi; i++) {
+                const int l0 = lk[i], l1 = lk[i + k];
+                const double s = (spos[l1] - spos[l0]) / (l1 - l0);
                 if (std::fabs(s - period0) < 0.02 * period0)
                     slopes.push_back(s);
             }

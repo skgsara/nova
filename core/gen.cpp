@@ -69,9 +69,13 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
         } else {
             // image line, measured JMH layout (session 3): sync pulse
             // (black) 1.5%, white gap to 3.6%, picture to 98.4%, then a
-            // black porch to end of line
+            // black porch to end of line. The pulse is OPTIONAL in
+            // WMO §5.1.3.3 — with dead_pulse false the dead sector is
+            // plain white, as VMW/NMC/GYA send it, and the decoder then
+            // has no per-line sync at all and must draw on the measured
+            // clock alone.
             for (int i = 0; i < plen; i++)
-                line[i] = (i < 0.015 * plen) ? 0.0f : 1.0f;
+                line[i] = (opt.dead_pulse && i < 0.015 * plen) ? 0.0f : 1.0f;
             const int pic0 = static_cast<int>(0.036 * plen);
             const int pic1 = static_cast<int>(0.984 * plen);
             const int row = (l - phasing_lines) % content.height;
@@ -84,7 +88,16 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
                                      std::min(x, content.width - 1)] /
                           255.0f;
             }
-            for (int i = pic1; i < plen; i++) line[i] = 0.0f;  // porch
+            // Black porch closing the line. The dead sector straddles the
+            // line boundary [WMO §5.1.3.3], so porch and pulse are the two
+            // halves of one feature: a station that sends no pulse sends no
+            // porch either, and its dead sector is white end to end (VMW,
+            // NMC, GYA — session 4 measured white consistency 0.70-0.99).
+            // Emitting the porch anyway leaves a black->white edge at every
+            // line boundary, which is a sync pulse in all but name: it gave
+            // 629 locks on a signal generated with dead_pulse false.
+            for (int i = pic1; i < plen; i++)
+                line[i] = opt.dead_pulse ? 0.0f : 1.0f;
         }
         vid.insert(vid.end(), line.begin(), line.end());
     }

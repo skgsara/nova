@@ -111,10 +111,43 @@ nova::Image make_full_ref(int width, int rows) {
     return ref;
 }
 
+// The test pattern's straightness bar is solid black, present on every
+// line at the same position, and followed by lighter content — which is
+// precisely the shape of the OPTIONAL sync pulse [WMO §5.1.3.3]. The
+// decoder anchors on it and reports locks even when the signal carries no
+// pulse at all (measured: 629 locks on a white-only generated signal). A
+// real white-only chart does not carry such a feature (session 4 library
+// measurement: pulse-shape consistency 0.14-0.34 for white-only stations
+// against 0.48-0.94 for pulse stations), so for the white-only group the
+// bar is greyed: still findable by edge_x (< 100), no longer "dark" to the
+// anchor (kDarkLevel = 0.25 of full scale = 64).
+// (The standard pattern has two such features: the black straightness bar,
+// and the gradient strip, which starts at pure black at a fixed x on every
+// line. Both anchored the decoder — 629 "locks" on a pulse-free signal —
+// so this pattern carries neither.)
+nova::Image white_only_pattern(int width, int rows) {
+    nova::Image c;
+    c.width = width;
+    c.height = rows;
+    c.px.assign(static_cast<size_t>(width) * rows, 200);
+    const int x0 = width / 6, x1 = width / 6 + width / 36;
+    for (int y = 0; y < rows; y++) {
+        for (int x = x0; x < x1; x++)
+            c.px[static_cast<size_t>(y) * width + x] = 90;  // grey bar
+        if (y % 50 < 2)  // horizontal line-count bars: not line-consistent
+            for (int x = 0; x < width; x++)
+                c.px[static_cast<size_t>(y) * width + x] = 0;
+    }
+    return c;
+}
+
 nova::DecodeResult run(const nova::GenOptions& g, int lines,
-                       nova::DecodeOptions d) {
-    nova::Image content = nova::gen_test_pattern(
-        (g.ioc == 288) ? 905 : 1810, lines);
+                       nova::DecodeOptions d,
+                       const nova::Image* content_override = nullptr) {
+    nova::Image content =
+        content_override ? *content_override
+                         : nova::gen_test_pattern(
+                               (g.ioc == 288) ? 905 : 1810, lines);
     std::vector<float> sig = nova::gen_fax_signal(content, lines, g);
     std::vector<float> video = nova::fm_demod(sig, g.fs, 1900.0, g.deviation);
     return nova::decode_fax(video, g.fs, d);
@@ -201,6 +234,43 @@ int main() {
         nova::DecodeResult r = run(g, kLines, d);
         check(edge_stdev(crop_rows(r.img, 40, kLines)) < 2.0,
               "150 Hz deviation decodes straight");
+    }
+
+    // The station sends no sync pulse [WMO §5.1.3.3 makes it optional], so
+    // there is nothing to lock and the picture rides entirely on the
+    // measured clock — the case that has no other screamer, because on a
+    // real white-only recording (VMW, NMC, GYA) nobody knows the true
+    // clock. Here it is generated, so it is known. Before session 5 the
+    // period came from a 200 Hz autocorrelation whose lag step is 10 000
+    // ppm; the fold measures it as phase drift across the whole recording.
+    std::printf("[7] white-only dead sector at +250 ppm: no locks, straight\n");
+    {
+        nova::GenOptions g;
+        g.dead_pulse = false;
+        g.ppm = 250;
+        nova::DecodeOptions d;
+        const nova::Image content = white_only_pattern(1810, 600);
+        nova::DecodeResult r = run(g, 600, d, &content);
+        std::printf("  clock=%+.1f ppm locked=%d per_line_sync=%d\n",
+                    r.clock_ppm, r.locked_lines, r.per_line_sync ? 1 : 0);
+        check(!r.per_line_sync, "white-only style detected");
+        check(r.locked_lines == 0, "no locks invented without a pulse");
+        check(std::fabs(r.clock_ppm - 250) < 10, "clock measured within 10 ppm");
+        check(edge_stdev(crop_rows(r.img, 40, 600)) < 3.0,
+              "white-only decode straight on the measured clock alone");
+    }
+
+    // Precision, not just correctness: the fold's whole justification is
+    // that accuracy comes from the BASELINE, so a long recording must be
+    // measured better than a short one, not merely acceptably.
+    std::printf("[8] clock precision on a long recording\n");
+    {
+        nova::GenOptions g;
+        g.ppm = -137;
+        nova::DecodeOptions d;
+        nova::DecodeResult r = run(g, 1200, d);
+        std::printf("  clock=%+.2f ppm (true -137)\n", r.clock_ppm);
+        check(std::fabs(r.clock_ppm + 137) < 5, "clock within 5 ppm");
     }
 
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",
