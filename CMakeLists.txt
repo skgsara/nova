@@ -45,9 +45,16 @@ target_link_libraries(nova-test-fixture PRIVATE nova-core)
 # value with room for noise, but above what the previous code achieved, so
 # a regression to the old anchor fails the suite.
 add_test(NAME fixture COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 115 125 -130 -40 0.85)
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav 120 115 125 -130 -40 0.95)
+# Session 7: line counts below are POST-SEGMENTATION — the start tone and
+# phasing interval are no longer drawn [WMO §5.2.3], so a fixture that
+# opens inside one decodes fewer lines than it holds. Both of these do:
+# 45 phasing lines in the first (its parent's phasing runs 72.5-102.5 s and
+# the cut is 80-140 s), 69 lines of start tone + phasing in the LPE one.
+add_test(NAME fixture_phasing_boundary COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 70 80 -130 -40 0.85)
 add_test(NAME fixture_lpe COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 115 125 -130 -40 0.75)
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75)
 add_test(NAME fixture_warp COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85)
 add_test(NAME fixture_60lpm COMMAND nova-test-fixture
@@ -65,6 +72,13 @@ add_test(NAME fixture_weak_white COMMAND nova-test-fixture
   --expect-white-only)
 add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
   ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)
+# The phasing line-start anchor [WMO §5.2.3.4], asserted against the
+# decoded picture rather than against the anchor number — session 5's rule.
+# VMW is white-only: this phase does not exist anywhere else in the signal,
+# and with the image-derived anchor the chart came out rotated by 520 px.
+add_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav 120 240 250 -90 -50 0.0
+  --expect-phasing-anchor)
 
 # M3 control-signal suite: start/stop tone and phasing detection.
 # [4], [5] and [9] are the false-start screamers — picture content with no

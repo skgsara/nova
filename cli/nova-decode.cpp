@@ -33,6 +33,10 @@ int main(int argc, char** argv) {
             opt.start_sec = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--no-autolock"))
             opt.autolock = false;
+        else if (!std::strcmp(argv[i], "--no-phasing"))
+            opt.use_phasing = false;
+        else if (!std::strcmp(argv[i], "--no-segment"))
+            opt.segment = false;
         else {
             usage();
             return 2;
@@ -55,6 +59,23 @@ int main(int argc, char** argv) {
             r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
                                                            : "white",
             r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");
+        if (r.phasing_found)
+            std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp vs "
+                        "image  (%s)\n",
+                        r.phasing_t_start, r.phasing_t_end,
+                        r.phasing_anchor_delta,
+                        r.anchor_from_phasing ? "PHASING anchor used"
+                                              : "image anchor used");
+        else
+            std::printf("  phasing none\n");
+        if (r.segmented)
+            std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
+                        "start/phasing, %d of stop)\n",
+                        r.image_t_start, r.image_t_end, r.lines_dropped_head,
+                        r.lines_dropped_tail);
+        else
+            std::printf("  image   whole recording (no control signals to "
+                        "segment on)\n");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "nova-decode: %s\n", e.what());
         return 1;

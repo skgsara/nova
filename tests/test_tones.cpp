@@ -255,6 +255,59 @@ int main() {
         }
     }
 
+    std::printf("[11] phasing anchor is an ABSOLUTE line start "
+                "[WMO §5.2.3.4]\n");
+    {
+        // `line_start` is a residue modulo the truncated integer period;
+        // `anchor` is the position a decoder actually consumes. Two ways it
+        // can be wrong while line_start stays perfect, both found by
+        // measurement in session 7 and both pinned here:
+        //
+        //   (a) PARITY. Referring the run to its midpoint refers it to a
+        //       half-line when the run has an even number of lines, putting
+        //       the anchor exactly half a period out. 30 lines is even, so
+        //       the whole library read half a line off and every synthetic
+        //       test still passed. Both parities are generated here.
+        //   (b) GRID SLIP. The detector counts lines in whole samples while
+        //       a real clock is never nominal, so the integer grid walks
+        //       against the signal; at -137 ppm over 30 lines that is
+        //       ~16 samples of pure bias.
+        for (int nph : {30, 31}) {
+            for (double ppm : {0.0, -137.0}) {
+                nova::GenOptions g;
+                g.phasing_lines = nph;
+                g.ppm = ppm;
+                const double period = kFs * 0.5 * (1.0 + ppm * 1e-6);
+                std::vector<float> v = make_video(g, 60);
+                nova::PhasingResult p = nova::detect_phasing(v, kFs, period);
+                char what[96];
+                std::snprintf(what, sizeof what,
+                              "%d phasing lines at %+.0f ppm", nph, ppm);
+                if (!p.found) {
+                    check(false, what);
+                    continue;
+                }
+                // The generated grid starts at sample 0 (the 5 s start tone
+                // is a whole number of lines), so every line's white edge is
+                // at a multiple of the period, offset only by the demod's
+                // 63-tap group delay.
+                const double kDelay = 31.0;
+                double d = std::fmod(p.anchor - kDelay, period);
+                if (d > period / 2) d -= period;
+                if (d < -period / 2) d += period;
+                std::printf("    %s: anchor=%.1f  off-grid %+.1f smp "
+                            "(%.2f%% of the line)\n",
+                            what, p.anchor, d, 100.0 * d / period);
+                check(std::fabs(d) < 0.015 * period, what);
+                // ...and it must be a position INSIDE the interval it was
+                // measured on, not an extrapolation to somewhere else.
+                check(p.anchor >= p.t_start * kFs - period &&
+                          p.anchor <= p.t_end * kFs + period,
+                      "anchor lies within the phasing interval");
+            }
+        }
+    }
+
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",
                 failures);
     return failures ? 1 : 0;

@@ -51,7 +51,18 @@ struct PhasingResult {
     int lines = 0;          // phasing lines that agreed
     // Sample offset, within the line, of the leading edge of white — i.e.
     // of dead-sector entry [WMO §5.2.3.4]. This is the line-start anchor.
+    // Measured on a grid of whole samples counted from sample 0, which is
+    // the caller's grid only when the period is a whole number; prefer
+    // `anchor` for anything that has to line up with a decoder.
     double line_start = 0.0;
+    // The same anchor as an ABSOLUTE sample position, at the middle of the
+    // phasing run. `line_start` cannot be handed to a decoder directly: it
+    // is a residue modulo the truncated integer period, so a caller with a
+    // fractional period (every real recording — the clock is never exactly
+    // nominal) walks off it by (period - trunc(period)) per line, tens of
+    // samples across a 60-line interval. This is measured against the
+    // fractional `period` passed in and is what decode_fax consumes.
+    double anchor = 0.0;
     double spread = 0.0;    // 10-90% of per-line positions, in samples
     bool asymmetric = true; // 5/95 [WMO §5.2.3.2] vs symmetric 50/50
     double score = 0.0;     // median per-line contrast of the run

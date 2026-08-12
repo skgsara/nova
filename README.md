@@ -56,7 +56,7 @@ ppm and had been shearing three of the library's recordings by a third of
 a page while every lock metric stayed green — found by measuring decoded
 pictures rather than decoder statistics.
 
-**M3 in progress (2026-08-12):** the control signals — 300/675 Hz start,
+**M3 done bar manual override (2026-08-12):** the control signals — 300/675 Hz start,
 450 Hz stop [WMO §5.2.2, §5.2.5] and the 30 s phasing interval
 [WMO §5.2.3] — are detected and measured. Detection accepts on spectral
 *purity* rather than a transition rate, which is what lets it tell a
@@ -65,11 +65,21 @@ picture content never exceeds 0.16 in a control band while real tones run
 0.68–0.99. Zero false positives; 14 of the 20 recordings turn out to carry
 a start tone, and 15 a full phasing interval.
 
-Sequencing itself is not wired yet: nothing consumes the detections, and
-the decoder still takes its anchor from image lines. The prize when it
-lands is the phasing stage's line-start reference [WMO §5.2.3.4] — the
-only per-line phase that exists for stations sending a plain white dead
-sector.
+Sequencing is wired. The decoder draws the picture and not the control
+signals, and on stations sending a plain white dead sector it takes its
+line start from the phasing interval [WMO §5.2.3.4] — the only per-line
+phase such a station has. That was worth more than it sounds: their
+image-derived anchor had been locking onto the chart's blank margin
+rather than the dead sector, and VMW's charts were coming out **rotated
+by 520 px of 1810**, with the right-hand margin wrapped around to the left
+edge. Stations that do send a sync pulse keep tracking it, and decode
+byte-for-byte as before; the disagreement between the two anchors is
+reported on every decode, and on pulse stations it measures the black
+porch — two recordings of the same transmitter agree on it to 3 samples
+of 4000.
+
+Manual override of everything [ISO §4.2.6] is still untouched and needs
+the GUI (M4).
 
 Synthetic tests cover 60/90/120 lpm, IOC 288/576, ±150/±400 Hz
 deviation, clock error to ±250 ppm (including a white-only signal with

@@ -130,6 +130,47 @@ spread 14–73 samples and score 0.88–0.97, false runs 288–635 and 0.48–0.
 
 Nothing was copied in either case; the ledger below is unchanged.
 
+### Session 7 — where the line-start anchor comes from, and how it is carried
+
+Checked: **JWX** (`DecodeFax.java`, source in the parent folder),
+**KiwiSDR**/**weatherfax_pi**, **fldigi**, **Isobar**.
+
+**JWX does not use the phasing interval for the anchor at all.** Its
+`s_sync` state accumulates 20 s of *image* lines into one averaged line
+(clock-corrected per line by `clock_correct_line`), integrates it, and
+takes the strongest negative excursion as the sync bar. That is an
+image-derived anchor of exactly the kind Nova used before this session —
+so on a white-only station, where no such excursion exists, JWX has the
+same problem Nova had, and its own documentation shows the operator
+nudging alignment by hand. The reusable finding is a negative one: the
+mature decoder does not solve this, which is why Nova's answer had to come
+from the phasing interval and be checked against a picture rather than
+against JWX's behaviour.
+
+Two details of JWX's are worth recording because they bear directly on the
+bug this session found:
+
+- JWX carries its anchor forward by the **whole elapsed accumulation
+  window** (`sync_lines * row_len * calibration_val`) — an integer number
+  of lines, referred to the window's end. Nova referred its anchor to the
+  *midpoint* of the phasing run instead, which is a half-line whenever the
+  run has an even number of lines, and 30 s of phasing is 60 lines. JWX's
+  choice of endpoint over midpoint is immune to that by construction. Nova
+  keeps the midpoint (it halves the lever arm of a clock error) but now
+  rounds it to a line that exists, and `tones` [11] generates both
+  parities so the class of error cannot come back.
+- JWX then subtracts a fixed fudge (`sync_interval * 0.12 * sample_rate`)
+  to "align sync bar", compensating its integrator's group delay. It is a
+  tuned constant with no measurement behind it in the source. Nova instead
+  *measures* the equivalent quantity — the black porch between dead-sector
+  entry and the sync pulse — and reports it per recording
+  (`phasing_anchor_delta`), which is what turned it from a fudge into
+  evidence: two recordings of one transmitter agree to 3 samples of 4000.
+
+KiwiSDR/weatherfax_pi do run their wedge fit inside a phasing stage the
+tone state machine has already entered, which is the shape Nova follows
+for segmentation (opening sequence → image → stop). Nothing copied.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

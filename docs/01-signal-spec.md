@@ -135,6 +135,38 @@ library, so that registered gap stands.
   tone is also present, the phasing begins where the start tone ends in 11
   of 14 recordings — two detectors sharing no code agreeing on a boundary
   neither was told about.
+- **The phasing anchor and the image anchor mark the same edge, and the
+  difference between them is the black porch.** Settled by measurement in
+  session 7, on a fold of the video over the phasing region and over the
+  image region on one common grid. On JMH the phasing white leading edge
+  sits at −73 samples of 4000 from the decoder's pulse anchor and the
+  image's dead-sector black run starts at −67: the same feature, six
+  samples apart. Across the seven pulse-station recordings the offset is
+  −1.65% to −2.86% of a line, and two recordings of one transmitter agree
+  to **3 samples of 4000** (JMH −78.4/−75.7, XSG −114.3/−111.5). That is
+  the porch: the dead sector is entered black, the sync pulse follows, and
+  the phasing wedge marks the entry, not the pulse.
+- **On a white-only station the image anchor is not the dead sector, and
+  the phasing anchor is.** The white-only anchor scores the rising edge of
+  always-white, which is dead-sector entry only when nothing else on the
+  line is reliably white. Charts have blank margins: VMW 2230Z's always-
+  white run is 1350 samples where its dead sector is 180, so the anchor sat
+  1149 samples early and the picture was drawn rotated by 520 px of 1810 —
+  the paper's right margin wrapped around to the left edge. The phasing
+  wedge sits in the LAST 4.5% of that white run. Measured disagreements:
+  VMW +1149, NMC −1743, GYA 2324Z +287 samples; all three decode correctly
+  once phased from the phasing interval, verified against the picture.
+  Nova therefore takes the phasing anchor where the image gives no per-line
+  sync, keeps the tracked pulse anchor where it does, and reports the delta
+  either way [`fixture_phasing_anchor`].
+- **The transmission sequence bounds the picture.** Start tone → phasing →
+  image → stop tone [WMO §5.2.3, §5.2.5]; only the image is drawn. The
+  boundaries come from the first opening sequence and the first stop tone
+  that follows it, because a recording may hold more than one transmission
+  (`jmh sample`: start 6 s, stop 404 s, the *next* start at 425 s).
+  Segmentation crops the output only — onset, period, anchor and both
+  tracking passes still see the whole recording, so nothing measured moves.
+  [`roundtrip [9]`, `fixture_phasing_boundary`]
 - **A white-only dead sector carries no per-line phase information.**
   Session 3 assumed a "white-sector matcher" would fix VMW; session 4
   built two and measured both to be worse than not tracking at all — they
@@ -143,7 +175,10 @@ library, so that registered gap stands.
   There is nothing in a white dead sector that the paper does not also
   contain. Such stations are decoded on the measured clock and report
   zero locks; per-line sync for them would have to come from the phasing
-  stage [WMO §5.2.3.4], which is M3 work.
+  stage [WMO §5.2.3.4]. As of session 7 it does: they still report zero
+  per-line locks — that measurement stands — but their line-start PHASE
+  now comes from the phasing interval, which is a different thing and the
+  only one they ever had.
 - ±150 Hz LF mode is a deviation setting, same code path as ±400 Hz.
   [ISO §4.2.2 "and/or"]
 - Phasing waveform may be 5/95 asymmetric — detectors must accept both.

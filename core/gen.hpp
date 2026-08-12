@@ -26,6 +26,12 @@ struct GenOptions {
     // asymmetric (5% white / 95% black). A detector has to accept both, so
     // the generator has to be able to produce both.
     bool phasing_symmetric = false;
+    // Number of phasing lines. Configurable because the PARITY of this
+    // count is load-bearing: an anchor referred to the midpoint of the run
+    // is referred to a half-line when the count is even, and 30 lines (the
+    // ~30 s of WMO §5.2.3 at 60 lpm) is even, so a bug of exactly half a
+    // period is invisible to any test that only ever generates 30.
+    int phasing_lines = 30;
     // false = white-only dead sector (the pulse is optional, WMO §5.1.3.3):
     // no per-line sync exists, so the picture rides entirely on the
     // measured clock. This is how VMW, NMC and GYA transmit.

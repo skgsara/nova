@@ -75,7 +75,7 @@ register are milestone entries, not intentions (SOP P1.5).
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
-## M3 — full auto sequencing  [detection done, sequencing pending]
+## M3 — full auto sequencing  [done except manual override, which needs M4]
 
 Done (session 6) — detection, measured against the library:
 - Start/stop tones [ISO §4.2.5]: `core/tones.cpp`. Accept test is spectral
@@ -94,21 +94,36 @@ Done (session 6) — detection, measured against the library:
   audio, where these signals only appear as incidental envelope ripple,
   and concluded one recording in twenty carried a start tone. The correct
   domain is demodulated video, and the answer is 14 of 20.
-- Screamers: `tones` [1]–[10], `tones_fixture_vmw` (real start tone +
+- Screamers: `tones` [1]–[11], `tones_fixture_vmw` (real start tone +
   phasing in an off-air white-only recording), `tones_fixture_no_false_start`
   (zero events on 120 s of real newspaper text).
 
+Done (session 7) — sequencing, wired and verified against pictures:
+- **The edge convention, settled.** The phasing white leading edge marks
+  dead-sector ENTRY [WMO §5.2.3.4], on both dead-sector styles. Measured
+  by folding the video over the phasing region and the image region on one
+  common grid: on JMH the phasing edge is at −73 samples of 4000 and the
+  image's dead-sector black run starts at −67. Across seven pulse-station
+  recordings the offset is the black porch, −1.65% to −2.86% of a line,
+  and two recordings of one transmitter agree to 3 samples of 4000.
+- **The phasing anchor drives the decoder on white-only stations.** Their
+  image-derived anchor was catching the chart's blank margin, not the dead
+  sector: VMW 2230Z decoded rotated by 520 px of 1810, NMC's caption torn
+  across the line boundary, GYA 2324Z with a 130 px strip of its right edge
+  on the left. All three correct now. Pulse stations keep their tracked
+  anchor and are byte-identical (checked on all 10). The anchor delta is
+  reported on every decode either way.
+- **Segmentation.** Only the picture is drawn: start tone and phasing
+  cropped from the head, stop tone from the tail. Output framing only —
+  onset, period, anchor and both tracking passes still see the whole
+  recording, so nothing session 5 measured moves.
+- Screamers: `tones` [11] (absolute anchor, both run parities and a −137
+  ppm clock), `roundtrip [9]` (row 0 of the output is image line 0),
+  `fixture_phasing_anchor` (the VMW picture: content begins one dead
+  sector into the line, 4.97% — reads 0.00% with the old anchor),
+  `fixture_phasing_boundary` (a real phasing→image transition).
+
 Pending:
-- **Sequencing itself: nothing consumes the detections yet.** `decode_fax`
-  still finds its anchor from image lines. Wiring the phasing line-start
-  in is the payoff — it is the only per-line phase source that exists for
-  the white-only stations (VMW/NMC/GYA), which report zero locks by design.
-- Blocker to resolve first: which edge of the dead sector the phasing
-  `line_start` marks. On JMH Test Chart it agrees with `fax.cpp`'s
-  image-derived anchor to ~23 samples of 4000 (0.6% of a line) once the
-  black porch is accounted for — close enough to be the same feature,
-  not close enough to call the convention settled. Arithmetic cannot
-  settle it; a decoded picture can.
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
@@ -141,6 +156,28 @@ Pending:
   signal generated with no pulse at all. No library recording does this
   (session 4: white-only stations score 0.14–0.34), so it is registered,
   not fixed.
+- Multiple transmissions in one recording (session 7). Segmentation takes
+  the first — opening sequence to the first stop tone that follows it —
+  and drops the rest; `jmh sample` loses the 143 s of the next chart it
+  happens to catch. One recording, one image is the current model.
+  Splitting a recording into several images is unbuilt, and not a
+  milestone: no other library recording needs it.
+- The phasing anchor is measured ONCE, at the middle of the interval, and
+  propagated on the fitted clock for the rest of the recording (session 7).
+  That is a fixed reference, not a tracked one: on a white-only station a
+  mid-stream time-skip would shift the picture with nothing to re-acquire.
+  No library recording exercises it — the one time-skip case, himawari, is
+  a pulse station that re-acquires — but M4 live decode will.
+- Segmentation costs a full `detect_tones` pass over the recording
+  (session 7): ~9 s on the 61-minute JSC4 against a 37 s decode. Fine
+  offline, unbudgeted for M4, where the scan wants to be incremental.
+- `phasing_anchor_delta` is reported on every decode and asserted nowhere
+  (session 7). On pulse stations it measures the black porch and is stable
+  to 3 samples of 4000 across repeat recordings of one transmitter — a
+  screamer pinning the agreement of two independent anchors would be cheap
+  and would catch regressions neither existing test can see. Unexplained
+  while it stays unasserted: JSC2 reads −234 samples against JSC3's −55,
+  from the same transmitter.
 - 240 lpm: deliberately out of scope (not required by ISO 9876 §4.2.4).
 - 90 lpm real fixture: none in the library (session 3 batch survey).
 - IOC 288 real fixture: none found (no 675 Hz start tone anywhere).

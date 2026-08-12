@@ -63,7 +63,7 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
     if (opt.start_tone)
         push_tone(opt.ioc == 288 ? 675.0 : 300.0, 5.0);  // [WMO §5.2.2]
 
-    const int phasing_lines = opt.phasing ? 30 : 0;
+    const int phasing_lines = opt.phasing ? opt.phasing_lines : 0;
     const int total_lines = phasing_lines + image_lines;
     for (int l = 0; l < total_lines; l++) {
         std::vector<float> line(plen);

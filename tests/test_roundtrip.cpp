@@ -150,6 +150,13 @@ nova::DecodeResult run(const nova::GenOptions& g, int lines,
                                (g.ioc == 288) ? 905 : 1810, lines);
     std::vector<float> sig = nova::gen_fax_signal(content, lines, g);
     std::vector<float> video = nova::fm_demod(sig, g.fs, 1900.0, g.deviation);
+    // These tests decode the WHOLE generated recording, control lines
+    // included: every crop offset and line-count bound below is written in
+    // that frame (`crop_rows(img, 40, ...)` = 10 start-tone lines + 30
+    // phasing lines). Segmentation is measured on its own, in [9], where a
+    // wrong boundary is the thing under test rather than a silent shift of
+    // everything else.
+    d.segment = false;
     return nova::decode_fax(video, g.fs, d);
 }
 }  // namespace
@@ -271,6 +278,39 @@ int main() {
         nova::DecodeResult r = run(g, 1200, d);
         std::printf("  clock=%+.2f ppm (true -137)\n", r.clock_ppm);
         check(std::fabs(r.clock_ppm + 137) < 5, "clock within 5 ppm");
+    }
+
+    std::printf("[9] segmentation: draw the picture, not the control "
+                "signals [WMO §5.2.3, §5.2.5]\n");
+    {
+        // The generated recording is 10 start-tone lines + 30 phasing lines
+        // + kLines of picture + a stop tone. A correct segmentation emits
+        // the picture and nothing else, so the check is not "roughly the
+        // right number of rows" but "row 0 of the output IS image line 0":
+        // the reference is compared from row 0 with no crop offset, and the
+        // test pattern's horizontal bars every 50 lines make a slip of even
+        // a few rows blow the MAD bound.
+        nova::GenOptions g;
+        nova::Image content = nova::gen_test_pattern(1810, kLines);
+        std::vector<float> sig = nova::gen_fax_signal(content, kLines, g);
+        std::vector<float> video =
+            nova::fm_demod(sig, g.fs, 1900.0, g.deviation);
+        nova::DecodeOptions d;  // segmentation ON — this is the test
+        nova::DecodeResult r = nova::decode_fax(video, g.fs, d);
+        std::printf("  lines=%d dropped head=%d tail=%d image=%.2f-%.2f s\n",
+                    r.lines, r.lines_dropped_head, r.lines_dropped_tail,
+                    r.image_t_start, r.image_t_end);
+        check(r.segmented, "segmentation applied");
+        check(std::abs(r.lines_dropped_head - 40) <= 2,
+              "start tone + phasing dropped from the head (40 lines)");
+        check(r.lines_dropped_tail > 0, "stop tone dropped from the tail");
+        check(std::abs(r.lines - kLines) <= 3, "the picture lines survive");
+        const int rows = std::min(r.lines, kLines) - 2;
+        nova::Image ref = make_full_ref(1810, rows);
+        nova::Image crop = crop_rows(r.img, 0, rows);
+        const double mad = mean_abs_diff(crop, ref);
+        std::printf("  MAD from row 0 (no crop offset) = %.1f\n", mad);
+        check(mad < 20, "row 0 of the output is image line 0");
     }
 
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",

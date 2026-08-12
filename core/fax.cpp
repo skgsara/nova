@@ -1,5 +1,7 @@
 // fax.cpp
 #include "fax.hpp"
+#include "phasing.hpp"
+#include "tones.hpp"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -618,7 +620,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     res.dead_sector =
         has_pulse ? DeadSector::kBlackPulse : DeadSector::kWhiteOnly;
     res.dead_consistency = has_pulse ? pulse_cons : white_cons;
-    const double dead_start0 = has_pulse ? pulse_at : white_at;
+    double dead_start0 = has_pulse ? pulse_at : white_at;
     // Only a black pulse gives per-line phase. See the note on white_score
     // above: a white-only dead sector is decoded on the measured clock.
     res.per_line_sync = has_pulse;
@@ -629,6 +631,57 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                      pulse_shape, pulse_cons, pulse_at, white_shape,
                      white_cons, white_at,
                      has_pulse ? "black-pulse" : "white-only");
+
+    // --- 2b. phasing: the line-start reference the picture cannot give -----
+    // [WMO §5.2.3.4] puts the leading edge of the phasing white at entry
+    // into the dead sector — the same feature the image profile above is
+    // hunting for, measured on 30 s that contain no picture content to be
+    // fooled by. Measured on the library (session 7), on a black-pulse
+    // station the two land on the same edge (JMH: phasing white edge at
+    // -73 samples, image black run starts at -67, of 4000); on a WHITE-ONLY
+    // station they do not, and the image one is the one that is wrong.
+    //
+    // The white-only anchor scores the rising edge of always-white, which
+    // is dead-sector entry only if nothing else on the line is reliably
+    // white. On VMW 2230Z the chart's blank right margin is: the always-
+    // white run is 1350 samples where the dead sector is 180, so the anchor
+    // sat 1149 samples early and the picture was drawn rotated by 520 px of
+    // 1810 — the paper's right margin wrapped around to the left. The
+    // phasing wedge sits in the LAST 4.5% of that white run, which is the
+    // dead sector. Verified against the decoded picture, not just the
+    // numbers (session 5's lesson).
+    {
+        const PhasingResult ph = detect_phasing(video, fs, period0);
+        res.phasing_found = ph.found;
+        if (ph.found) {
+            res.phasing_t_start = ph.t_start;
+            res.phasing_t_end = ph.t_end;
+            const double phase =
+                std::fmod(std::fmod(ph.anchor - start, period0) + period0,
+                          period0);
+            double d = phase - dead_start0;
+            while (d > period0 / 2.0) d -= period0;
+            while (d < -period0 / 2.0) d += period0;
+            res.phasing_anchor_delta = d;
+            // Only where the image has nothing to offer. A pulse station
+            // already anchors on a feature it re-measures every line, at
+            // 88-99% lock rates; swapping that for a phase measured once,
+            // 30 s in, would trade a tracked reference for a fixed one.
+            // The delta is reported either way, so the day a pulse station
+            // disagrees by more than a porch, it will be in the output.
+            if (opt.use_phasing && !has_pulse) {
+                dead_start0 = phase;
+                res.anchor_from_phasing = true;
+            }
+        }
+        if (std::getenv("NOVA_DEBUG"))
+            std::fprintf(stderr,
+                         "dbg: phasing found=%d %.2f-%.2f s lines=%d "
+                         "anchor=%.1f delta=%+.1f -> %s\n",
+                         ph.found, ph.t_start, ph.t_end, ph.lines, ph.anchor,
+                         res.phasing_anchor_delta,
+                         res.anchor_from_phasing ? "USED" : "image anchor");
+    }
 
     // --- 3. pass A: sequential sync tracking -------------------------------
     // Walk line to line: each search window is centred on the previous
@@ -689,12 +742,6 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         }
     }
 
-    // Honest lock metric: lines where the sync template actually matched.
-    // (Before session 3 this counted "correction did not jump", which is
-    // vacuously true when the tracker coasts through noise.)
-    res.locked_lines = 0;
-    for (int l = 0; l < n_lines; l++)
-        if (sstr[l] >= lock) res.locked_lines++;
 
     // --- 4. pass B: robust period/phase from median LONG-baseline slope ----
     // Least squares bends here by design of the signal: phasing lines and
@@ -792,6 +839,93 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                          l, spos[l], sstr[l], spos[l] - (a + b * l));
     }
 
+    // --- 4c. segmentation: start -> phasing -> image -> stop ---------------
+    // The transmission sequence of WMO §5.2.3 is not picture: the start
+    // tone and the phasing interval precede the image and the stop tone
+    // ends it [WMO §5.2.5]. Drawing them produced tens of lines of black/
+    // white bars top and bottom of every decode, and — worse — they were
+    // counted in `lines` and diluted `locked_lines`, since a phasing line
+    // cannot match the picture-line sync template by design.
+    //
+    // This crops the OUTPUT only. Onset, period, anchor and both tracking
+    // passes still see the whole recording, deliberately: the long-baseline
+    // period fit of session 5 needs every lock it can get, and the phasing
+    // lines lock nowhere near the picture template anyway. Nothing measured
+    // moves — only what is drawn.
+    int line_lo = 0, line_hi = n_lines;
+    if (opt.segment) {
+        const std::vector<ToneEvent> ev = detect_tones(video, fs);
+        // Segment the FIRST transmission. A recording can hold more than
+        // one: `jmh sample` carries a start at 6 s, its stop at 404 s, and
+        // then the NEXT transmission's start at 425 s. Every boundary rule
+        // here is therefore "the first one after the previous boundary",
+        // never "the last" or "the largest" — taking the latest start tone
+        // dropped that recording's entire chart and kept 143 s of the
+        // following one.
+        bool have_head = false, have_tail = false;
+        double t0 = 0.0;
+        for (const auto& e : ev)
+            if (e.kind != ToneKind::kStop) {
+                t0 = e.t_end;
+                have_head = true;
+                break;
+            }
+        // ...then the first stop tone that follows the opening.
+        double t1 = static_cast<double>(video.size()) / fs;
+        for (const auto& e : ev)
+            if (e.kind == ToneKind::kStop && e.t_start > t0) {
+                t1 = e.t_start;
+                have_tail = true;
+                break;
+            }
+        // Phasing belongs to this transmission's opening only if it sits
+        // between the start tone and that stop [WMO §5.2.3]. It runs longer
+        // than the tone, so where it is present it sets the boundary.
+        if (res.phasing_found && res.phasing_t_end > t0 &&
+            res.phasing_t_end <= t1) {
+            t0 = res.phasing_t_end;
+            have_head = true;
+        }
+        // Only crop an end a control signal actually bounds. Otherwise the
+        // rounding of the line index alone would report "dropped 1 line of
+        // stop" on a recording with no stop tone in it (JSC1).
+        const int lo = have_head
+                           ? static_cast<int>(std::ceil((t0 * fs - a) / b))
+                           : 0;
+        const int hi = have_tail
+                           ? static_cast<int>(std::floor((t1 * fs - a) / b))
+                           : n_lines;
+        const int clo = std::max(0, std::min(lo, n_lines));
+        const int chi = std::max(clo, std::min(hi, n_lines));
+        // A segment that leaves nothing is a detection failure, not an
+        // instruction to emit an empty picture: fall back to the whole
+        // recording and say so rather than returning a blank image.
+        if (chi - clo >= 4) {
+            line_lo = clo;
+            line_hi = chi;
+            res.segmented = (line_lo != 0 || line_hi != n_lines);
+        }
+        if (std::getenv("NOVA_DEBUG"))
+            std::fprintf(stderr,
+                         "dbg: segment t0=%.2f t1=%.2f -> lines [%d,%d) of "
+                         "%d%s\n",
+                         t0, t1, line_lo, line_hi, n_lines,
+                         res.segmented ? "" : " (not applied)");
+    }
+    res.lines_dropped_head = line_lo;
+    res.lines_dropped_tail = n_lines - line_hi;
+    res.image_t_start = (a + b * line_lo) / fs;
+    res.image_t_end = (a + b * line_hi) / fs;
+
+    // Honest lock metric: lines where the sync template actually matched.
+    // (Before session 3 this counted "correction did not jump", which is
+    // vacuously true when the tracker coasts through noise.) Counted over
+    // the DRAWN lines only, so it describes the picture that came out
+    // rather than a window the caller never sees.
+    res.locked_lines = 0;
+    for (int l = line_lo; l < line_hi; l++)
+        if (sstr[l] >= lock) res.locked_lines++;
+
     // --- 5. assembly: fit + local-median residual --------------------------
     // The template anchor is the sync-pulse start in image lines; in the
     // phasing region the best template match sits ~half a dead sector
@@ -800,16 +934,17 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // the clamp lets the phasing->image transition through in one step
     // while rejecting wild jumps.
     const int width = (opt.ioc == 288) ? 905 : 1810;
+    const int out_lines = line_hi - line_lo;
     Image img;
     img.width = width;
-    img.height = n_lines;
-    img.px.resize(static_cast<size_t>(width) * n_lines);
+    img.height = out_lines;
+    img.px.resize(static_cast<size_t>(width) * out_lines);
 
     const double corr_clamp = 0.03 * b;
     double prev_corr = 0.0;
     bool have_corr = false;
     const int med_rad = 8;
-    for (int l = 0; l < n_lines; l++) {
+    for (int l = line_lo; l < line_hi; l++) {
         double line_start = a + b * l;  // sync-anchor position
         if (opt.autolock) {
             std::vector<double> r;
@@ -844,13 +979,13 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         for (int j = 0; j < width; j++) {
             const double pos = pic_start + pic_len * j / width;
             const float v = lerp_at(video, pos);
-            img.px[static_cast<size_t>(l) * width + j] =
+            img.px[static_cast<size_t>(l - line_lo) * width + j] =
                 static_cast<uint8_t>(std::lround(v * 255.0f));
         }
     }
 
     res.img = std::move(img);
-    res.lines = n_lines;
+    res.lines = out_lines;
     return res;
 }
 

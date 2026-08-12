@@ -80,21 +80,25 @@ more likely right than one that agrees only with its own reasoning.
    zero locks BY DESIGN — a measured negative result, not a gap to close
    (docs/01 §5); their per-line phase, if it is recoverable at all, has
    to come from the phasing stage in M3.
-3. ~~Start/stop tone detection~~ + auto sequencing (M3) — session 6:
-   detection built and measured, **sequencing not yet wired; nothing
-   consumes the detections**. The false-start trap is closed by spectral
-   purity rather than transition rate (content ≤ 0.16, tones 0.68–0.99,
-   threshold 0.35; zero false positives across 5.9 hours). Phasing is
-   found on 15 of 20 recordings and carries the line-start reference
-   [WMO §5.2.3.4] — the only per-line phase source white-only stations
-   have.
-   **The lesson for the next agent: session 3's "only `jmh sample.wav`
-   carries a start tone" was an artifact of measuring in the wrong
-   domain.** These are black/white alternations in VIDEO; that survey ran
-   an FFT on the raw AUDIO, where they appear only as incidental envelope
-   ripple, and it saw one of them. The real answer is 14 of 20. A negative
-   result is worth only as much as the domain it was measured in — and
-   this one had been sitting in the risk register for three sessions.
+3. ~~Start/stop tone detection~~ ~~+ auto sequencing~~ (M3) — session 7:
+   wired. The phasing line-start anchor drives the decoder on white-only
+   stations, and the tone events bound the drawn picture (start/phasing
+   cropped from the head, stop from the tail). The false-start trap stays
+   closed by spectral purity rather than transition rate (content ≤ 0.16,
+   tones 0.68–0.99, threshold 0.35; zero false positives across 5.9 hours).
+   **The lesson for the next agent: a number can agree with the picture
+   on every recording you check and still be half a period wrong.** The
+   absolute phasing anchor was referred to the MIDPOINT of the run, which
+   is a half-line whenever the run has an even number of lines — and a 30 s
+   phasing interval is 60 lines, so the whole library read exactly half a
+   line off. Every synthetic test passed, because the generator emitted 30
+   phasing lines too. Only XSG ASPN (53 lines, odd) read correctly, and it
+   was the disagreement between one odd recording and every even one that
+   exposed it. `tones` [11] now generates both parities.
+   Session 6's lesson still stands underneath: session 3's "only `jmh
+   sample.wav` carries a start tone" was an artifact of running an FFT on
+   the raw AUDIO when the control signals are black/white alternations in
+   VIDEO. The real answer is 14 of 20.
 4. ±150 Hz LF deviation [ISO §4.2.2] — synthetic only; no fixture.
 5. ~~Long recordings~~ — session 3: JSC4 61 min, XSG 23 min, Himawari
    17 min all decode end-to-end.
@@ -104,12 +108,13 @@ more likely right than one that agrees only with its own reasoning.
 - IOC 288 fixture: none. Re-confirmed session 6 with a detector that works
   in the right domain and searches ±1.5% around 675 Hz: no IOC-288 start
   tone anywhere in the library. IOC 288 remains synthetic-only.
-- Which edge of the dead sector the phasing `line_start` marks. It agrees
-  with `fax.cpp`'s image-derived anchor to ~23 samples of 4000 on JMH Test
-  Chart once the black porch is allowed for — the same feature, but not a
-  settled convention. Must be resolved against a decoded picture before
-  the phasing anchor drives the decoder (session 5's lesson: a number that
-  was never compared with the image is not evidence).
+- ~~Which edge of the dead sector the phasing `line_start` marks~~ —
+  settled session 7 by folding the video over the phasing region and the
+  image region on one grid: it marks dead-sector ENTRY, on both styles.
+  On pulse stations it lands one black porch before the sync pulse
+  (−1.65% to −2.86% of a line; two recordings of one transmitter agree to
+  3 samples of 4000). On white-only stations the image anchor is the one
+  that is wrong. Verified against decoded pictures, not just the numbers.
 - GYA 2300Z phasing: an 18-line candidate at 15.5–24.5 s scoring 0.77
   passed the looser first-pass thresholds and is rejected by the final
   ones. Deeply faded; whether it is a real partial phasing interval or
@@ -122,3 +127,17 @@ more likely right than one that agrees only with its own reasoning.
 - Content that mimics the sync pulse (dark run at a fixed position on
   every line, then white) is indistinguishable from it by design. See
   ROADMAP registered gaps.
+- Multiple transmissions in one recording. Segmentation takes the FIRST
+  (opening sequence → first stop tone that follows it) and drops the rest;
+  `jmh sample` loses the 143 s of the next chart it happens to catch. One
+  recording → one image is the current model. Splitting a recording into
+  several images is unbuilt and unregistered as a milestone.
+- The phasing anchor is measured ONCE, at the middle of the interval, and
+  then propagated on the fitted clock for the whole recording. That is a
+  fixed reference, not a tracked one: on a white-only station a mid-stream
+  time-skip would shift the picture and nothing would re-acquire. No
+  library recording exercises this (the one time-skip case, himawari, is a
+  pulse station that re-acquires); it matters for M4 live decode.
+- Segmentation costs a full `detect_tones` pass over the recording (~9 s
+  on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
+  for M4 live decode, where the scan wants to be incremental.

@@ -7,6 +7,128 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 7: the anchor agreed with every picture I checked, and was still half a line wrong
+
+Agent: Claude Opus 5.
+
+**Task as accepted:** session 6's next step — wire the phasing line-start
+in and segment the transmission, settling the dead-sector edge convention
+against a decoded picture first.
+
+**Prior art, checked first.** JWX's `s_sync` (source in the parent folder)
+does **not** use the phasing interval at all: it accumulates 20 s of
+*image* lines, integrates, and takes the strongest negative excursion —
+an image-derived anchor of exactly the kind that fails on a white-only
+station. The mature decoder does not solve this problem; its help file
+shows the operator aligning by hand. So the reusable finding was a
+negative one, and the answer had to come from the signal. Two JWX details
+mattered anyway, and both are in docs/00: it carries its anchor forward by
+a whole integer number of lines (immune by construction to the bug below),
+and it applies an untested constant fudge where Nova now measures the same
+quantity and reports it.
+
+**The edge convention, settled by measurement.** I folded the video over
+the phasing region and over the image region of one recording onto one
+common line grid and read off where the white starts in each. On JMH the
+phasing white leading edge sits at −73 samples of 4000 from the decoder's
+pulse anchor, and the image's dead-sector black run starts at −67: **the
+same feature, six samples apart.** Across seven pulse-station recordings
+the offset is the black porch — −1.65% to −2.86% of a line — and two
+recordings of the same transmitter agree to **3 samples of 4000**, twice
+over (JMH −78.4/−75.7, XSG −114.3/−111.5). `line_start` marks dead-sector
+ENTRY [WMO §5.2.3.4], on both dead-sector styles. Gap closed.
+
+**On white-only stations the image anchor was not the dead sector.** It
+scores the rising edge of always-white, which is dead-sector entry only if
+nothing else on the line is reliably white — and charts have blank
+margins. VMW 2230Z's always-white run is 1350 samples where its dead
+sector is 180, so the anchor sat 1149 samples early and **the picture was
+drawn rotated by 520 px of 1810**, the paper's right margin wrapped around
+to the left edge. The phasing wedge sits in the last 4.5% of that white
+run, which is the dead sector. NMC disagreed by −1743 samples and its
+caption was torn across the line boundary; GYA 2324Z by +287 with a 130 px
+strip of its right edge on the left. All three are correct now, checked by
+looking at the pictures. Pulse stations keep their tracked anchor and are
+**byte-identical** on all ten recordings tested.
+
+**The bug that no number would have caught.** I referred the absolute
+anchor to the MIDPOINT of the phasing run — and `(i+j)/2` is a half-line
+whenever the run has an even number of lines. A 30 s phasing interval is
+60 lines. So every anchor in the library came out **exactly half a period
+off**, and every synthetic test still passed, because the generator emits
+30 phasing lines and 30 is even too. What exposed it was one recording:
+XSG ASPN, whose run is 53 lines, read −111.5 samples while every other
+station read ~+1900. An odd number disagreeing with a field of even ones
+is not a plausible physical result. The generator now takes
+`phasing_lines`, and `tones` [11] generates both parities — reverting the
+fix fails it at 49.75% of a line while the odd cases still pass.
+
+**A second measurement error, found the same way.** The phasing run was
+grown on score alone, and the 10–90% spread is a robust statistic, so up
+to a tenth of the run could disagree wildly without the spread ever
+showing it. Printing the per-line positions: the last line of VMW's
+"60-line" interval sits **718 samples off the median**, and the generated
+pattern's first two picture rows sit 256 off. All were being counted as
+phasing and all moved the `t_end` that segmentation cuts the picture on.
+The ends are now trimmed back to lines that agree in position (ends only —
+a dropout in the middle is HF fading, not a boundary). The synthetic run
+went 32 → exactly 30 lines, most library runs snapped to exactly 30.0 s,
+and roundtrip [9]'s MAD against a known reference went 19.4 → 10.9.
+
+**Segmentation** crops the OUTPUT only: onset, period, anchor and both
+tracking passes still see the whole recording, so nothing session 5
+measured moves. Boundaries are the first opening sequence and the first
+stop tone that follows it — ordering that matters, because `jmh sample`
+holds a start at 6 s, its stop at 404 s, and the *next* transmission's
+start at 425 s. My first rule took the latest start tone and threw away
+that recording's entire chart, keeping 143 s of the following one.
+
+**Contradictions found.** Three, all mine, none caught by reasoning.
+(a) The half-line anchor above. (b) The untrimmed run boundary above.
+(c) The segmentation rule that took the latest start tone rather than the
+first. There is also one that is not mine: `test-chart-jmh-kiwisdr-60s.wav`
+has been documented as the PRIMARY "pure image content" honest-lock
+reference since session 3, and it is not pure image — its parent's phasing
+runs 72.5–102.5 s and the fixture is cut 80–140 s, so **45 of its 120
+lines are phasing** and the rest are blank top margin. Segmentation is
+what surfaced it. It is kept and re-documented as the phasing→image
+boundary case (which no other fixture covers), and a real pure-image
+reference was cut from 140–200 s: 117 of 120 locks, max_step 0.16 px.
+
+**Tests:** 13 suites green, zero warnings (was 11). New `tones` [11]
+(absolute anchor, both run parities, at 0 and −137 ppm), `roundtrip [9]`
+(row 0 of the output IS image line 0, against a known reference — a slip
+of a few rows blows the MAD bound), `fixture_phasing_anchor` on a new
+160 s VMW fixture (start tone + phasing + 245 image lines) asserting the
+PICTURE: content begins one dead sector into the line, 4.97%, and reads
+0.00% with the old anchor. `fixture` now points at the new pure-image
+fixture; `fixture_phasing_boundary` is the old one, re-bound to its true
+75 drawn lines; `fixture_lpe` re-bound to 51. Every new screamer was
+verified to FAIL with its fix reverted.
+
+**Registered gaps added:** multiple transmissions in one recording (the
+first is decoded, the rest dropped — one recording, one image); the
+phasing anchor is measured once and propagated on the fitted clock, so a
+mid-stream time-skip on a white-only station would shift the picture with
+nothing to re-acquire (no library recording exercises this; it matters for
+M4); and segmentation costs a full `detect_tones` pass (~9 s on the
+61-minute JSC4 against a 37 s decode), which is unbudgeted for live decode.
+
+**Next step:** M3 is done bar the manual override, which needs the GUI.
+Two things are worth doing before M4 opens, in this order. First, the
+`phasing_anchor_delta` is now printed on every decode but nothing asserts
+it — the porch is stable to 3 samples across repeat recordings of a
+transmitter, so a screamer that pins the *agreement between the two
+independent anchors* on a pulse station is cheap and would catch a whole
+class of regression neither existing test would. Second, decide whether a
+pulse station should ever prefer the phasing anchor: it is currently never
+used there, on the argument that a tracked reference beats a fixed one,
+and that argument is sound but untested — JSC2's delta is −234 samples
+against JSC3's −55 from the same transmitter, and nobody has looked at why.
+Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 6: the tones were always there; we had been listening in the wrong domain
 Agent: Claude Opus 5.
 

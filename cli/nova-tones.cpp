@@ -101,9 +101,10 @@ int main(int argc, char** argv) {
         }
         if (best.found)
             std::printf("  phasing    %7.2f - %7.2f s  (%d lines @ %d lpm)  "
-                        "line_start=%.0f smp  spread=%.1f  %s  score=%.2f\n",
+                        "line_start=%.0f smp  anchor=%.1f  spread=%.1f  %s  "
+                        "score=%.2f\n",
                         best.t_start, best.t_end, best.lines, best_lpm,
-                        best.line_start, best.spread,
+                        best.line_start, best.anchor, best.spread,
                         best.asymmetric ? "5/95" : "50/50", best.score);
         else
             std::printf("  phasing    none\n");

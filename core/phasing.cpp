@@ -98,24 +98,85 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         if (score[i] < opt.min_score) { i++; continue; }
         size_t j = i;
         while (j + 1 < n_lines && score[j + 1] >= opt.min_score) j++;
-        const size_t len = j - i + 1;
+        // Where the next candidate starts, fixed before the trim below can
+        // move `j` — otherwise the trimmed-off tail is rescanned as a run
+        // of its own.
+        const size_t next = j + 1;
 
         std::vector<double> p, sc;
-        int n_asym = 0;
         for (size_t l = i; l <= j; l++) {
             p.push_back(pos[l]);
             sc.push_back(score[l]);
-            n_asym += asym[l];
         }
         unwrap_about(p, median_of(p), period);
+
+        // Trim the ENDS back to lines that agree on where the white is.
+        // The run was grown on score alone, and score alone lets a dark
+        // picture line adjacent to the interval join it: the 10-90% spread
+        // is a robust statistic, so up to a tenth of the run can disagree
+        // wildly and the spread never shows it. Measured (session 7): the
+        // last line of VMW 2230Z's "60-line" interval sits 718 samples off
+        // the median, and the generated pattern's first two picture rows
+        // sit 256 off — both were being counted as phasing, and both moved
+        // the t_end that segmentation cuts the picture on.
+        //
+        // Ends only. A dropout in the MIDDLE is HF fading, not a boundary,
+        // and the median is what makes that harmless.
+        const double tol = opt.max_spread_frac * period;
+        {
+            const double m0 = median_of(p);
+            size_t lo = 0, hi = p.size();
+            while (lo < hi && std::fabs(p[lo] - m0) > tol) lo++;
+            while (hi > lo && std::fabs(p[hi - 1] - m0) > tol) hi--;
+            if (lo > 0 || hi < p.size()) {
+                p = std::vector<double>(p.begin() + lo, p.begin() + hi);
+                sc = std::vector<double>(sc.begin() + lo, sc.begin() + hi);
+                j = i + hi - 1;
+                i = i + lo;
+            }
+        }
+        if (p.empty()) { i = next; continue; }
+        const size_t len = p.size();
+        int n_asym = 0;
+        for (size_t l = i; l <= j; l++) n_asym += asym[l];
         const double med = median_of(p);
         const double sp = spread_10_90(p);
-        if (dbg)
+
+        // Absolute anchor at the middle of the run. Each line's white edge
+        // sits at l*plen + pos[l]; successive edges are one FRACTIONAL
+        // period apart, so referring every line back to the middle one and
+        // taking the median removes the integer-grid slip instead of
+        // averaging over it. Without this the anchor carries up to
+        // (period - plen) * lines/2 of error — 20 samples on a 60-line
+        // interval at a typical -85 ppm clock, growing with run length.
+        // An INTEGER line: the reference has to be a line that exists.
+        // (i+j)/2 as a real number is a half-line whenever the run has an
+        // even number of lines — which the 30 s phasing interval usually
+        // does — and every such anchor came out exactly half a period off.
+        // Odd-length runs looked perfect throughout, which is precisely why
+        // this needed the picture to catch it and not the numbers.
+        const double l_mid = static_cast<double>(i + (j - i) / 2);
+        std::vector<double> abs_est;
+        abs_est.reserve(len);
+        for (size_t k = 0; k < len; k++) {
+            const double l = static_cast<double>(i + k);
+            abs_est.push_back(l * plen + p[k] - (l - l_mid) * period);
+        }
+        unwrap_about(abs_est, median_of(abs_est), period);
+        const double anchor = median_of(abs_est);
+        if (dbg) {
             std::fprintf(stderr,
                          "dbg: phasing cand %zu lines @line %zu pos=%.1f "
                          "spread=%.1f (limit %.1f) score=%.3f\n",
                          len, i, med, sp, opt.max_spread_frac * period,
                          median_of(sc));
+            for (size_t k = 0; k < p.size() && std::getenv("NOVA_DEBUG_FULL");
+                 k++)
+                if (k < 3 || k + 3 >= p.size())
+                    std::fprintf(stderr,
+                                 "dbg:   line %zu pos=%.1f (%+.1f) score=%.3f\n",
+                                 i + k, p[k], p[k] - med, sc[k]);
+        }
 
         // The spread test is what stops a stretch of dark picture lines
         // from passing: they can each score well, but they do not agree on
@@ -129,11 +190,12 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
             res.t_end = static_cast<double>((j + 1) * plen) / fs;
             res.lines = static_cast<int>(len);
             res.line_start = std::fmod(med + period, period);
+            res.anchor = anchor;
             res.spread = sp;
             res.asymmetric = n_asym * 2 >= static_cast<int>(len);
             res.score = median_of(sc);
         }
-        i = j + 1;
+        i = next;
     }
     return res;
 }

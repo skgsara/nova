@@ -27,6 +27,16 @@ struct DecodeOptions {
     bool autolock = true;        // per-line dead-sector relock
     double search_frac = 0.03;   // sync search window, fraction of line
     int max_lines = 0;           // 0 = all available
+    // Take the line-start phase from the phasing interval when the station
+    // sends one and the image gives no per-line sync [WMO §5.2.3.4]. Off is
+    // the pre-session-7 behaviour, kept so the two can be compared on the
+    // same recording rather than argued about.
+    bool use_phasing = true;
+    // Draw only the picture: start tone and phasing before it, stop tone
+    // after it, are control signals, not image [WMO §5.2.3, §5.2.5]. Off
+    // draws every line from onset to EOF, which is what Nova did before
+    // session 7.
+    bool segment = true;
 };
 
 // Which of the two dead-sector styles WMO §5.1.3.3 permits the station
@@ -53,6 +63,27 @@ struct DecodeResult {
     // a white-only dead sector that is not reliably white gives a per-line
     // template nothing but picture content to match.
     bool per_line_sync = true;
+
+    // --- phasing [WMO §5.2.3] ---------------------------------------------
+    bool phasing_found = false;
+    double phasing_t_start = 0.0, phasing_t_end = 0.0;
+    // Where the phasing anchor sits relative to the anchor the image lines
+    // gave, in samples, wrapped to ±half a line. Reported ALWAYS, even when
+    // the phasing anchor is not the one used, because it is the only
+    // independent check on a phase that otherwise nothing corroborates:
+    // two detectors sharing no code either agree or they do not.
+    double phasing_anchor_delta = 0.0;
+    // True when the drawn picture is phased from the phasing interval
+    // rather than from the image lines.
+    bool anchor_from_phasing = false;
+
+    // --- segmentation [WMO §5.2.3 transmission sequence] -------------------
+    // The picture actually drawn, in seconds into the recording. When no
+    // control signal bounds an end, that end is the recording's.
+    bool segmented = false;
+    double image_t_start = 0.0, image_t_end = 0.0;
+    int lines_dropped_head = 0;  // start tone + phasing
+    int lines_dropped_tail = 0;  // stop tone and whatever follows it
 };
 
 DecodeResult decode_fax(const std::vector<float>& video, int fs,
