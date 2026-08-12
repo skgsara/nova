@@ -14,13 +14,13 @@ information.
 
 | Clause | Requirement (paraphrase) | Software translation | Test | Status |
 |---|---|---|---|---|
-| §4.2.2 | Accept AF input −10…+10 dBm, shifts ±150 and/or ±400 Hz about 1900 Hz | Wide usable input-level range (AGC/normalization); both deviation modes supported | synthetic: decode at min/max level, both deviations | pending |
-| §4.2.3 | IOC 576 and 288, automatic or manual | IOC auto from 300/675 Hz tone + manual override | synthetic both IOCs; fixture if found | pending |
-| §4.2.4 | Scan speeds 60/90/120 spm, automatic and manual | lpm auto from phasing rate + manual override | synthetic 3 rates | pending |
-| §4.2.5 | Auto respond to 300/675 Hz start (via line-sync detection) and 450 Hz stop | tone detectors + state machine; hysteresis; false-start rejection | synthetic + noisy fixture; no false start on text-heavy image | pending |
-| §4.2.6 | Sync accuracy ±2×10⁻⁶, stability ±2×10⁻⁵; phasing automatic with manual adjustment | clock-rate estimate from phasing + per-line dead-sector relock; manual phase nudge in GUI | long fixture decodes straight; injected clock error corrected | pending |
-| §4.2.7 | Pitch of scanning trace within ±25% | line rate held by design (resampled) | trivially met; assertion in line assembly | pending |
-| §5.4.2 | Recorder produces chart identical to transmitted for all IOC/speed combos | decode synthetic full matrix {288,576}×{60,90,120} | generator→decode round-trip, all 6 combos | pending |
+| §4.2.2 | Accept AF input −10…+10 dBm, shifts ±150 and/or ±400 Hz about 1900 Hz | Wide usable input-level range (AGC/normalization); both deviation modes supported | synthetic: both deviations decode (roundtrip [6]); level-range test pending | partial |
+| §4.2.3 | IOC 576 and 288, automatic or manual | IOC auto from 300/675 Hz tone + manual override | synthetic decode both IOCs (roundtrip [4]); auto-from-tone pending (M3) | partial |
+| §4.2.4 | Scan speeds 60/90/120 spm, automatic and manual | lpm auto from phasing rate + manual override | synthetic 3 rates, auto-detected (roundtrip [1][4][5]) | synthetic ✓ |
+| §4.2.5 | Auto respond to 300/675 Hz start (via line-sync detection) and 450 Hz stop | tone detectors + state machine; hysteresis; false-start rejection | pending (M3) | pending |
+| §4.2.6 | Sync accuracy ±2×10⁻⁶, stability ±2×10⁻⁵; phasing automatic with manual adjustment | clock-rate from median line-period fit + per-line dead-sector template lock; manual phase nudge pending GUI | synthetic +100 ppm corrected (roundtrip [2]); real JMH fixture (~-100 ppm) straight | synthetic+fixture ✓, manual adj. pending |
+| §4.2.7 | Pitch of scanning trace within ±25% | line rate held by design (resampled) | trivially met; assertion in line assembly | met |
+| §5.4.2 | Recorder produces chart identical to transmitted for all IOC/speed combos | decode synthetic full matrix {288,576}×{60,90,120} | 576/120, 288/60, 576/90 covered; full matrix pending | partial |
 
 Notes:
 - §4.2.4 lists 60/90/120 only — this is why 240 lpm is out of scope.

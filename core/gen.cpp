@@ -1,0 +1,116 @@
+// gen.cpp
+#include "gen.hpp"
+#include "resample.hpp"
+#include <cmath>
+#include <random>
+#include <stdexcept>
+
+namespace nova {
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}
+
+Image gen_test_pattern(int width, int height) {
+    Image img;
+    img.width = width;
+    img.height = height;
+    img.px.resize(static_cast<size_t>(width) * height, 200);
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            uint8_t v = 200;
+            // vertical straightness reference bar
+            if (x >= width / 6 && x < width / 6 + width / 36) v = 0;
+            // horizontal line-count reference bars
+            if (y % 50 < 2) v = 0;
+            // gradient strip on the right
+            if (x >= 2 * width / 3)
+                v = static_cast<uint8_t>(255.0 * (x - 2 * width / 3) /
+                                         (width / 3));
+            img.px[static_cast<size_t>(y) * width + x] = v;
+        }
+    }
+    return img;
+}
+
+std::vector<float> gen_fax_signal(const Image& content, int image_lines,
+                                  const GenOptions& opt) {
+    if (content.width <= 0 || content.height <= 0)
+        throw std::invalid_argument("gen_fax_signal: empty content");
+    const double fs = opt.fs;
+    const double period = fs * 60.0 / opt.lpm;  // samples per line
+    const int plen = static_cast<int>(period);
+    const double dead = 0.045 * period;         // [WMO §5.1.3.3]
+
+    // Build the video waveform v(t) in [0,1] (0=black, 1=white).
+    std::vector<float> vid;
+    auto push_samples = [&](int n, float v) {
+        vid.insert(vid.end(), static_cast<size_t>(n), v);
+    };
+    // alternating black/white tone at freq f0 for `seconds`
+    auto push_tone = [&](double f0, double seconds) {
+        const long total = static_cast<long>(seconds * fs);
+        const long half = static_cast<long>(fs / (2.0 * f0));
+        for (long i = 0; i < total; i++)
+            vid.push_back(((i / half) & 1) ? 1.0f : 0.0f);
+    };
+
+    if (opt.start_tone)
+        push_tone(opt.ioc == 288 ? 675.0 : 300.0, 5.0);  // [WMO §5.2.2]
+
+    const int phasing_lines = opt.phasing ? 30 : 0;
+    const int total_lines = phasing_lines + image_lines;
+    for (int l = 0; l < total_lines; l++) {
+        std::vector<float> line(plen);
+        if (l < phasing_lines) {
+            // asymmetric phasing: 5% white / 95% black; leading edge of
+            // white at dead-sector entry [WMO §5.2.3.2, §5.2.3.4]
+            for (int i = 0; i < plen; i++)
+                line[i] = (i < dead) ? 1.0f : 0.0f;
+        } else {
+            // dead sector: sync pulse (black) in first half, then white
+            for (int i = 0; i < plen; i++)
+                line[i] = (i < dead / 2) ? 0.0f : 1.0f;
+            // picture sector
+            const int row = (l - phasing_lines) % content.height;
+            for (int i = static_cast<int>(dead); i < plen; i++) {
+                const int x = static_cast<int>(
+                    static_cast<double>(i - dead) / (plen - dead) *
+                    content.width);
+                line[i] = content.px[static_cast<size_t>(row) *
+                                         content.width +
+                                     std::min(x, content.width - 1)] /
+                          255.0f;
+            }
+        }
+        vid.insert(vid.end(), line.begin(), line.end());
+    }
+
+    if (opt.stop_tone) {
+        push_tone(450.0, 5.0);   // [WMO §5.2.5]
+        push_samples(static_cast<int>(10.0 * fs), 0.0f);
+    }
+
+    // FM modulate: f = 1900 + dev * (2v - 1)  [WMO §5.3.1.2]
+    std::vector<float> out(vid.size());
+    double ph = 0.0;
+    for (size_t i = 0; i < vid.size(); i++) {
+        const double f = 1900.0 + opt.deviation * (2.0 * vid[i] - 1.0);
+        ph += 2.0 * kPi * f / fs;
+        if (ph > 1e9) ph = std::fmod(ph, 2.0 * kPi);
+        out[i] = static_cast<float>(opt.amplitude * std::sin(ph));
+    }
+
+    if (opt.noise > 0.0) {
+        std::mt19937 rng(42);
+        std::normal_distribution<double> g(0.0, opt.noise);
+        for (auto& s : out) s += static_cast<float>(g(rng));
+    }
+
+    if (opt.ppm != 0.0) {
+        const double r = 1.0 + opt.ppm * 1e-6;
+        return resample_ratio(out, r);
+    }
+    return out;
+}
+
+}  // namespace nova

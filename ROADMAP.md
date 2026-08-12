@@ -3,16 +3,16 @@
 Milestone map. Done vs pending. Screamer tests owed by the risk
 register are milestone entries, not intentions (SOP P1.5).
 
-## M0 — headless core decodes one real recording  [pending]
+## M0 — headless core decodes one real recording  [DONE 2026-08-12]
 - Dependency-free DSP core: resample-to-internal-rate, FM demod
-  (quadrature + normalized discriminator, ACFax lineage), line
-  assembly.
-- First fixture: excerpt of `test chart.m4a` (known content) → image
-  a human can judge.
-- Harness: internal signal generator producing on-spec WMO §5 signals
-  (start/phasing/image/stop) with injectable clock error and noise.
-  This is a test tool, not a product feature.
-- Screamers: sync-lock rate on fixture; generator→decode round-trip.
+  (quadrature + phase-difference discriminator), sync, line assembly.
+- First fixture: `test chart.m4a` (JMH Tokyo 13988.5 kHz) — decodes
+  straight and readable, incl. the portrait, unattended.
+- Harness: `nova-gen` signal generator (start/phasing/image/stop,
+  injectable ppm and noise). Round-trip test suite: 6 groups green.
+- Screamers live: `ctest` = roundtrip (synthetic matrix) + fixture
+  (real JMH excerpt, measured bounds).
+- Key bring-up findings in SESSION-LOG 2026-08-12 session 2.
 
 ## M1 — mode generality  [pending]
 - IOC 576/288, 60/90/120 lpm from one mode table (no hardcoded

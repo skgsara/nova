@@ -7,7 +7,54 @@ anything as our develop history").
 
 ---
 
-## 2026-08-12 — Session 1 addendum: first commit
+## 2026-08-12 — Session 2: M0 DONE — real JMH test chart decodes
+Agent: Kimi Code CLI.
+
+**Done:**
+- core/ written: wav (PCM in/out), resample (windowed-sinc + ratio
+  form), demod (quadrature mix @1900 + 63-tap FIR + atan2
+  discriminator — amplitude-normalized by construction), fax (sync +
+  assembly), gen (harness signal generator), image (PGM).
+- CLIs: nova-decode (wav -> pgm + report), nova-gen. CMake, -Wall
+  -Wextra clean. ctest: roundtrip (6 synthetic groups) + fixture —
+  all pass.
+- Real fixture decoded: `test chart.m4a` = JMH Tokyo (3622.5/7795/
+  13988.5 kHz header legible, WMO test chart + portrait readable).
+  Straight, unattended decode. Clock measured -99 ppm (cluster of
+  windowed autocorrs agrees; earlier whole-file estimate of -24 ppm
+  was biased by tone regions).
+
+**Failure modes found this session (the reason tests exist):**
+1. Least-squares period fit bends ~+66 ppm when phasing and image
+   lines are fitted together — the phasing wedge anchors the sync
+   template ~half a dead sector (2.25% line = 90 samples @8k) earlier
+   than the image sync pulse. Fixed with MEDIAN-slope fit over
+   near-consecutive line pairs (regime-pure) + local-median residual
+   tracking across the boundary.
+2. Sequential tracker window (±1.5%) was smaller than that same 2.25%
+   regime offset -> tracker fell off the grid at the phasing->image
+   boundary and coasted to EOF. Window now ±3% with a comment saying
+   why it may not shrink.
+3. Test-metric bug: horizontal reference bars made "find the black
+   bar edge" return junk on 5% of rows, inflating stdev to 28 px on a
+   visually perfect decode. Metric now skips mostly-black rows.
+4. "Strongest edge" sync locking abandoned before it shipped: content
+   edges (white gradient -> black pulse) tie with sync edges. The
+   black->white sync TEMPLATE is content-independent; use that.
+
+**Discovered in the fixture:** a constant ~+523 px (144 ms) faint
+duplicate of all content = long-path ionospheric echo in the
+recording itself (stereo channels verified identical; autocorrelation
+of the decode confirms a 144 ms/12% copy). Not a decoder bug. This
+fixture now also covers "signal with LPE ghost".
+
+**Contradictions found:** none in spec; one in my own earlier
+analysis (whole-file clock estimate), corrected above in writing.
+
+**Next step:** M1 — mode generality on real signals: batch-analyze the
+whole recording library (rates/IOC per station from phasing tones),
+identify which fixtures cover 60/90 lpm and IOC 288; decode one full
+long recording end-to-end (e.g. JSC1, 27 min) and inspect.
 - Scaffold committed as `20a9a64` on `main`; SESSION-LOG.md un-ignored
   and tracked per Sara's call. Regular commit standards from here on.
 - Resolved: commit author is "skgsara <skgsara@riseup.net>", set
