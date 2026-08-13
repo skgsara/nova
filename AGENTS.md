@@ -141,10 +141,35 @@ more likely right than one that agrees only with its own reasoning.
   (−1.65% to −2.86% of a line; two recordings of one transmitter agree to
   3 samples of 4000). On white-only stations the image anchor is the one
   that is wrong. Verified against decoded pictures, not just the numbers.
-- GYA 2300Z phasing: an 18-line candidate at 15.5–24.5 s scoring 0.77
-  passed the looser first-pass thresholds and is rejected by the final
-  ones. Deeply faded; whether it is a real partial phasing interval or
-  dark content is not established either way.
+- ~~GYA 2300Z phasing~~ — session 10: settled, and the gap described it
+  wrong. It is not an 18-line candidate at 15.5–24.5 s; it is a REAL
+  40-line interval at **4.5–24.5 s**, the same interval GYA 2324Z puts its
+  clean phasing in. The "18 lines" was an artifact of a detector that grew
+  runs from consecutive qualifying lines chopping a faded interval into
+  fragments. GYA is white-only, so this is the only place its line phase
+  exists; the chart now draws with its title box at the left margin,
+  matching GYA 2324Z, where the image anchor put it half a line out.
+  **The lesson for the next agent: a threshold measured on strong signals
+  describes strong signals.** `min_score` was calibrated in session 6 on
+  true phasing at 0.88–0.97 against dark content at 0.48–0.62, and the
+  comment in `phasing.hpp` said it "sits in that gap". GYA 2300Z's real
+  phasing lines score 0.34–0.88 — through the gap and out the other side —
+  because fading takes the contrast and leaves the edge. No threshold on
+  that score could have worked; the fix was to stop asking it to decide
+  membership at all.
+- The phasing timebase witness cannot test a FADED interval, and says so
+  rather than guessing (session 10). GYA 2300Z's per-line edge moves ~15
+  samples line to line against a 10-sample threshold, so the honest verdict
+  is `kUnknown` with the reason named. Both library `kUnknown` recordings
+  therefore remain `kUnknown` — VMW 2215Z because the recording genuinely
+  contains no phasing interval (three isolated single lines, measured), GYA
+  2300Z because its interval is too noisy to resolve a step. What changed
+  is that neither is now unexplained, and GYA gained its anchor.
+- `--expect-phasing-anchor`'s picture assertion (content begins 2–8% into
+  the line, from a column that is white on ≥90% of rows) does not apply to
+  a deeply faded recording: GYA 2300Z's whitest column reaches 0.90 only at
+  column 429. The anchor there was verified by eye against GYA 2324Z
+  instead. A faded-signal form of that automated check does not exist.
 - ±150 Hz LF mode: synthetic-only testing, and it will stay that way.
   Session 9, Sara: she knows of no operating station still carrying it.
   That is stronger than the old wording ("no real-world source known",
@@ -164,6 +189,18 @@ more likely right than one that agrees only with its own reasoning.
   `jmh sample` loses the 143 s of the next chart it happens to catch. One
   recording → one image is the current model. Splitting a recording into
   several images is unbuilt and unregistered as a milestone.
+  **Session 10: the phasing detector did not share that rule and nobody
+  had noticed**, because the right answer was winning by luck. It took the
+  LONGEST qualifying run; `jmh sample`'s two transmissions have 59 and 60
+  phasing lines, and the day the second one grew by a line the head crop
+  fell from 62 lines to 3 and 59 phasing lines were drawn into the chart.
+  **The lesson for the next agent: two recordings can want opposite answers
+  from the same rule.** "Take the first", the obvious fix and the rule
+  segmentation already uses, is wrong for FAXSignal — it holds two OPENINGS
+  before ONE picture, and taking the first drew 68 lines of the second into
+  the chart. The control tones decide it now: the LAST opening inside a
+  known transmission, the FIRST when no bounds are known. The tone scan
+  moved to §2b and is shared with segmentation instead of run twice.
 - The phasing anchor is measured ONCE, at the middle of the interval, and
   then propagated on the fitted clock for the whole recording. That is a
   fixed reference, not a tracked one: on a white-only station a mid-stream

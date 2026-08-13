@@ -122,6 +122,9 @@ int main(int argc, char** argv) {
     bool want_delta = false;
     double delta_lo = 0.0, delta_hi = 0.0;
     const char* want_timebase = nullptr;
+    int want_phasing_lines = 0;
+    bool want_window = false;
+    double win_t0 = 0.0, win_t1 = 0.0;
     for (int i = 8; i < argc; i++) {
         if (!std::strcmp(argv[i], "--expect-white-only"))
             want_white_only = true;
@@ -136,12 +139,21 @@ int main(int argc, char** argv) {
                    i + 1 < argc) {
             want_timebase = argv[++i];
             if (std::strcmp(want_timebase, "linear") &&
-                std::strcmp(want_timebase, "steps")) {
+                std::strcmp(want_timebase, "steps") &&
+                std::strcmp(want_timebase, "noisy")) {
                 std::fprintf(stderr,
                              "nova-test-fixture: --expect-timebase takes "
-                             "linear|steps\n");
+                             "linear|steps|noisy\n");
                 return 2;
             }
+        } else if (!std::strcmp(argv[i], "--expect-phasing-lines") &&
+                   i + 1 < argc) {
+            want_phasing_lines = std::atoi(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--expect-phasing-window") &&
+                   i + 2 < argc) {
+            want_window = true;
+            win_t0 = std::atof(argv[++i]);
+            win_t1 = std::atof(argv[++i]);
         } else {
             std::fprintf(stderr, "nova-test-fixture: bad arg %s\n", argv[i]);
             return 2;
@@ -203,10 +215,62 @@ int main(int argc, char** argv) {
                         r.timebase_step_lines, r.timebase_step_rate,
                         r.phasing_nonlinearity);
             // A verdict of unknown fails either expectation: "not measured"
-            // must never pass for "measured and fine".
-            check(steps == !std::strcmp(want_timebase, "steps") &&
-                      r.timebase != nova::Timebase::kUnknown,
-                  "timebase verdict as expected");
+            // must never pass for "measured and fine". Except where being
+            // unmeasurable is the claim under test — session 10 added the
+            // case where a phasing interval IS found and is too noisy to
+            // resolve a step, which is a third answer and not a failure to
+            // produce one.
+            if (!std::strcmp(want_timebase, "noisy")) {
+                std::printf("  phasing witness: nonlin=%.1f noise=%.1f "
+                            "steps=%d\n",
+                            r.phasing_nonlinearity, r.phasing_roughness,
+                            r.phasing_steps);
+                check(r.timebase == nova::Timebase::kUnknown &&
+                          r.phasing_witness == nova::PhasingWitness::kNoisy,
+                      "timebase unmeasurable because the edge is too noisy");
+            } else {
+                check(steps == !std::strcmp(want_timebase, "steps") &&
+                          r.timebase != nova::Timebase::kUnknown,
+                      "timebase verdict as expected");
+            }
+        }
+
+        if (want_window) {
+            // WHICH phasing interval, on a recording that carries two. The
+            // opening this decoder is entitled to is the FIRST one, and the
+            // interval itself has to be phasing rather than a control tone
+            // that happens to fit the same template — a 300 Hz start tone
+            // is 150 white runs per line at 120 lpm and fits the 5% wedge
+            // with a position spread of exactly zero, which is better than
+            // any real phasing interval in the library manages.
+            std::printf("  phasing %.2f-%.2f s  %d lines  score %.3f\n",
+                        r.phasing_t_start, r.phasing_t_end, r.phasing_lines,
+                        r.phasing_score);
+            check(r.phasing_found, "phasing interval found");
+            check(std::fabs(r.phasing_t_start - win_t0) < 1.0 &&
+                      std::fabs(r.phasing_t_end - win_t1) < 1.0,
+                  "the FIRST opening's phasing, and no tone lines in it");
+        }
+
+        if (want_phasing_lines) {
+            // A FADED phasing interval, on the one station in the library
+            // that has no other source of line phase. Growing runs from
+            // consecutive above-threshold lines found nothing here at all
+            // (session 10): the interval is real, 40 lines of it, and only
+            // 23 of those lines clear the per-line score. The anchor it
+            // yields was checked against the drawn picture and against GYA
+            // 2324Z, the same station 24 minutes later, whose phasing is
+            // unambiguous — the chart's title box lands at the left margin
+            // on both, and half a line out with the image anchor.
+            std::printf("  phasing %.2f-%.2f s  %d lines  score %.3f  "
+                        "from_phasing=%d\n",
+                        r.phasing_t_start, r.phasing_t_end, r.phasing_lines,
+                        r.phasing_score, r.anchor_from_phasing ? 1 : 0);
+            check(r.phasing_found, "faded phasing interval found (screamer)");
+            check(r.phasing_lines >= want_phasing_lines,
+                  "enough of its faded lines are recovered");
+            check(r.anchor_from_phasing,
+                  "white-only station phased from it [WMO §5.2.3.4]");
         }
 
         if (want_phasing_anchor) {

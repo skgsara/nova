@@ -28,6 +28,16 @@ Notes:
 - §4.2.4 lists 60/90/120 only — this is why 240 lpm is out of scope.
 - §4.2.2's "±150 Hz and/or ±400 Hz" is why LF deviation is a
   first-class mode, not an afterthought.
+- **Session 10, §4.2.6 "phasing automatic":** automatic phasing now also
+  covers a FADED interval, which is the case where it matters most —
+  a station sending a plain white dead sector has no other source of line
+  phase, and the one such recording in the library was reporting no
+  phasing at all. The interval is identified by where the white edge is
+  rather than by each line's contrast, because fading destroys the second
+  and not the first (real phasing lines at 0.34–0.88, below the 0.48–0.62
+  that dark picture content scores). Count of library recordings with a
+  detected phasing interval: 15 → **16 of 20**.
+  [`fixture_faded_phasing`, `tones [12]`]
 - WMO §5.2.3.2's two phasing waveforms (50/50 and 5/95) are covered
   under the §4.2.6 phasing row. Both are now detected and distinguished
   (`tones` [7][8]); the library's XSG recordings are the real 50/50 case.

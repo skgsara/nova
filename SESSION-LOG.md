@@ -7,6 +7,200 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 10: the rejected candidate was real, and finding it broke three things that were passing by luck
+
+Agent: Claude Opus 5.
+
+**Task as accepted:** session 9's next step, first candidate — decide the
+registered GYA 2300Z phasing candidate either way. Sara chose it over M4.
+Prior art checked first, as the reuse rule requires (docs/00, session 10
+section).
+
+**The candidate is real, and the registered gap described it wrongly.** It
+is not "an 18-line candidate at 15.5–24.5 s scoring 0.77". It is a **real
+40-line phasing interval at 4.5–24.5 s** — the identical interval that GYA
+2324Z, the same station 24 minutes later, puts its clean 40-line phasing
+in. Lines 9–48 sit at position 872–968 of a 4000-sample line with a sharp
+onset (0.16 → 0.83 in one line) and a sharp end; lines 0–8 and 49+ scatter
+across the whole line. The "18 lines" was an artifact of the detector, not
+a property of the signal: it grew runs from CONSECUTIVE qualifying lines,
+and a faded interval breaks into fragments of one to six.
+
+**Score cannot be the membership test, at any threshold.** `phasing.hpp`
+said `min_score` "sits in that gap" between true phasing at 0.88–0.97 and
+dark content at 0.48–0.62 (session 6). GYA 2300Z's REAL phasing lines score
+**0.34–0.88** — through that gap and out the far side — because fading
+takes the contrast the score measures and leaves the edge exactly where it
+was. Runs are now SEEDED by score and CARRIED by position agreement, which
+fading does not touch. Prior art has the shape of this and not the
+substance: fldigi's `decode_phasing` abandons phasing only after 5
+consecutive failed lines, KiwiSDR's start/stop counter leaks rather than
+resets ("can deal with noisy input if we had a miss"), and JWX does not
+judge lines at all — it folds 20 s of them and finds the edge on the sum,
+which would work here and is recorded as a live option for M4. Carrying on
+POSITION is new and is written down as such.
+
+**Then the failures started, and all three were things passing by luck.**
+
+(a) *The timebase witness convicted GYA immediately.* Having recovered the
+interval, the decoder reported `NOT LINEAR: 46.2 smp off straight` — worse
+than JSC2's 25.5, on a recording with no steps in it. Session 9 calibrated
+that statistic only on intervals whose per-line edge is good to about a
+sample; GYA's is good to ~14. The image half of the same test has always
+local-median smoothed for exactly this reason and the phasing half never
+did. Smoothing alone does not save it (GYA 14.6 against JSC4's 18.4 is not
+a gap to put a threshold in). What separates them is the residual's SHAPE:
+an inserted sample stays inserted, so its residual is a staircase whose
+neighbouring lines agree; noise redraws every line.
+
+(b) *A single skip read worse than any stepping recording.* JMH KiwiSDR
+Himawari's phasing interval straddles one ~95-sample jump with textbook
+linear edge either side — two segments at position ~1055 and ~1150 — and
+reads **96.1** off straight. Its 1922 tracked lines say 1.6 steps per 1000,
+i.e. linear, and a 60-line phasing interval was over-ruling them. Session 9
+had already settled that one skip is not a rate, in the image domain, which
+COUNTS steps; this domain measured a spread and could not tell one jump
+from fifty. The old code missed it only because the run happened to start
+after the jump.
+
+(c) *`jmh sample` lost its head crop, and the obvious fix broke FAXSignal.*
+`jmh sample` carries two whole transmissions (start tones at 6.25 s and
+424.88 s), each with a real phasing interval, of 59 and 60 lines. The
+detector took the LONGEST qualifying run; the day the second grew by one
+line the head crop fell from 62 lines to 3 and 59 phasing lines were drawn
+into the chart. Segmentation three sections below in the same file already
+says "the first one after the previous boundary, never the last or the
+largest" and names `jmh sample` as the reason, so I made the phasing
+detector take the first — and the final library sweep caught what that did
+to FAXSignal, which I had flagged as a risk mid-session and then lost track
+of. FAXSignal holds two OPENINGS before ONE picture (start tone 0–7 s,
+phasing 7–22 s, a second 300 Hz burst 22–30.5 s, phasing again 32–64.5 s):
+taking the first drew 68 lines of the second opening into the chart and
+took `max_step` from 14.83 px to 54.23. Neither rule is right alone. The
+control tones decide it: inside a known transmission the LAST opening wins,
+because the picture begins after it; with no bounds known the FIRST wins,
+because a later run may belong to a transmission this decode is not
+drawing. `jmh sample`'s second transmission is past its first stop tone and
+FAXSignal's second opening is not, which is exactly the distinction. The
+tone scan moved up to §2b and is now shared with segmentation rather than
+run twice. **The lesson for the next agent: two recordings can want
+opposite answers from the same rule, and the one you did not re-measure is
+the one that changed.** FAXSignal is back to its baseline decode exactly.
+
+**One threshold now does three jobs, so there is one number and not three.**
+`kNonlinSec` is the resolution the test claims (10 samples). An interval
+whose own roughness exceeds it cannot resolve it in either direction and
+abstains; below it the edge is straight; above it, conviction needs two
+counted persistent moves. Measured: roughness 0.1–1.8 on every clean and
+every stepping recording against **15.2** on GYA 2300Z; counted steps 16
+and 17 on JSC2/JSC3, **0** on Himawari's single jump. `PhasingWitness` is
+reported in words, so `kUnknown` names which witness is missing instead of
+implying none exists.
+
+**Two mechanisms I added were inert, and I removed them.** Both had been
+justified in a comment before being measured. A white-run count to reject
+control tones: I read FAXSignal's 30-line candidate "@line 14, spread 0.0,
+score 0.99" as a start tone, when line 14 is 7.00 s — exactly where the
+start tone ENDS and the phasing begins. It was always the real phasing.
+Disabling the filter changes nothing on any of the 20 recordings. A
+run-level median score floor, added to kill XSG ASPN's 26-line false run
+(score 0.24): once the run's lease is renewed by score rather than by
+agreement, that run no longer forms. Also inert across the library, also
+removed. **The lesson for the next agent: a mechanism that survives because
+no test fails when you disable it is not defensive, it is unmeasured.**
+
+**Contradictions found.** Six. (f) My own mid-session claim that "first
+qualifying" was the right selection rule, contradicted by FAXSignal in the
+final sweep — see (c). (a) `phasing.hpp`'s score-separation claim,
+above — true of strong signals, false of faded ones. (b) The registered
+gap's own description of the candidate (18 lines at 15.5–24.5 s; it is 40
+at 4.5–24.5). (c) docs/01's "15 of 20 recordings carry a detectable phasing
+interval" is now 16 of 20. (d) My own white-run diagnosis, corrected by
+measurement rather than by argument. (e) FAXSignal's phasing was being
+reported as 32.00–64.50 s when the start tone ends at 7.00 s and the
+phasing begins there — the "11 of 14 recordings where phasing begins where
+the start tone ends" was 11 of 14 partly because this one disagreed for a
+reason that was a bug.
+
+**VMW 2215Z is settled the other way, and permanently.** The other
+`kUnknown` recording has no phasing interval to find: three isolated single
+lines in the whole file, at positions 2657, 1638 and 0. The recording
+begins mid-transmission. That is a measured negative, not a gap.
+
+**Verified against the picture, which is where this was decided.** GYA is
+white-only, so the phasing anchor IS the rotation. Decoded both ways: with
+the phasing anchor the chart's title box sits at the left margin, exactly
+as it does on GYA 2324Z, whose phasing is unambiguous; with the image
+anchor it sits half a line across. The automated form of that check
+(`--expect-phasing-anchor`) does NOT apply here — it needs a column that is
+white on 90% of rows, and this recording's whitest column reaches 0.90 only
+at column 429 — so the verification is by eye plus the 2324Z corroboration,
+and that limitation is registered.
+
+**Tests: 20 suites green, zero warnings (was 17).** Three new fixtures, each
+cut from a real recording and each isolating one claim.
+`fixture_faded_phasing` (GYA 2300Z 0–120 s) pins both halves at once and
+they pull opposite ways: the faded interval must be FOUND, and having been
+found must NOT then be convicted. `fixture_phasing_one_skip` (JMH KiwiSDR
+Himawari 0–120 s, cut at 120 s so the image witness clears its 128-line
+floor and can be the one that answers). `fixture_phasing_two_openings`
+(FAXSignal 0–70 s) pins not-the-longest, corroborated by the tone
+detector, which shares no code: the start tone ends at 7.00 s and the
+phasing begins there. `roundtrip [10]` gains a synthetic one-skip case with
+ground truth — a single insertion inside the phasing interval, which reads
+steps=1 and so is the thing that actually pins the constant at 2, because
+the real Himawari case reads 0 (its jump falls across a gap in the run).
+`tones [13]` builds both shapes with ground truth — two openings where the
+second is deliberately LONGER — and pins all three branches: no window →
+first, window → last, and a run past the stop tone is not eligible at all.
+
+**Revert checks run; every surviving mechanism is pinned by at least one.**
+Gap bridging off → three fail. Noise gate off → `fixture_faded_phasing`
+fails. One-skip rule off → `roundtrip` fails. Window ignored → `tones`
+fails. Longest-wins → `fixture_phasing_two_openings` and `tones` fail. The
+two that failed to break anything are the two I deleted.
+
+**What did NOT happen: `kUnknown` did not get rarer.** That was the stated
+goal of session 9's first candidate and it is not met, for a reason worth
+having found. Both recordings still report `kUnknown` — VMW 2215Z because
+there is genuinely nothing to measure, GYA 2300Z because its interval is
+too noisy to resolve a step and saying otherwise would be a guess. What
+changed is that neither is unexplained now, and GYA 2300Z gained its
+anchor, which is the thing that actually affects its picture.
+
+**Registered gaps added / narrowed.** A faded interval that IS stepping is
+detectable by neither statistic (no library recording is both, so this is
+unexercised). The picture-based anchor check (`--expect-phasing-anchor`)
+has no faded-signal form.
+
+**The library-wide effect, measured against the pre-session baseline:
+5 recordings of 32 entries changed, and every change is intended.** GYA
+2300Z gains its interval and its anchor. NMC 2204Z 19 s → 32.5 s, XSG ASPN
+26.5 s → 31 s, JMH KiwiSDR Himawari 23.5 s → 30.5 s — all growing TOWARD
+the ~30 s of WMO §5.2.3, having previously been cut short at the first
+faded line. **Every anchor in the library moved by at most 0.2 samples**,
+which is the corroboration that matters: the runs got longer, not
+different, so the extra lines are more of the same edge and not something
+else being swept in. Everything else — FAXSignal, `jmh sample`, VMW 2230Z,
+GYA 2324Z, all six JSC — is byte-identical apart from the timebase wording.
+`fixture_anchor_delta_xsg`'s drawn-line band moved 138–148 → 128–140
+because nine more phasing lines are now correctly cropped rather than
+drawn; the anchor delta it exists to pin did not move (−107.2).
+
+**Next step:** M4 — the GUI plus live audio, which is where the manual
+override lives and where session 7's incremental-`detect_tones` cost comes
+due. Session 9's note for whoever takes it still stands: the timebase test
+is offline (it needs the drawn segment and the whole phasing interval), so
+a live decoder needs an incremental form and the prior art has nothing to
+offer. Add session 10's: the phasing run now grows forward across gaps and
+ends `max_gap` lines after its last strong line, which is incremental
+already, but the noise/steps verdict needs the finished run. If a smaller
+piece is wanted first, JWX's fold (docs/00, session 10) is the untaken idea
+that would decide a faded interval without any per-line vote at all. Tree
+is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 9: the symptom session 8 recommended was the wrong one, and the library has six bad recordings, not two
 
 Agent: Claude Opus 5.

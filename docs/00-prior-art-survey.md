@@ -201,6 +201,51 @@ runs on a live stream where an overrun inserts or drops samples silently —
 and none of them looks. Nova is offline today and looks anyway, which is
 the right way round for M4.
 
+### Session 10 — how does a mature decoder hold a phasing interval together when the signal fades?
+
+Checked, sources read rather than recalled: **fldigi**
+(`src/wefax/wefax.cxx`, `decode_phasing`), **KiwiSDR**
+(`extensions/FAX/FaxDecoder.cpp`), **weatherfax_pi**
+(`src/FaxDecoder.cpp`), **JWX** (`DecodeFax.java`, `s_sync`).
+
+The question is Nova's specific one: GYA 2300Z carries a real 40-line
+phasing interval in which only 23 lines clear a per-line contrast test,
+and no more than three of those are consecutive. Nova grew runs from
+CONSECUTIVE qualifying lines and therefore found ten fragments of one to
+six lines and reported no phasing at all.
+
+| | how a faded phasing line is handled |
+|---|---|
+| fldigi | The closest thing to an answer. `decode_phasing` counts qualifying lines and needs only **4** of them; a line that fails does not end the phase — `m_num_phase_lines` counts consecutive failures and it gives up only at **5**. So the run is explicitly allowed to be interrupted. Its per-line test is a Schmitt trigger (white at 200/255, black at 25/255) plus a duty-cycle check, not a contrast score. |
+| KiwiSDR | Never faces the question: its tone state machine hands the phasing stage a fixed 40-line window, the first 2 discarded, and the median over the rest absorbs any dropouts. Its per-line acceptance test does not exist because it does not need one. Also relevant: its START/STOP line counter is deliberately LEAKY (`typecount--` on a miss, with the comment "can deal with noisy input if we had a miss rather than reset here") — the same instinct applied to a different run. |
+| weatherfax_pi | As KiwiSDR minus the spread filter: a plain median over 38 lines of a fixed window. No per-line test at all. |
+| JWX | Does not judge lines individually in the first place. `s_sync` ACCUMULATES 20 s of lines into one array — clock-corrected per line, then summed — and finds the edge on the sum, with the comment "must accumulate to work with noisy signals and clock errors". A fold, not a vote. |
+
+**Two ideas taken, neither copied.** From fldigi, the shape of the rule: a
+phasing run survives lines that fail its test, and ends only after a
+measured number of them in a row. Nova's number is 8, measured here
+(GYA 2300Z's widest internal gap between qualifying lines is 6; the
+generated test pattern's phasing-like picture rows are 49 apart), and the
+counter is renewed by score alone rather than by any weaker evidence —
+without that, a white-only station's run never ends at all, because its
+image dead sector is white at the phasing position. From KiwiSDR's leaky
+`typecount`, the confirmation that this is the standard instinct for a
+noisy run and not a special case.
+
+What is NEW here and written down as such: **carrying the run on POSITION
+agreement** rather than on score. None of the four does this — three never
+need a membership rule and fldigi's is a fixed per-line test. It is forced
+by the measurement: a faded phasing line's contrast collapses while its
+edge does not move, so on GYA 2300Z real phasing scores 0.34-0.88 and
+reaches BELOW the 0.48-0.62 band that dark picture content scores. Score
+cannot separate them at any threshold; position can.
+
+JWX's fold is the one idea NOT taken, and worth recording as a live option
+for M4: it would work on exactly this signal and needs no per-line
+decision at all. It is rejected here only because Nova scans a whole
+recording blind and needs run BOUNDARIES, which a fold does not give.
+Nothing copied; the ledger below is unchanged.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

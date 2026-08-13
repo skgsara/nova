@@ -93,8 +93,14 @@ add_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
 add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75
   --expect-anchor-delta -125 -25)
+# Session 10: the drawn-line band moved 138-148 -> 128-140 because the
+# phasing interval this fixture opens with is now measured as 31.5 s rather
+# than 27 s, so nine more lines of it are cropped off the head instead of
+# being drawn as picture. 31.5 s is the answer that matches WMO's ~30 s;
+# the run was previously cut short at the first faded line. The anchor
+# delta, which is what this test is actually about, did not move (-107.2).
 add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
-  ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 138 148 -130 -60 0.85
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 128 140 -130 -60 0.85
   --expect-anchor-delta -160 -55)
 # Session 9: is the recording's timebase the straight line everything
 # upstream assumes? Two fixtures, chosen so that each isolates one half of
@@ -118,6 +124,49 @@ add_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
 add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
   --expect-timebase linear)
+# Session 10: GYA 2300Z's first 120 s, which carry a REAL 40-line phasing
+# interval at 4.5-24.5 s that the detector reported as "no phasing" for
+# nine sessions. It is deeply faded — only 23 of its 40 lines clear the
+# per-line score, and the longest consecutive run of those is 3 — so a
+# detector that grows runs from consecutive strong lines finds ten
+# fragments and nothing that reaches min_lines. This is the ONLY station in
+# the library whose line phase exists nowhere but here, so the fragments
+# cost it its anchor entirely.
+#
+# It pins the other half too, and the two halves pull opposite ways: having
+# recovered the interval, the timebase test must NOT then convict it. Its
+# per-line edge moves ~15 samples line to line, which is above the 10-sample
+# resolution the test claims, so the honest verdict is unmeasurable-because-
+# noisy. Read as a raw spread it scores 46.2 — worse than JSC2's 25.5 on a
+# recording that has no steps in it at all.
+# Session 10: WHICH phasing interval, on a recording that carries two.
+# FAXSignal's first 70 s run start tone 0-7 s, phasing 7-22 s, a SECOND
+# 300 Hz burst 22-30.5 s, then a second phasing 32-64.5 s. This cut holds
+# no stop tone, so no transmission window is known and the rule is "the
+# first" — the branch this fixture pins, against "the longest", which takes
+# the second interval (64 lines against 30). The windowed branch, where the
+# LAST opening before the picture is the one wanted and the full FAXSignal
+# recording therefore keeps its 32-64.5 s interval, is pinned with ground
+# truth in `tones [13]`.
+# 7.00-22.00 s is corroborated by the tone detector, which shares no code
+# with this: the start tone ends at 7.00 s.
+add_test(NAME fixture_phasing_two_openings COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
+  120 70 85 -40 40 0.85 --expect-phasing-window 7.0 22.0)
+# Session 10, the real one-skip case: JMH KiwiSDR Himawari's first 120 s.
+# Its phasing interval straddles a single ~95-sample jump, with textbook
+# linear edge either side, and reads 96.1 samples off straight — worse than
+# any of the six genuinely stepping JSC recordings. The 1922 tracked lines
+# of the full recording call it linear, and a phasing witness that convicts
+# on the SIZE of the residual rather than on counted persistent moves
+# over-rules them. Cut at 120 s so the image witness clears its 128-line
+# floor and can be the one that answers.
+add_test(NAME fixture_phasing_one_skip COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-phasing-jump-120s.wav
+  120 155 175 -130 -40 0.85 --expect-timebase linear)
+add_test(NAME fixture_faded_phasing COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav 120 185 200 -135 -95 0.0
+  --expect-white-only --expect-phasing-lines 30 --expect-timebase noisy)
 
 # M3 control-signal suite: start/stop tone and phasing detection.
 # [4], [5] and [9] are the false-start screamers — picture content with no

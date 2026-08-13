@@ -11,6 +11,26 @@
 namespace {
 constexpr int kInternalRate = 8000;
 
+// What the phasing witness had to say, in words. Each of these is a
+// DIFFERENT fact about the recording and they used to print as one.
+const char* phasing_witness_text(const nova::DecodeResult& r) {
+    switch (r.phasing_witness) {
+        case nova::PhasingWitness::kNone:
+            return "no phasing interval";
+        case nova::PhasingWitness::kTooShort:
+            return "phasing interval too short to fit";
+        case nova::PhasingWitness::kNoisy:
+            return "phasing edge too noisy to resolve a step";
+        case nova::PhasingWitness::kOneSkip:
+            return "phasing edge takes one jump, which is not a rate";
+        case nova::PhasingWitness::kStraight:
+            return "phasing edge straight";
+        case nova::PhasingWitness::kSteps:
+            return "phasing edge steps";
+    }
+    return "";
+}
+
 void usage() {
     std::fprintf(stderr,
                  "usage: nova-decode in.wav out.pgm [--lpm 60|90|120] "
@@ -78,8 +98,10 @@ int main(int argc, char** argv) {
                                 r.timebase_lines);
                 else
                     std::printf("  timebase NOT LINEAR: phasing edge %.1f "
-                                "smp off straight.\n",
-                                r.phasing_nonlinearity);
+                                "smp off straight in %d step(s), noise "
+                                "%.1f.\n",
+                                r.phasing_nonlinearity, r.phasing_steps,
+                                r.phasing_roughness);
                 std::printf("           The clock figure above is this "
                             "recording's clock PLUS its insertion rate, and "
                             "the anchor delta\n"
@@ -101,8 +123,9 @@ int main(int argc, char** argv) {
                 else
                     std::printf("no per-line sync to track");
                 if (r.phasing_found)
-                    std::printf("; phasing edge %.1f smp off straight)\n",
-                                r.phasing_nonlinearity);
+                    std::printf("; %s, %.1f smp off straight, noise %.1f)\n",
+                                phasing_witness_text(r),
+                                r.phasing_nonlinearity, r.phasing_roughness);
                 else
                     std::printf("; no phasing interval)\n");
                 break;
@@ -110,14 +133,16 @@ int main(int argc, char** argv) {
                 // Say WHICH witness is missing. "No per-line sync" and
                 // "the recording is too short to measure a rate over" are
                 // different facts, and a 60 s cut of a pulse station hits
-                // the second while looking like the first.
+                // the second while looking like the first. Since session 10
+                // a phasing interval can also be PRESENT and still unable to
+                // answer — too noisy to resolve the threshold, or bent by a
+                // single skip that is not a rate — and saying "no phasing
+                // interval" there would be a lie about a run that was found.
                 std::printf("  timebase not measurable (%s; %s)\n",
                             !r.per_line_sync
                                 ? "no per-line sync to track"
                                 : "too few drawn lines for a step rate",
-                            r.phasing_found
-                                ? "phasing interval too short to fit"
-                                : "no phasing interval");
+                            phasing_witness_text(r));
                 break;
         }
         if (r.segmented)

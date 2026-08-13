@@ -213,7 +213,20 @@ Pending:
     kUnknown: GYA 2300Z and VMW 2215Z are white-only (no tracked residual)
     with no phasing interval found (no edge to fit). A stepping timebase on
     such a recording would still be invisible — which is precisely the
-    dangerous combination, since nothing tracks there either. A short cut of
+    dangerous combination, since nothing tracks there either.
+    **Session 10 explains both and closes neither.** VMW 2215Z genuinely
+    contains no phasing interval — the recording starts mid-transmission,
+    and the whole file holds three isolated single lines at positions 2657,
+    1638 and 0. That is a measured negative, not a gap to close. GYA 2300Z
+    DOES contain one, 40 lines at 4.5–24.5 s, and it is now found and used
+    for the anchor; but its edge is too noisy (~15 samples line to line,
+    against a 10-sample threshold) to test for steps, so the timebase
+    verdict stays kUnknown with the reason named. The blind spot is
+    therefore smaller in the way that matters — GYA's picture is now phased
+    correctly — and unchanged in verdict count.
+    A faded interval that IS stepping remains undetectable by either
+    statistic. No library recording is both, so this is unexercised.
+    A short cut of
     a perfectly good pulse station reports kUnknown too: the rate needs 128
     drawn lines, and a 60 s fixture at 120 lpm has 120. That is a floor on
     what a rate can honestly be measured over, not a bug, but it means M4's

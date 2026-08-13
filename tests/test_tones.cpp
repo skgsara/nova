@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
 #include <vector>
 
 namespace {
@@ -306,6 +307,162 @@ int main() {
                       "anchor lies within the phasing interval");
             }
         }
+    }
+
+    std::printf("[12] phasing survives a FADED interval [WMO §5.2.3]\n");
+    {
+        // GYA 2300Z, measured session 10: a real 40-line phasing interval
+        // whose per-line scores run 0.34-0.88 — reaching BELOW the 0.48-0.62
+        // band that dark picture content scores — because fading cuts the
+        // contrast the score measures while leaving the edge where it was.
+        // Score alone therefore cannot decide membership on a faded signal.
+        // Growing runs from consecutive above-threshold lines chopped that
+        // interval into ten fragments of one to six lines and reported no
+        // phasing at all, on the one station in the library that has no
+        // other source of line phase.
+        //
+        // The fade is injected into the AUDIO and only over the phasing
+        // interval, so the picture, the tones and the clock are untouched
+        // and the single thing under test is whether the run survives.
+        nova::GenOptions g;
+        nova::Image content = nova::gen_test_pattern(1810, 60);
+        std::vector<float> sig = nova::gen_fax_signal(content, 60, g);
+        const size_t t0 = static_cast<size_t>(5.0 * kFs);  // 5 s start tone
+        const size_t t1 =
+            t0 + static_cast<size_t>(g.phasing_lines * 0.5 * kFs);
+        std::mt19937 rng(20260812u);
+        std::normal_distribution<float> noise(0.0f, 0.20f);
+        std::vector<float> faded = sig;
+        for (size_t i = t0; i < std::min(t1, faded.size()); i++)
+            faded[i] += noise(rng);
+        std::vector<float> v =
+            nova::fm_demod(faded, g.fs, 1900.0, g.deviation);
+
+        // The fade has to be deep enough that the OLD rule could not have
+        // passed this test by luck: most lines must fail min_score, and the
+        // longest run of consecutive passing lines must be shorter than
+        // min_lines. Asserted, not assumed — otherwise a change to the
+        // generator could quietly turn this back into the easy case.
+        const nova::PhasingOptions defaults;
+        const double period = kFs * 0.5;
+        int weak = 0, best_consec = 0, consec = 0;
+        for (int l = 0; l < g.phasing_lines; l++) {
+            const size_t s = t0 + static_cast<size_t>(l * period);
+            double wsum = 0.0, total = 0.0;
+            const size_t wlen = static_cast<size_t>(0.05 * period);
+            for (size_t k = 0; k < static_cast<size_t>(period); k++) {
+                if (s + k >= v.size()) break;
+                total += v[s + k];
+                if (k < wlen) wsum += v[s + k];
+            }
+            const double sc = wsum / wlen -
+                              (total - wsum) / (period - wlen);
+            if (sc < defaults.min_score) {
+                weak++;
+                consec = 0;
+            } else if (++consec > best_consec) {
+                best_consec = consec;
+            }
+        }
+        std::printf("    fade: %d of %d lines below min_score, longest "
+                    "consecutive run %d (min_lines %d)\n",
+                    weak, g.phasing_lines, best_consec, defaults.min_lines);
+        check(weak * 2 > g.phasing_lines,
+              "the fade really does put most lines under the score floor");
+        check(best_consec < defaults.min_lines,
+              "...and no consecutive-only run could reach min_lines");
+
+        nova::PhasingResult p = nova::detect_phasing(v, kFs, period);
+        std::printf("    found=%d lines=%d of %d  spread=%.1f  score=%.3f\n",
+                    p.found ? 1 : 0, p.lines, g.phasing_lines, p.spread,
+                    p.score);
+        check(p.found, "faded phasing interval is still found (screamer)");
+        if (p.found) {
+            check(p.lines >= defaults.min_lines,
+                  "enough of its lines are recovered");
+            // And it is still the RIGHT interval: same grid as [11], same
+            // tolerance. Finding a run is worth nothing if its anchor is
+            // wrong — that is how a white-only station gets drawn rotated.
+            const double kDelay = 31.0;
+            double d = std::fmod(p.anchor - kDelay, period);
+            if (d > period / 2) d -= period;
+            if (d < -period / 2) d += period;
+            std::printf("    anchor=%.1f  off-grid %+.1f smp (%.2f%%)\n",
+                        p.anchor, d, 100.0 * d / period);
+            check(std::fabs(d) < 0.015 * period,
+                  "...and the anchor still lands on the true line start");
+        }
+
+        // The other half of the rule: position agreement is what carries the
+        // run, so a stretch that fades and never agrees on WHERE the white
+        // is must NOT be joined up into one. Same fade depth, applied to
+        // picture content with no phasing in it at all.
+        nova::GenOptions gp;
+        gp.phasing = false;
+        gp.start_tone = false;
+        gp.stop_tone = false;
+        std::vector<float> psig = nova::gen_fax_signal(content, 60, gp);
+        std::mt19937 rng2(20260813u);
+        for (size_t i = 0; i < psig.size(); i++) psig[i] += noise(rng2);
+        std::vector<float> pv =
+            nova::fm_demod(psig, gp.fs, 1900.0, gp.deviation);
+        nova::PhasingResult q = nova::detect_phasing(pv, kFs, period);
+        std::printf("    faded picture content: found=%d lines=%d\n",
+                    q.found ? 1 : 0, q.lines);
+        check(!q.found, "a faded stretch of picture is not phasing");
+    }
+
+    std::printf("[13] which phasing interval, when there are two\n");
+    {
+        // Two openings, one picture — FAXSignal's shape, built with ground
+        // truth: phasing, a gap, a SECOND and longer phasing, then image.
+        // Three rules give three different answers here and the library
+        // shows all three are reachable, so both branches are pinned.
+        nova::GenOptions g;
+        nova::Image content = nova::gen_test_pattern(1810, 60);
+        std::vector<float> a = nova::gen_fax_signal(content, 60, g);
+        nova::GenOptions g2;
+        g2.start_tone = false;
+        g2.stop_tone = false;
+        g2.phasing_lines = 45;  // deliberately LONGER than the first
+        std::vector<float> b = nova::gen_fax_signal(content, 60, g2);
+        std::vector<float> both = a;
+        both.insert(both.end(), b.begin(), b.end());
+        std::vector<float> v = nova::fm_demod(both, g.fs, 1900.0, g.deviation);
+        const double period = kFs * 0.5;
+        const double first_t0 = 5.0;                        // after the tone
+        const double second_t0 = a.size() / double(g.fs);   // start of b
+
+        // No window: the FIRST, because a later run may belong to a
+        // transmission this decode is not drawing (`jmh sample`).
+        nova::PhasingResult f = nova::detect_phasing(v, kFs, period);
+        std::printf("    no window  -> %.2f-%.2f s (%d lines)\n", f.t_start,
+                    f.t_end, f.lines);
+        check(f.found && std::fabs(f.t_start - first_t0) < 1.0,
+              "with no transmission bounds, the first opening wins");
+        check(f.lines < 45, "...and not simply the longest run");
+
+        // Windowed: the LAST inside it, because that is the opening the
+        // picture begins after (FAXSignal).
+        nova::PhasingOptions o;
+        o.t_lo = first_t0;
+        o.t_hi = both.size() / double(g.fs);
+        nova::PhasingResult l = nova::detect_phasing(v, kFs, period, o);
+        std::printf("    windowed   -> %.2f-%.2f s (%d lines)\n", l.t_start,
+                    l.t_end, l.lines);
+        check(l.found && l.t_start > second_t0 - 1.0,
+              "inside a known transmission, the last opening wins");
+
+        // ...and a run beyond the window is not eligible at all, which is
+        // what keeps the next transmission's phasing out.
+        nova::PhasingOptions o2;
+        o2.t_lo = first_t0;
+        o2.t_hi = second_t0 - 1.0;
+        nova::PhasingResult c = nova::detect_phasing(v, kFs, period, o2);
+        std::printf("    cut window -> %.2f-%.2f s (%d lines)\n", c.t_start,
+                    c.t_end, c.lines);
+        check(c.found && std::fabs(c.t_start - first_t0) < 1.0,
+              "a run past the stop tone is not eligible");
     }
 
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",

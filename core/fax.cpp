@@ -63,6 +63,12 @@ constexpr int kMedRad = 8;
 constexpr double kStepSec = 0.25e-3;    // 2 samples at 8 kHz
 constexpr double kNonlinSec = 1.25e-3;  // 10 samples at 8 kHz
 constexpr double kStepRateLimit = 20.0;
+// ...and in the phasing domain, how many persistent moves make a RATE
+// rather than a single skip. Session 9 settled the principle on the image
+// side and session 10 applies it here: JMH KiwiSDR Himawari's phasing
+// interval contains exactly one ~95-sample jump, JSC2 and JSC3 contain 16
+// and 17. Two is the smallest number that is not one.
+constexpr int kMinPhasingSteps = 2;
 // Below this many drawn lines the rate is too noisy to convict on: at the
 // clean-recording rate a 64-line window sees a step about once in three
 // recordings, and one step in 64 lines already reads 15.6/1000.
@@ -671,8 +677,27 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // phasing wedge sits in the LAST 4.5% of that white run, which is the
     // dead sector. Verified against the decoded picture, not just the
     // numbers (session 5's lesson).
+    //
+    // WHICH phasing interval, when a recording holds more than one, is
+    // decided by the control tones — so they are detected here rather than
+    // at §4c, and the one scan is shared by both. See PhasingOptions::t_lo:
+    // inside a known transmission the last opening before the picture is
+    // the one that matters, and outside one the first is the safe answer.
+    const std::vector<ToneEvent> tones =
+        opt.segment ? detect_tones(video, fs) : std::vector<ToneEvent>();
     {
-        const PhasingResult ph = detect_phasing(video, fs, period0);
+        PhasingOptions popt;
+        for (const auto& e : tones)
+            if (e.kind != ToneKind::kStop) {
+                popt.t_lo = e.t_end;
+                break;
+            }
+        for (const auto& e : tones)
+            if (e.kind == ToneKind::kStop && e.t_start > popt.t_lo) {
+                popt.t_hi = e.t_start;
+                break;
+            }
+        const PhasingResult ph = detect_phasing(video, fs, period0, popt);
         res.phasing_found = ph.found;
         if (ph.found) {
             res.phasing_t_start = ph.t_start;
@@ -680,6 +705,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             res.phasing_lines = ph.lines;
             res.phasing_spread = ph.spread;
             res.phasing_nonlinearity = ph.nonlinearity;
+            res.phasing_roughness = ph.roughness;
+            res.phasing_steps = ph.steps;
+            res.phasing_score = ph.score;
             const double phase =
                 std::fmod(std::fmod(ph.anchor - start, period0) + period0,
                           period0);
@@ -878,7 +906,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // moves — only what is drawn.
     int line_lo = 0, line_hi = n_lines;
     if (opt.segment) {
-        const std::vector<ToneEvent> ev = detect_tones(video, fs);
+        const std::vector<ToneEvent>& ev = tones;  // scanned once, at §2b
         // Segment the FIRST transmission. A recording can hold more than
         // one: `jmh sample` carries a start at 6 s, its stop at 404 s, and
         // then the NEXT transmission's start at 425 s. Every boundary rule
@@ -1017,11 +1045,47 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         }
         // Either statistic can convict on its own; only one has to be
         // available. They agree wherever both are (JSC2/3/4 both ways).
+        //
+        // Session 10: "the edge is not straight" is not the same claim as
+        // "the timebase steps", and until this session the second was read
+        // off the first. Three things bend a phasing edge, and the library
+        // holds one of each:
+        //
+        //   NOISE. GYA 2300Z's interval is faded; its per-line edge moves
+        //   ~15 samples line to line, so a 10-sample threshold is below its
+        //   own measurement floor and any verdict is a coin toss. Read raw
+        //   it scored 46.2 — worse than JSC2, on a recording with no steps.
+        //   ONE SKIP. JMH KiwiSDR Himawari's interval straddles a single
+        //   ~95-sample jump with textbook-linear edge either side. Session 9
+        //   already settled that one skip is not a rate — in the image
+        //   domain, which counts steps. This domain measured a spread and so
+        //   could not tell one jump from fifty; it now counts too. Its 1922
+        //   tracked lines read 1.6 steps per 1000, i.e. linear, and the
+        //   60-line phasing interval was over-ruling them.
+        //   STEPS. JSC2 and JSC3, 16 and 17 persistent moves in 59 lines.
+        //
+        // The same kNonlinSec does all three jobs, so there is one number to
+        // move and not three: it is the resolution the test claims. An
+        // interval whose own line-to-line noise exceeds it cannot resolve it
+        // in either direction, and says so rather than guessing.
         if (res.phasing_found && res.phasing_lines >= 8) {
-            const bool nonlin = res.phasing_nonlinearity > kNonlinSec * fs;
-            if (nonlin || res.timebase == Timebase::kUnknown)
-                res.timebase =
-                    nonlin ? Timebase::kSteps : Timebase::kLinear;
+            const double limit = kNonlinSec * fs;
+            if (res.phasing_roughness >= limit) {
+                res.phasing_witness = PhasingWitness::kNoisy;
+            } else if (res.phasing_nonlinearity <= limit) {
+                res.phasing_witness = PhasingWitness::kStraight;
+            } else if (res.phasing_steps >= kMinPhasingSteps) {
+                res.phasing_witness = PhasingWitness::kSteps;
+            } else {
+                res.phasing_witness = PhasingWitness::kOneSkip;
+            }
+            if (res.phasing_witness == PhasingWitness::kSteps)
+                res.timebase = Timebase::kSteps;
+            else if (res.phasing_witness == PhasingWitness::kStraight &&
+                     res.timebase == Timebase::kUnknown)
+                res.timebase = Timebase::kLinear;
+        } else if (res.phasing_found) {
+            res.phasing_witness = PhasingWitness::kTooShort;
         }
         if (std::getenv("NOVA_DEBUG"))
             std::fprintf(stderr,

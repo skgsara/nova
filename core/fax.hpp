@@ -56,6 +56,20 @@ enum class Timebase {
     kSteps,    // the timebase jumps; clock_ppm is the clock PLUS that rate
 };
 
+// What the PHASING half of the timebase test was able to say. Reported so
+// that a kUnknown verdict names the witness it is missing rather than
+// implying none exists — and so that "the edge is not straight" is never
+// silently promoted to "the timebase steps", which is only one of the
+// reasons an edge bends (session 10).
+enum class PhasingWitness {
+    kNone,       // no phasing interval in the recording at all
+    kTooShort,   // found, but under 8 lines: nothing to fit a line to
+    kStraight,   // the edge lies on a straight line: linear
+    kNoisy,      // it does not, but the interval's own noise explains that
+    kOneSkip,    // ...nor does noise, but there is a single jump, not a rate
+    kSteps,      // persistent moves, more than one: a stepping timebase
+};
+
 struct DecodeResult {
     Image img;
     int lpm = 0;
@@ -85,6 +99,15 @@ struct DecodeResult {
     // ...with the best straight line removed, so a constant clock error is
     // not counted as non-linearity. See PhasingResult::nonlinearity.
     double phasing_nonlinearity = 0.0;
+    // Why that residual is not straight, which the size of it cannot say:
+    // its line-to-line roughness (noise) and how many PERSISTENT moves it
+    // contains (steps). See PhasingResult for the measurements behind both.
+    double phasing_roughness = 0.0;
+    int phasing_steps = 0;
+    // Median per-line contrast of the run. Real intervals score 0.76-0.99
+    // across the library; a faded one sits at the bottom of that.
+    double phasing_score = 0.0;
+    PhasingWitness phasing_witness = PhasingWitness::kNone;
     // Where the phasing anchor sits relative to the anchor the image lines
     // gave, in samples, wrapped to ±half a line. Reported ALWAYS, even when
     // the phasing anchor is not the one used, because it is the only

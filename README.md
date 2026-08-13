@@ -63,7 +63,18 @@ pictures rather than decoder statistics.
 control tone from dense weather text: across 5.9 hours of library audio,
 picture content never exceeds 0.16 in a control band while real tones run
 0.68–0.99. Zero false positives; 14 of the 20 recordings turn out to carry
-a start tone, and 15 a full phasing interval.
+a start tone, and 16 a full phasing interval.
+
+The sixteenth took a while to see. A phasing interval on a badly faded
+signal keeps its edge and loses its contrast, so the per-line score that
+identifies phasing on a strong signal drops *below* what dark picture
+content scores — one library recording's real interval runs 0.34–0.88,
+against 0.48–0.62 for content. Nova therefore finds the interval by where
+the white edge is rather than by how well each line scores, and a run
+survives faded lines instead of ending at the first one. That recording
+sends a plain white dead sector, so this interval is the only per-line
+phase it has anywhere, and without it the chart came out half a line
+rotated (2026-08-12).
 
 Sequencing is wired. The decoder draws the picture and not the control
 signals, and on stations sending a plain white dead sector it takes its
@@ -102,6 +113,15 @@ straight line, 1.0–3.8 samples against 20.2–25.5. Either is enough on its
 own, so a station sending no sync pulse is still covered, and where
 neither is available the decoder says "not measurable" instead of
 guessing.
+
+A bent phasing edge is not by itself a stepping timebase, and since
+2026-08-12 Nova distinguishes the three reasons an edge bends. A faded
+interval's edge moves further line to line than the effect being measured,
+so it cannot resolve the question either way and says so; a single
+time-skip is one jump and not a rate, however large it reads, so
+conviction takes more than one *persistent* move. Both cases occur in the
+library, and both used to be reported as a stepping timebase — one of them
+on evidence that 1922 tracked lines of the same recording contradicted.
 
 Run over the library, that turned the count from two recordings into
 **six** — every JSC file, including the three at 60 lpm whose +335 to +458

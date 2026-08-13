@@ -11,9 +11,11 @@
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
 #include "../core/gen.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <numeric>
+#include <random>
 
 namespace {
 int failures = 0;
@@ -425,6 +427,65 @@ int main() {
         check(wl.timebase == nova::Timebase::kLinear &&
                   ws.timebase == nova::Timebase::kSteps,
               "white-only: phasing alone convicts a stepping timebase");
+
+        // The false positive the phasing witness is exposed to, found in
+        // session 10 the moment GYA 2300Z's faded interval was recovered and
+        // handed to it: a NOISY edge is not a MOVED one. The statistic is
+        // the spread of the residual about the fitted line, and it was
+        // calibrated (session 9) only on intervals whose per-line edge is
+        // good to about a sample. GYA 2300Z's is good to ~14, and read 46.2
+        // raw — twice JSC2's 25.5, on a recording with no steps in it.
+        //
+        // What separates them is not the SIZE of the residual but its SHAPE:
+        // an inserted sample moves the edge and it stays moved, so the
+        // residual is a staircase whose line-to-line differences are near
+        // zero; noise is a new draw every line. Same signal as the
+        // white-only case above, no insertions, phasing faded instead.
+        nova::GenOptions gn;
+        gn.dead_pulse = false;
+        std::vector<float> noisy = nova::gen_fax_signal(content, kLines, gn);
+        const size_t p0 = static_cast<size_t>(5.0 * gn.fs);
+        const size_t p1 =
+            p0 + static_cast<size_t>(gn.phasing_lines * 0.5 * gn.fs);
+        std::mt19937 rng(20260812u);
+        std::normal_distribution<float> nd(0.0f, 0.20f);
+        for (size_t i = p0; i < std::min(p1, noisy.size()); i++)
+            noisy[i] += nd(rng);
+        const nova::DecodeResult nz = run_video(noisy);
+        std::printf("  faded phasing: %s nonlin=%.1f smp (locks %d)\n",
+                    nz.timebase == nova::Timebase::kSteps    ? "STEPS"
+                    : nz.timebase == nova::Timebase::kLinear ? "linear"
+                                                             : "unknown",
+                    nz.phasing_nonlinearity, nz.locked_lines);
+        check(nz.phasing_found, "the faded interval is found at all");
+        check(nz.timebase != nova::Timebase::kSteps,
+              "a noisy phasing edge is not called a stepping timebase");
+
+        // ...and the third way an edge bends: ONE skip. Session 9 settled
+        // that a single time-skip is not a stepping timebase and pinned it
+        // in the image domain (`fixture_timebase_linear`); the phasing
+        // domain measured a spread and so could not tell one jump from
+        // fifty. JMH KiwiSDR Himawari is the real case — a ~95-sample jump
+        // in the middle of an otherwise textbook phasing interval, which
+        // read 96.1 samples off straight and out-scored every genuinely
+        // stepping recording in the library. Here it is with ground truth:
+        // the same white-only signal, one insertion, inside the phasing.
+        std::vector<float> once;
+        const size_t at = static_cast<size_t>(12.5 * gn.fs);  // mid-phasing
+        for (size_t i = 0; i < w_clean.size(); i++) {
+            once.push_back(w_clean[i]);
+            if (i == at)
+                for (int k = 0; k < kIns; k++) once.push_back(w_clean[i]);
+        }
+        const nova::DecodeResult one = run_video(once);
+        std::printf("  one skip: %s nonlin=%.1f smp steps=%d\n",
+                    one.timebase == nova::Timebase::kSteps    ? "STEPS"
+                    : one.timebase == nova::Timebase::kLinear ? "linear"
+                                                              : "unknown",
+                    one.phasing_nonlinearity, one.phasing_steps);
+        check(one.phasing_found, "the interval around the skip is found");
+        check(one.timebase != nova::Timebase::kSteps,
+              "one skip in the phasing edge is not a rate");
     }
 
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",

@@ -135,6 +135,44 @@ library, so that registered gap stands.
   tone is also present, the phasing begins where the start tone ends in 11
   of 14 recordings — two detectors sharing no code agreeing on a boundary
   neither was told about.
+- **A faded phasing interval is still a phasing interval, and score alone
+  cannot find one.** Session 10, correcting the count above to **16 of 20**.
+  GYA 2300Z carries a real 40-line interval at 4.5–24.5 s — the same
+  4.5–24.5 s that GYA 2324Z, the same station 24 minutes later, puts its
+  clean 40-line interval in — and it was reported as "no phasing" for nine
+  sessions. Its per-line contrast scores run **0.34–0.88**, reaching BELOW
+  the 0.48–0.62 band that dark picture content scores (session 6), because
+  fading collapses the contrast the score measures while leaving the edge
+  where it is. Only 23 of the 40 lines clear `min_score` and no more than
+  three of those are consecutive, so a run grown from consecutive
+  qualifying lines breaks into ten fragments and none reaches `min_lines`.
+  Runs are therefore carried by POSITION agreement and only SEEDED by
+  score, ending after 8 lines with no fresh qualifying line (GYA's widest
+  internal gap is 6). The lease must be renewed by score and not by
+  agreement: on a white-only station the image dead sector is white at the
+  phasing position [WMO §5.2.3.4], so every later picture line agrees, and
+  a run that reset on agreement grew from 30 lines to 230 and off the end
+  of the picture. This matters more than one recording — GYA is white-only,
+  so this interval is the ONLY place its line phase exists, and without it
+  the chart is drawn half a line rotated. Verified against the picture:
+  the title box lands at the left margin, as it does on GYA 2324Z.
+  [`fixture_faded_phasing`, `tones [12]`]
+- **Which phasing interval, when a recording holds two — never the
+  longest.** Two shapes occur and they want opposite answers, which is why
+  the control tones decide it. `jmh sample` holds two complete
+  TRANSMISSIONS (start tones at 6.25 s and 424.88 s, a stop at 404 s), each
+  with a real phasing interval, of 59 and 60 lines. FAXSignal holds two
+  OPENINGS before one picture: start tone 0–7 s, phasing 7–22 s, a second
+  300 Hz burst 22–30.5 s, phasing again 32–64.5 s, image from 64.5 s.
+  Inside a known transmission the interval wanted is the LAST one, because
+  the picture begins after it; with no bounds known it is the FIRST, because
+  a later run may belong to a transmission this decode is not drawing. The
+  window comes from the same tone scan segmentation uses, now run once and
+  shared. Taking the longest picked `jmh sample`'s second transmission by a
+  one-line margin and cut its head crop from 62 lines to 3; taking the
+  first unconditionally drew 68 lines of FAXSignal's second opening into
+  the chart and took its `max_step` from 14.83 px to 54.23.
+  [`tones [13]`, `fixture_phasing_two_openings`]
 - **The phasing anchor and the image anchor mark the same edge, and the
   difference between them is the black porch.** Settled by measurement in
   session 7, on a fold of the video over the phasing region and over the
@@ -202,6 +240,29 @@ library, so that registered gap stands.
      positions must lie on a straight line, and what remains after removing
      the best one is non-linearity. Eleven clean recordings **1.0–3.8**
      samples, JSC2/3/4 **20.2–25.5**.
+     **Session 10: that size is not by itself a verdict.** Three things
+     bend a phasing edge and only one of them is a stepping timebase, so
+     this half now reports which. The residual is local-median smoothed
+     (±3 lines) exactly as the image half smooths, and then read with two
+     further numbers — its line-to-line ROUGHNESS, and how many PERSISTENT
+     moves it contains:
+     - *noise*: GYA 2300Z's faded edge moves ~15 samples line to line,
+       above the 10-sample resolution the test claims. Read as a raw spread
+       it scores **46.2**, worse than JSC2's 25.5, on a recording with no
+       steps in it. An interval whose own roughness exceeds the threshold
+       cannot resolve it in either direction and now says so.
+     - *one skip*: JMH KiwiSDR Himawari's interval straddles a single
+       ~95-sample jump with textbook-linear edge either side, and reads
+       **96.1** off straight. Session 9 already settled that one skip is
+       not a rate — in the image domain, which COUNTS steps. This domain
+       measured a spread and so could not tell one jump from fifty; its
+       1922 tracked lines call the recording linear and a 60-line phasing
+       interval was over-ruling them. Convicting now needs two counted
+       persistent moves; JSC2 and JSC3 have 16 and 17.
+     - *steps*: the real thing.
+     The verdicts are `straight` / `noisy` / `one skip` / `steps`, and the
+     middle two mean the phasing witness abstains rather than guesses.
+     [`fixture_faded_phasing`, `fixture_phasing_one_skip`, `roundtrip [10]`]
   The raw phasing spread cannot do job 2 — it is dominated by the clock, at
   0.66 samples per line at −90 ppm and so ~40 samples across a 60-line
   interval. That is why session 8's "phasing spread 72/47 against 1–19"
