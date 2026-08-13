@@ -272,7 +272,7 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15]
+## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15, shell designed session 17]
 - Core seams (session 14, done): log/progress callback, cooperative
   cancellation, structured DecodeError kinds, decode_fax split into nine
   named stages (core/hooks.hpp; screamers in `hooks`).
@@ -308,6 +308,39 @@ Pending:
 - Greyscale PNG writer [DECIDED session 16, Sara]: hand-rolled encoder
   (uncompressed deflate), no new dependency — Nova has no external
   dependencies today and libpng/zlib would change that.
+- Shell design [docs/05, session 17 — PROPOSAL, not yet decided by Sara]:
+  - Three layers: `nova-core` (untouched, no deps) → `nova-live` (no
+    FLTK, no RtAudio, no real clock — streaming tones, provisional
+    renderer, session state machine, retained store, PNG writer) →
+    `nova-gui` (thin: devices, widgets, queues, no DSP). The rule exists
+    so M4 can have screamers at all.
+  - Four threads: RtAudio callback → lock-free SPSC ring → live decode
+    thread → GUI queue drained on a 50 ms `Fl::add_timeout`; batch decode
+    on a frozen `shared_ptr<const vector<float>>` snapshot per
+    transmission. No worker thread touches a widget.
+  - Streaming resample/demod by block-with-overlap, so `core/` gains no
+    stateful entry point; equality with the whole-file result is a
+    screamer.
+  - Eight named live states (IDLE, READY, START TONE, PHASING,
+    DRAWING — PREVIEW, STOP TONE, DECODING, SAVED). The nine decode
+    stages are sub-progress inside DECODING only — see the contradiction
+    in docs/05 §10 against docs/04 Finding 3.
+  - **The only core change M4 asks for**: two `DecodeOptions` fields,
+    `phase_anchor_frac` (negative = measure) and `clock_ppm_override`
+    (NaN = measure; zero cannot mean auto, because a perfect clock is
+    zero ppm). Both follow the existing `lpm = 0` / `ioc = 0` idiom.
+  - Retention: current image only, no raw sidecar — so an image from
+    three hours ago cannot be re-phased. Matches the SR-97's "stored
+    images cannot be modified".
+  - Four screamers planned, none needing an audio device or a window:
+    `live_demod_equiv`, `live_tones`, `live_preview` (bit-identical
+    whatever the block size), `png_roundtrip`.
+  - Five questions still open for Sara: docs/05 §12.
+- **Dependency qualifier.** "Nova has no external dependencies" stays
+  true of the core, the CLIs and the test suite after M4, and becomes
+  false of the GUI binary alone, which links FLTK and RtAudio behind
+  `option(NOVA_BUILD_GUI)`. Tests and CLIs must build with it OFF.
+  M5's tier-1/tier-2 matrix is only affected for that one target.
 - m4a input via runtime ffmpeg; WAV native.
 
 ## M5 — packaging & release  [pending]

@@ -7,6 +7,113 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 17: the shell drawn on paper, and the survey's one-to-one claim does not survive it
+
+Agent: Claude Opus 5. Code changed: none. Files changed:
+`docs/05-m4-shell-design.md` (new), `ROADMAP.md` (M4 shell design block
+and the dependency qualifier), `SESSION-LOG.md`.
+
+**Task as accepted:** Sara asked to keep UI design and UI coding in
+separate sessions, and to do the design first — and asked how the layout
+would be presented to her visually. Answer given and taken: an HTML page
+with the window mockups drawn at FLTK's real widget metrics, published as
+an artifact so it can be redeployed to the same URL as the design
+changes. The stated caveat, which shaped the mockups: HTML flatters, so
+rounded corners, web typography and shadows were refused in favour of
+25 px control rows, 12 px Helvetica, two-pixel `FL_UP_BOX` /
+`FL_DOWN_BOX` bevels and the default `#c6c6c6` chrome. The mockups keep
+that grey in both page themes, because FLTK does not follow the desktop.
+
+Visual companion:
+https://claude.ai/code/artifact/5aa3770e-e01e-46f0-8c7d-b73666bde5ab —
+`docs/05` is authoritative where the two disagree.
+
+**Method.** Worked backwards from the two hard constraints already
+decided — `decode_fax` stays batch and untouched [docs/04 answer 1] and
+the live view is never revised [answer 5] — to the smallest code shape
+that satisfies both, then checked the resulting layout against the
+survey's conventions. Inputs: `docs/03` §GUI readiness, all of
+`docs/04`, `core/hooks.hpp`, `core/fax.hpp`, `core/tones.hpp`, and the
+existing CMake target shape. Confirmed on the machine: FLTK 1.x
+(`fltk-config`) and RtAudio are both installed via Homebrew, so the
+design is buildable, not hypothetical.
+
+**The result, in one line each.** Three layers, and only the thinnest
+knows the toolkit: `nova-core` (untouched, no deps) → `nova-live` (no
+FLTK, no RtAudio, no real clock) → `nova-gui` (devices, widgets, queues,
+no DSP). Four threads, with the RtAudio callback writing a lock-free
+SPSC ring and no worker thread ever touching a widget. Streaming
+resample/demod by block-with-overlap, so `core/` gains no stateful entry
+point. A frozen `shared_ptr<const vector<float>>` per transmission is the
+entire concurrency story for the batch path.
+
+**The load-bearing rule, and why it is a rule.** `nova-live` must not
+depend on FLTK, RtAudio or a real clock. This project's quality argument
+is its 23 screamers, and a live path exercisable only by a human with a
+radio has none. Four screamers follow from the split, all runnable with
+no audio device and no window: `live_demod_equiv` (streaming equals
+whole-file, sample for sample), `live_tones` (same kinds, same order,
+start times within one hop — medians explicitly excluded, because a
+streaming detector emits at the earliest qualifying moment and a batch
+one after the whole run), `live_preview` (bit-identical whatever the
+block size — a preview that depends on how the audio callback chunked
+the stream is broken), `png_roundtrip`.
+
+**The only core change M4 asks for**, and it is small: two
+`DecodeOptions` fields, `phase_anchor_frac` (negative = measure it) and
+`clock_ppm_override` (NaN = measure it). Both follow the existing
+`lpm = 0` / `ioc = 0` idiom, which is `docs/04` Finding 2 —
+AUTO-is-a-value, never a mode toggle — landing in the type system.
+Zero cannot mean auto for ppm, because a perfect clock *is* zero ppm;
+any other sentinel makes a legal measurement unrepresentable.
+
+**Contradictions found: one, and it mattered.** `docs/04` Finding 3
+calls the receivers' protocol narration "a one-to-one match with Nova's
+nine decode stages". One section later, answer 1 moves all nine stages to
+*after* the transmission ends. They cannot be the live narration any
+more — taken literally, `change-points` would appear on screen as a
+protocol state while the operator waits for a picture. Resolved: eight
+named live states carry the narration, and the nine stages are
+sub-progress inside `DECODING`, the one state long enough to deserve a
+bar. Both halves of Finding 3 survive; only the claimed identity does
+not.
+
+**A second, weaker one, recorded in `ROADMAP.md` rather than argued**:
+"Nova has no external dependencies" needs a qualifier after M4. It stays
+true of the core, the CLIs and the test suite; it becomes false of the
+GUI binary alone, behind `option(NOVA_BUILD_GUI)`, with tests and CLIs
+required to build with it OFF.
+
+**Validation.** None applicable — no code changed, no tests run. The
+tree is untouched apart from the three documents. The page itself was
+verified in a browser before publishing: no horizontal page overflow,
+all seven sections and ten mockups present, both themes resolving from
+tokens (checked by stamping `data-theme="dark"` and reading computed
+styles, including the `var()` colours inside the SVG diagram), and one
+real bug fixed — the ruler's last label overflowed into the side panel.
+
+**Registered gaps.** Nothing here tests RtAudio or FLTK; device
+enumeration, xrun behaviour and widget wiring are verified by running the
+app, which is the boundary the three-layer split exists to keep small.
+The preview inherits the short-baseline gap already on the roadmap
+(GYA 2300Z gives −1223 to +320 ppm over 120 s windows) and may look bad
+enough that an operator stops a good transmission — unmeasured. And the
+preview's row-placement quality has no target number: `place_rms_px` is
+the batch metric, and the preview equivalent is undefined, so
+`live_preview` pins determinism and dimensions, not quality.
+
+**Next step:** Sara rules on the five open questions in `docs/05` §12 —
+capture device rate (recommend accept-and-resample), retention policy
+(recommend current image only, accepting that a three-hour-old image
+cannot be re-phased), page cap default (recommend 1), whether the
+waterfall ships in M4 or M4.5, and what keys per-station persistence.
+None of the five blocks the others, and none blocks starting the walking
+skeleton — CMake `NOVA_BUILD_GUI` target, empty FLTK window, RtAudio
+device enumeration, no decode — which is the first coding step whichever
+way they go.
+
+---
+
 ## 2026-08-13 — Session 16: a second surveyor re-reads all sixteen manuals, and the survey mostly survives
 
 Agent: Kimi Code CLI (Kimi k2). Code changed: none. Files changed:
