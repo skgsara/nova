@@ -182,15 +182,29 @@ survive that filter unchanged; Finding 4 did not, and Finding 8
 up. The mockup page carried the same invented frequency and was
 corrected with the document.
 
-**One new question this opened**, registered as §12 item 6 rather than
-left to surface later: with two raw streams retained, nothing is lost
-when a transmission arrives mid-edit — but the single image pane still
-cannot show the edit and the incoming live preview at once, and §8's
-"one pane, announced swap" did not anticipate a third participant.
-Recommended: the edit holds the pane, the incoming transmission draws
-into its background buffer behind a compact receiving indicator that
-switches on click. Parking an edit is cheap here in a way it would not
-be elsewhere — the entire edit state is two numbers.
+**One new question this opened, and Sara closed it the same day.** With
+two raw streams retained, nothing is lost when a transmission arrives
+mid-edit — but the single image pane still cannot show the edit and the
+incoming live preview at once, and §8's "one pane, announced swap" was
+written for two participants, not three. Registered as §12 item 6 rather
+than left to surface later, and **decided: the edit holds the pane.**
+The incoming transmission draws into a background buffer behind a
+compact receiving indicator (state, line count, thumbnail) that switches
+on click; the buffered picture comes forward under the same
+announced-swap rule when the operator switches or finishes.
+
+Two things make that cheap rather than a feature, and both are worth
+noting because they are the thread design paying off: the provisional
+renderer never draws to a widget — it pushes `RowsDrawn` through the GUI
+queue and the FLTK thread decides where rows land, so rendering into a
+buffer nobody is looking at costs nothing extra; and parking an edit is
+two numbers, because PHASE and SYNC are the entire edit state. Rejected:
+letting the new transmission take the pane, which is what a receiver
+with one sheet of paper has to do, and which would interrupt the
+operator during the one interaction ISO §4.2.6 exists to guarantee.
+
+**With this, no design question remains open** — every item in
+`docs/03`, `docs/04` and `docs/05` has an answer.
 
 **A process failure worth recording, since this log is the memory.** The
 session-17 commit `ab74640` was made on `main`, which AGENTS.md reserves
@@ -204,14 +218,20 @@ agent: **branch before the first commit of a session, not after**, and
 treat a denied git command as possibly-executed rather than
 definitely-not.
 
-**Next step:** Sara rules on the four questions still open in `docs/05`
-§12 — capture device rate (recommend accept-and-resample), retention
-policy (recommend current image only, accepting that a three-hour-old
-image cannot be re-phased), page cap default (recommend 1), and what
-keys per-station persistence. None of the four blocks the others, and
-none blocks starting the walking skeleton — CMake `NOVA_BUILD_GUI`
-target, empty FLTK window, RtAudio device enumeration, no decode —
-which is the first coding step whichever way they go.
+**Next step: the walking skeleton — the first M4 code.** Every design
+question in `docs/03`, `docs/04` and `docs/05` is decided, so the paper
+phase is over. The skeleton is: `option(NOVA_BUILD_GUI)` in
+`CMakeLists.txt` finding FLTK and RtAudio and skipping the target
+(never failing the build) if either is absent; an empty FLTK window laid
+out to §8's regions with no data behind them; RtAudio device
+enumeration in the Device menu; the tests and CLIs verified to still
+build with `NOVA_BUILD_GUI=OFF`. No decode, no threads, no DSP — the
+point is to prove the dependency wiring and the layout against real
+FLTK pixels before any of §2's concurrency exists. The layout mockup
+was drawn in HTML at FLTK metrics and is a prediction, not a
+measurement; the skeleton is what tests that prediction, and any place
+the toolkit disagrees with the mockup should be recorded as a
+correction to `docs/05` §8 the same day.
 
 ---
 

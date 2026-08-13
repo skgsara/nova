@@ -30,6 +30,6 @@ that was drawn rotated by 520 px until session 7:
 - `docs/02` — ISO 9876 §4.2 compliance matrix (acceptance checklist)
 - `docs/03` — pre-M4 standards/provenance/GUI-readiness audit
 - `docs/04` — commercial receiver UI survey; the M4 design decisions
-- `docs/05` — the M4 shell design (proposal, session 17)
+- `docs/05` — the M4 shell design (all questions decided, session 17)
 - `ROADMAP.md` — milestones, done vs pending
 - `SESSION-LOG.md` — newest first, append-only, tracked in git

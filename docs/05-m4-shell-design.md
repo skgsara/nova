@@ -1,11 +1,11 @@
 # 05 — M4 shell design: FLTK + RtAudio
 
-Status: **proposal, session 17; all five original open questions decided
-by Sara the same day** (§12). One new question is open — §12 item 6,
-which picture owns the image pane while an edit is in progress. Two of
-her answers corrected the design rather than merely choosing from it:
-the retention rule (§3) and the status panel (§8.1), the latter because
-Nova cannot know the frequency at all.
+Status: **complete — every design question in this document is decided**
+(Sara, 2026-08-13, session 17: all five originally open, plus the sixth
+that her retention answer raised). Two of her answers corrected the
+design rather than merely choosing from it: the retention rule (§3) and
+the status panel (§8.1), the latter because Nova cannot know the
+frequency at all. **The next step is code, not paper.**
 
 This document is the design that `docs/04`'s answers imply. `docs/04`
 settled *what the operator sees and what the machine promises*; this one
@@ -433,6 +433,39 @@ status line uncritically, and it is worth carrying into M4.5: a
 frequency readout only becomes possible if Nova ever gains CAT control
 of a receiver, which is not on the roadmap.
 
+### 8.2 Which picture owns the pane while an edit is in progress
+
+**DECIDED 2026-08-13 (Sara, session 17): the edit holds the pane.**
+
+The retention rule (§3) keeps both raw streams, so nothing is *lost*
+when a transmission arrives mid-edit. But one image pane cannot show the
+operator's edit and the incoming live preview at the same time, and §8's
+"one pane, announced swap" was written for two participants, not three.
+
+The incoming transmission draws into its **background buffer**, and the
+status area carries a compact receiving indicator — state name, line
+count, small thumbnail — that switches to the live view when clicked.
+Nothing interrupts a human mid-correction, and nothing is lost by
+waiting, because the raw is retained either way; when the operator
+switches or finishes, the buffered picture comes forward under the same
+announced-swap rule as before.
+
+Two things make this cheap rather than a feature:
+
+- **The thread design already paid for it.** The provisional renderer
+  never draws to a widget — it pushes `RowsDrawn` through the GUI queue
+  (§2.3), and the FLTK thread decides where those rows land. Rendering
+  into a buffer that is not currently displayed costs nothing extra;
+  the renderer does not know or care whether anyone is looking.
+- **Parking an edit is two numbers.** PHASE and SYNC are the entire
+  edit state (§7), so switching away and back is not the state-machine
+  problem it would be in an application with a real editing session.
+
+Rejected: letting the new transmission take the pane automatically.
+That is what a receiver with one sheet of paper has to do, and it would
+interrupt the operator during the one interaction ISO §4.2.6 exists to
+guarantee.
+
 **The spectrum/waterfall is not in M4** [DECIDED 2026-08-13, Sara,
 session 17]. It ships in M4.5. What stays in its place is a slim input
 level meter, and the distinction is worth stating because it is not the
@@ -587,25 +620,18 @@ Sara's answer to item 2, is open at the end.
    names the file. See §8.1, which corrects the status panel this
    mistake had already reached.
 
-### Still open — raised by the answer to item 2
+### Raised by the answer to item 2, and closed the same day
 
-6. **Which picture owns the pane while an edit is in progress?** The
-   retention rule now keeps both raw streams, so nothing is lost — but
-   the single image pane cannot show the operator's edit and the
-   incoming live preview at the same time, and §8's "one pane, announced
-   swap" did not anticipate a third participant.
+6. ~~**Which picture owns the pane while an edit is in progress?**~~
+   **DECIDED 2026-08-13 (Sara, session 17): the edit holds the pane.**
+   The incoming transmission draws into its background buffer behind a
+   compact receiving indicator that switches on click. See §8.2 for why
+   this costs nothing architecturally — the provisional renderer already
+   pushes rows through the GUI queue rather than drawing to a widget, and
+   the entire edit state is two numbers.
 
-   Recommend: **the edit holds the pane.** The incoming transmission
-   draws into its background buffer, and the status area carries a
-   compact receiving indicator (state, line count, small thumbnail) that
-   switches to the live view when clicked. Nothing interrupts a human
-   mid-correction, and nothing is lost by waiting, because the raw is
-   retained either way. Parking an edit is cheap here in a way it would
-   not be in most applications: the entire edit state is two numbers.
-
-   The alternative — the new transmission takes the pane and the edit is
-   parked automatically — is what a receiver with one sheet of paper
-   would have to do, and Nova is not that.
+**No design question remains open.** Every item in `docs/03`,
+`docs/04` and this document has an answer. The next step is code.
 
 ---
 

@@ -363,11 +363,17 @@ Pending:
     `live_demod_equiv`, `live_tones`, `live_preview` (bit-identical
     whatever the block size), `png_roundtrip`, `override_phase_seed`,
     `override_sync_fallback`.
-  - All five original docs/05 §12 questions decided 2026-08-13. One new
-    one open: **which picture owns the image pane while an edit is in
-    progress** (§12 item 6), raised by the retention answer. Recommended
-    there: the edit holds the pane, the incoming transmission draws into
-    its background buffer behind a compact receiving indicator.
+  - Pane ownership during an edit [DECIDED 2026-08-13, Sara]: **the edit
+    holds the pane.** The incoming transmission draws into a background
+    buffer behind a compact receiving indicator (state, line count,
+    thumbnail) that switches on click. Costs nothing architecturally —
+    the provisional renderer already pushes rows through the GUI queue
+    instead of drawing to a widget, and the entire edit state is two
+    numbers. Rejected: the new transmission taking the pane, which would
+    interrupt the operator during the one interaction ISO §4.2.6 exists
+    to guarantee.
+  - **No design question remains open** (docs/05 §12, all six decided
+    2026-08-13). The next step is code.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind
