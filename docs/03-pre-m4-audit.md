@@ -254,6 +254,15 @@ answer the "M4 design decisions still open" above on paper first.
 **Status, session 15.** The "on paper first" condition is met: all eight
 questions are answered in `docs/04-receiver-ui-survey.md`, and the
 decided architecture is recorded under M4 in `ROADMAP.md`. The shell
-design itself is still to be done, and one question `docs/04` created
-remains open before GUI code — how the provisional live view gives way
-to the saved image.
+design itself is still to be done.
+
+**Status, session 16.** The last question `docs/04` created — how the
+provisional live view gives way to the saved image — is decided (show
+the transition: provisional label from the first row, one announced
+swap at end of transmission), together with the PNG writer (hand-rolled,
+uncompressed deflate) and the manual-correction model (forward-only on
+the preview, non-destructive re-render on the saved image, live
+overrides seeding the batch re-decode). `docs/04` was independently
+re-verified against all sixteen manuals this session. **No design
+question remains open; the gate for GUI code is fully clear.** What
+remains is the shell design itself.

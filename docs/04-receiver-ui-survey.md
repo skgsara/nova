@@ -386,6 +386,36 @@ image opens as a separate artifact), or to show both. Unregistered, this
 would surface as a bug report — "the picture changed after it finished" —
 so it is registered here instead.
 
+**DECIDED 2026-08-13 (Sara, session 16): show the transition.** The live
+view is labelled **provisional from the first row drawn** — the status
+line is already the decided place for state names, so it carries
+"preview" while drawing, "decoding" at the stop tone, and the saved
+image's name once the batch decode lands. The saved image replaces the
+preview *in the same pane*, once, at the natural boundary where nothing
+is being drawn anyway — an announced swap, not a mid-reception redraw,
+so the never-revised rule is untouched. The rejected options: hiding the
+live view takes away the picture the operator just watched build (no
+receiver does that — the paper stays, the SR-97 asks `SAVE?`), and
+showing both answers a comparison question only a developer asks, which
+is the batch CLI's job. The label-from-the-start is what defuses the
+anticipated bug report: the UI said the picture was provisional all
+along.
+
+**DECIDED 2026-08-13 (Sara, session 16): manual corrections exist at
+both moments, and live corrections carry into the batch re-decode.**
+The override surface is the same two numbers everywhere. *During*
+reception the operator may click the dead sector / adjust PHASE and
+SYNC; the correction applies forward from that row only (the SR-97
+model) and never revises drawn rows. *After* the stop tone, PHASE/SYNC
+adjustments on the saved image are re-renders from the retained raw
+stream (the FAX-30 model) — non-destructive, repeatable, and the home
+of the ISO §4.2.6/§5.4.3 manual-phase requirement. And an override the
+operator set during reception is *information the decoder does not
+have* — on a white-only station or after a forced start it may be the
+only phase evidence there is — so the batch re-decode takes it as its
+initial anchor. Per-station persistence of these values follows the
+SR-97 precedent (Finding 1).
+
 ## Registered gaps in this survey
 
 - Furuno FAX-207, FAX-214 and the Sony CRF-V21 operator sections were
@@ -398,3 +428,103 @@ so it is registered here instead.
   survey records conventions, not geometry — unlike Isobar's `docs/05`,
   which measured the original's form resources because interop demanded
   it. Nothing here demands it.
+
+---
+
+## Independent verification pass (session 16, Kimi)
+
+Same day, a second surveyor (Kimi Code CLI) re-read all sixteen manuals
+independently, including the three the first pass left unread, working
+from fresh text extractions (PDFKit) and Vision OCR for the six scans.
+Purpose: test whether the findings above survive a second reader who
+had not seen them. They mostly do. What follows is only where the
+second pass *adds* or *disagrees*; silent agreement covers the rest.
+
+**Contradictions found.**
+
+1. **Finding 2's headline is too strong.** "AUTO is a value, not a
+   mode" holds for the SFX-100, FAX-30 and SR-97, but three receivers
+   carry a literal receive-mode toggle: the JAX-9B's `REC` switch
+   alternates AUTO/MANU (the document's own Finding 2 bullet cites
+   this), the JAX-91 has AUTO / SEMI AUTO / MANU / Program modes on the
+   `MAN OPE` switch, and the SFAX-500 has a dedicated Auto/Manual key
+   with four named receive modes (Automatic / Manual / Forced /
+   Timer). The 1980s Furunos (207/208A/210/214) have no AUTO token
+   anywhere — automatic selection is implicit behaviour on signal
+   detection, with the asterisk idiom for scan/remote-start. The
+   *design takeaway is unchanged* — where a parameter is exposed, AUTO
+   belongs inside it as a value — but the corpus is not unanimous, and
+   the JAX-9B counterexample was already in the first pass's own
+   evidence list.
+2. **Finding 5's "with pinning" is not universal.** The SR-97 — the
+   largest store in the corpus at 200 images — has no lock/pin at all
+   and declares stored images unmodifiable. Pinning exists on the
+   FAX-30, SFAX-500 and SFX-100 (12, 30, 20 images). This strengthens
+   rather than weakens the session-15 decision to drop LOCK with
+   unbounded storage: the receiver with the biggest buffer is the one
+   that omitted it.
+3. **The clean paper/stored-image split has one defector each way.**
+   The SR-97 is a stored-image receiver that corrects *during*
+   reception (touch centres "the remainder of the image"; stored
+   images cannot be modified) — the first pass used this for the
+   live-view decision but the corpus-table framing "stored-image …
+   corrections after reception" overgeneralizes. In the other
+   direction the SFX-100's CONTRAST works only on the *incoming*
+   image and explicitly not on stored ones.
+4. **Finding 3's named-state vocabulary is one receiver's, not the
+   industry's.** `WEFAX READY → APT DETECTED → SYNCHRONIZING → SAVE?`
+   is the SR-97 alone. The JAX-9B shows `RECORD`/`PHASE`; the FAX-30
+   shows `RCV`/`STBY`; the paper Furunos show `SEARCHING FRAME`
+   messages and LED semantics. The universal claim is the narrower
+   one: state, never a percentage. Zero progress percentages in
+   sixteen manuals.
+
+**Corroborations from the manuals the first pass skipped.** The
+FAX-207, FAX-208A and FAX-214 (read in full from OCR) confirm the
+ruler-and-coordinate phase entry (printed 0–40 scale, "read the scale
+at the centre of the dead sector"), the two-correction surface, forced
+start, and no percentages. The JAX-91 (read closely) confirms the
+measurement pattern with a scale at the paper discharge and one-shot
+`PH SET` entry. This closes the first and second registered gaps
+above.
+
+**Additions not in the first pass.**
+
+- **Slant has no measurement aid anywhere.** Every ruler in the
+  corpus serves PHASE only; SYNC is guess-and-turn on all fifteen
+  receivers. Nova's fitted clock means its SYNC override can show the
+  measured ppm — a place where Nova can beat the entire industry,
+  not just match it.
+- **The machine annotates its own output.** The 1980s Furunos print a
+  per-chart header — station, frequency, time, IOC/rpm, manual/auto —
+  including a `Phase OK` / `Phase NG` verdict, with a PHASE lamp for
+  "picture is out of phase". Precedent for stamping Nova's decode QA
+  (anchor source, clock, timebase verdict) onto the saved image or
+  its metadata.
+- **Buffering did not imply re-render.** The FAX-207/208A/210/214
+  buffer ~30 scan lines in RAM ahead of the thermal head and still
+  offer no post-reception correction; corrections are "effective only
+  while the printer is operative". The session-15 "live view is never
+  revised" decision has precedent even inside machines that had the
+  data to do otherwise.
+- **Export format precedent is GIF.** The SFX-100 copies images to
+  USB as GIF; the SFAX-500 to SD as GIF. Both are 1990s–2010s
+  greyscale-safe choices; noted for the PNG decision (session 15's
+  hand-rolled-writer flag) as prior art, not as an argument to
+  switch.
+- **Mid-broadcast entry asymmetry (JAX-9B):** AUTO cannot start
+  mid-broadcast; MANU can, by locking onto the "similar phase signal"
+  inside the image — and if the image lacks it, mid-image start is
+  impossible. This is the commercial shape of Nova's white-only
+  station problem.
+- **Nagra FAXDM caveat:** the scan is physically cropped — the right
+  text column of every page is missing. The first pass's "minimal"
+  verdict is partly a damaged-document artifact; what survives shows
+  a demodulator-only box whose geometry controls lived on the
+  separate tracer unit.
+
+**Gaps this pass leaves.** The Sony CRF-V21 is confirmed a
+principles booklet, not an operator's manual (it cites a separate
+"Operating Instructions" the corpus does not have). The Nagra's
+cropped column is unrecoverable from this copy. Screen layouts remain
+unmeasured, by the same deliberate choice as the first pass.

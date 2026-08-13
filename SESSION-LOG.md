@@ -7,6 +7,87 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 16: a second surveyor re-reads all sixteen manuals, and the survey mostly survives
+
+Agent: Kimi Code CLI (Kimi k2). Code changed: none. Files changed:
+`docs/04-receiver-ui-survey.md` (independent-verification section and
+three decided blocks appended), `docs/03-pre-m4-audit.md` (session-16
+status: gate fully clear), `ROADMAP.md` (M4 decisions completed),
+`SESSION-LOG.md`.
+
+**Task as accepted:** Sara asked for the commercial-receiver survey to
+be redone from Kimi's perspective, working through the manuals in
+`../Weather Fax Receiver Manuals/` directly — an independent check on
+session 15 rather than a summary of it.
+
+**Method.** Same corpus, fresh tooling: a PDFKit text extractor plus a
+Vision-OCR extractor (~60 and ~50 lines of Swift, rebuilt in the
+scratchpad — session 15's `pdftool.swift` was not preserved, so this
+session's pair now lives in `/tmp/nova-survey/`). Ten manuals had text
+layers; the six scans (FAX-207, 208A, 214, SFX-100, Sony, Nagra) went
+through Vision OCR, which proved legible throughout the operation
+chapters. Sixteen sub-readers each extracted operator-interface facts
+from one manual against the seven claims implied by `docs/04`, with
+page citations; the synthesis and the comparison against `docs/04` are
+this agent's own. Same copyright handling as session 15: facts about
+conventions only, extractions stay in the scratchpad.
+
+**Result.** The survey survives a second reader. Confirmed again:
+exactly two named picture corrections (PHASE, SYNC) on every receiver
+that has controls; the ruler/coordinate phase-entry pattern (now with
+the FAX-207/208A/214 and JAX-91 evidence the first pass had skipped);
+forced start without exception; zero progress percentages in sixteen
+manuals; ring buffers of 12, 20, 30 and 200 images. Four contradictions
+and six additions are recorded in the new `docs/04` section; the two
+that matter most: Finding 2's "AUTO is a value, never a mode toggle" is
+contradicted by the JAX-9B, JAX-91 and SFAX-500 (the JAX-9B evidence
+was already in session 15's own bullet list), and Finding 5's pinning
+is not universal — the SR-97, the largest store at 200 images, has no
+lock. The first does not change the design takeaway (AUTO-as-value
+stays, as a choice); the second strengthens Sara's drop-LOCK decision.
+
+**Notable additions for M4.** Slant has no measurement aid in the
+entire corpus — every ruler serves PHASE only — so Nova's measured-ppm
+SYNC override is a place to beat the industry, not match it. The 1980s
+Furunos print `Phase OK` / `Phase NG` on each chart header: precedent
+for stamping decode QA onto saved images. The buffered-but-never-
+re-rendered 1980s Furunos (corrections "effective only while the
+printer is operative") give the live-view-never-revised decision
+precedent even where the data to revise existed. Nagra FAXDM's
+"minimal" verdict is partly artifact: the scan's right text column is
+physically cropped away. The Sony CRF-V21 PDF is confirmed a
+principles booklet; its real Operating Instructions are not in the
+corpus.
+
+**Validation.** None applicable — no code changed. The verification is
+the document comparison itself, done claim by claim with page
+citations, recorded in `docs/04`.
+
+**Two decisions taken by Sara after the survey, closing the last open
+M4 questions.** (1) The live→saved handoff: **show the transition** —
+the live view is labelled provisional from the first row, and the saved
+image replaces it in the same pane, once, at end of transmission. (2)
+The PNG writer: **hand-rolled encoder with uncompressed deflate
+blocks**, no new dependency. Both recorded in `docs/04` and
+`ROADMAP.md`. With these, every open `docs/03`/`docs/04` design
+question has an answer.
+
+**One more decision the same day**, when Sara asked how manual
+correction fits the replace-once handoff: (3) corrections exist at
+**both moments** with the same two-number surface — forward-only on the
+live preview, non-destructive re-render from retained raw on the saved
+image — and an override set during reception **seeds the batch
+re-decode as its initial anchor**, with per-station persistence.
+Recorded in `docs/04` and `ROADMAP.md`.
+
+**Next step:** design the FLTK/RtAudio shell against the decided
+architecture in `docs/04` — the live/saved two-path split, the
+streaming tone detector, the PHASE/SYNC override surface, the status
+line, the named protocol states, and the provisional→saved transition.
+No design question remains open; the gate for GUI code is fully clear.
+
+---
+
 ## 2026-08-13 — Session 15: sixteen commercial receivers agree on two knobs, and that settles M4
 
 Agent: Claude Opus 5. Code changed: none. Files changed:
