@@ -7,6 +7,196 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 19, continued (2): the About text, and the day's work committed and merged
+
+Agent: Kimi. Code changed: none. Files changed:
+`docs/05-m4-shell-design.md` (§8.3 item 8 gains the About content),
+`ROADMAP.md`, `SESSION-LOG.md`.
+
+**The last design answer of the day.** Sara asked whether the GUI design
+should be finished, whether there should be an About window, and what it
+should say. The first two were already settled (complete on paper since
+session 17; About decided session 18 as load-bearing under GPLv3+). The
+third was the real question, and the answer is now in `docs/05` §8.3
+item 8, approved verbatim: the GPL's own boilerplate shape for the
+copyright/no-warranty paragraphs, the standards line keeping its
+"design target — no certified-compliance claim" qualifier, and the
+NOTICE pointer the provenance rule requires reachable from the program.
+Deliberately absent: a version number (release question) and any mention
+of Isobar or KG-FAX (standards-first; lineage lives in NOTICE/docs/00).
+The coding session copies this text; it does not invent one.
+
+**Committed and merged at Sara's request.** The whole day's work —
+`live/ruler.*`, the `ruler_mapping` and `gui_layout` screamers, the
+`nova-live` library wiring, the five §8.4 behaviour answers, the About
+text, and this log — went onto branch `m4-screamers-design` as one
+commit and merged to `main` (fast-forward). No remote is configured, so
+nothing is left unpushed. 25/25 pass on the merge.
+
+**Next step, unchanged and now unblocked: the §8.3 + §8.4 surfaces in
+code.** Sara opens the GUI coding session next. Everything it needs is
+on paper and approved: the window geometry and its two screamers, the
+menu bar with folder chooser and this About text, the preference file
+next to the executable, Zoom with left-edge retention, `Fl_Scroll` and
+the ruler consuming `live/ruler.hpp`, the serialized transport
+(insensitive "Start" during DECODING), Force Start gated on explicit
+IOC + rate. After it: `nova-live` proper — streaming resample/demod and
+`live_demod_equiv`.
+
+---
+
+## 2026-08-13 — Session 19, continued: five behaviour questions, and design is complete for the third time
+
+Agent: Kimi. Code changed: none — and that is the point of this entry.
+Files changed: `docs/05-m4-shell-design.md` (new §8.4, §12 items 15–19,
+status line), `ROADMAP.md`, `SESSION-LOG.md`.
+
+**What happened, stated plainly because the log's honesty rule covers
+agents too.** Sara launched the skeleton "to continue the design", and
+asked what Start versus Force Start means. The question was answered from
+`docs/04`/`docs/05`, she said "yes, let's continue work" — and the agent
+read that as the §8.3 **coding** session and rewrote `gui/nova-gui.cpp`
+(menu bar, Zoom, `Fl_Scroll`, live ruler, Start/Stop) before she stopped
+it: *"no, don't link gui to core yet, let's finish GUI design first,
+before any coding."* Her session-17 rule — UI design and UI coding stay
+in separate sessions — was in `docs/05` the whole time, and the agent
+had quoted it back to her earlier the same day. The rewrite was reverted
+uncommitted; the tree is back to the committed skeleton plus session
+19's test layer. The session-18 lesson applies to agents as much as to
+layouts: a question you cannot see is not a question you have answered,
+and Sara's "continue" meant the design.
+
+**Five questions, all DECIDED 2026-08-13 (Sara), written up in `docs/05`
+§8.4.** All five were about *behaviour over time* — persistence, the
+zoom-scroll interaction, the transport cycle — which is the dimension
+neither the paper design nor the static skeleton had exercised:
+
+1. **Settings persist in a preference file next to the executable** —
+   the image folder and the per-station PHASE/SYNC memory. Recorded
+   consequence: a non-writable directory (system-wide install) means no
+   persistence for the session, never a failure.
+2. **Zoom keeps the left edge** — the column at the pane's left edge
+   stays put across a zoom change; no re-centering, no jump to start.
+3. **Force Start requires explicit IOC and rate** — with both set to
+   numbers it starts immediately; with either on Auto the button is
+   insensitive. Deactivate, don't prompt.
+4. **During DECODING the button is insensitive, reading "Start"**,
+   active again at SAVED. The button never reads a state name — states
+   live in the status line [Finding 3]. The first GUI is serialized; an
+   overlapping next reception (Start active during DECODING) stays
+   architecturally available but unbought.
+5. **The ruler appears suddenly when AUTO resolves the IOC** — blank
+   until measured, then lit, no transition.
+
+One clarification that fell out and is worth keeping: **SAVED is a
+status-line state, not a button state.** The question only made sense
+once that was untangled.
+
+**Contradictions found: none in the documents** — the only false move
+was the agent's, recorded above. `docs/05`'s status line now reads
+complete for the third time; the count of times "no design question
+remains open" has been written and revised is itself the evidence for
+the paragraph under §12 item 19.
+
+**Validation.** None applicable — no code changed. The suite still
+passes 24 (+1 with the GUI), verified after the revert.
+
+**Next step: the §8.3 + §8.4 surfaces in code — the GUI coding session,
+now that the design is complete.** Menu bar with the folder chooser and
+About; the preference file next to the executable; Zoom with left-edge
+retention; `Fl_Scroll` around the pane; the ruler consuming
+`live/ruler.hpp`; Start/Stop with the serialized transport (insensitive
+"Start" during DECODING); Force Start gated on explicit IOC + rate. The
+reverted session-19 draft of exactly this exists in no file — it was
+deleted, and rewriting it is cheap now that the paper is right. Then
+`nova-live` proper: streaming resample/demod and `live_demod_equiv`,
+unchanged.
+
+---
+
+## 2026-08-13 — Session 19: the two screamers the window owed — `gui_layout` and `ruler_mapping`
+
+Agent: Kimi. Code changed: `live/ruler.hpp`, `live/ruler.cpp` (new — the
+first `nova-live` code), `tests/test_ruler_mapping.cpp` (new),
+`tests/gui_layout.cmake` (new), `CMakeLists.txt` (the `nova-live`
+library, both ctest targets). Files changed: `docs/05-m4-shell-design.md`
+(§8.3 tick-step clarification, §9 items 7–8 marked built, the count
+arithmetic, §13), `ROADMAP.md`, `START-HERE.md`, `SESSION-LOG.md`. No
+branch cut; the work sat on `main`'s working tree uncommitted at the
+time of writing, for Sara to place as she sees fit.
+
+**Task as accepted:** the next step exactly as session 18 left it —
+`gui_layout` and `ruler_mapping` as ctest targets, then the
+"(+1 with the GUI)" wording in `START-HERE.md`.
+
+**Result: both built, both passing, and one of them earned its keep on
+first contact.**
+
+**`ruler_mapping` failed its first run — on the claim it exists to
+defend, almost.** 31 failures, all of them "Fit: image fits, no scroll".
+`max_scroll_px` computes `cols * (pane/cols) - pane`, which at Fit is one
+floating-point rounding away from zero in either direction; when it lands
+a hair positive the function reports a scrollable range of ~1e-13 px, and
+a scrollbar would appear that scrolls nothing. The fix is in the library,
+not the test: a residue that small *is* the "image fits" answer, so
+`max_scroll_px` snaps it to 0. The GUI will test scrollbar visibility
+with exactly this function, which is why the honest zero had to come from
+`nova-live` and not from a tolerance in the screamer.
+
+**Contradictions found: two, both in the paperwork, both resolved in
+place.**
+
+1. `docs/05` §8.3's tick-step example — "At Fit on an IOC 576 chart that
+   is 200 columns" — did not say at which window, and it matters: the
+   stated rule (smallest step leaving ≥ 40 px between labels) gives 200
+   columns at and near the ~880 px minimum window but **100 at the 980 px
+   default**. The rule is self-consistent; the example was
+   under-specified. §8.3 now says so, and `ruler_mapping` pins all three
+   numbers. (The doc's other example, 20 columns at 200%, holds
+   unconditionally.)
+2. Session 18's decided suite-count wording, **"23 (+1 with the GUI)"**,
+   was arithmetically unreachable under its own next step: guarding both
+   new tests gives +2, and §9's design has `ruler_mapping` needing no
+   window, i.e. unguarded, which moves the base count. Resolved as **"24
+   (+1 with the GUI)"** — `ruler_mapping` tests dependency-free
+   `nova-live` code and runs in every build (24), `gui_layout` stays
+   guarded (+1). This keeps Sara's "+1 with the GUI" literally true and
+   matches the project's test-everywhere rule; it is recorded here and in
+   `docs/05` §9 so the change from the decided wording is traceable, and
+   Sara should say if she wants it the other way.
+
+**Design notes for whoever consumes this.** The mapping lives in
+`live/ruler.hpp` as pure functions — `zoom_scale`, `scrolled`,
+`column_at`, `x_at`, `tick_step`, `max_scroll_px` — so the click handler,
+the ruler's draw code and the screamer all call the same arithmetic and
+cannot disagree. Scroll is clamped *by construction* (`scrolled()` is the
+only way in), and a click past the image's right edge maps to a column
+≥ `image_cols`, which the click handler must reject — pinned by the test.
+The ruler is never constructed with unknown width: while IOC is unknown
+it is blank and disabled [docs/05 §8.3 item 1], which is GUI behaviour,
+not a state of the mapping.
+
+**Validation.** 25/25 pass with the GUI (88 s), zero warnings on the new
+code. `NOVA_BUILD_GUI=OFF`: 24/24 pass, no `nova-gui` produced, and
+`ruler_mapping` runs there as designed. `gui_layout` drives the real
+binary through `cmake -P`, so it stays portable; it checks ruler == pane
+interior at 740x420, 980x700, 1200x800, 1400x900 and 1920x1080, and
+built-at == dragged-to byte-for-byte at both ends of the range.
+
+**Next step: the GUI session — the §8.3 surfaces in code.** Menu bar
+(File / Settings / Help), the Zoom control (Fit / 25 / 50 / 100 / 200),
+`Fl_Scroll` around the pane, the ruler drawing ticks from
+`live/ruler.hpp`, Start relabelling to Stop while receiving. Two things
+that session must not miss: the Zoom control raises the minimum window
+width to ~880 [docs/05 §8.3], and `gui_layout`'s size list includes
+740x420, so the test moves when `kMinW` does; and the mapping functions
+already exist, so no column arithmetic may be written inside a widget.
+After it: `nova-live` proper — streaming resample/demod by
+block-with-overlap, with `live_demod_equiv` as its screamer, unchanged
+from session 18's plan.
+
+---
+
 ## 2026-08-13 — Session 18, continued: eight questions from a window with nothing behind it
 
 Agent: Claude Opus 5. Code changed: none. Files changed:

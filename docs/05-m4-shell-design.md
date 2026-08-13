@@ -1,11 +1,9 @@
 # 05 — M4 shell design: FLTK + RtAudio
 
 Status: **complete — every design question in this document is decided**
-(Sara, 2026-08-13, session 17: all five originally open, plus the sixth
-that her retention answer raised). Two of her answers corrected the
-design rather than merely choosing from it: the retention rule (§3) and
-the status panel (§8.1), the latter because Nova cannot know the
-frequency at all. **The next step is code, not paper.**
+(Sara, 2026-08-13, sessions 17–19: the original five plus the retention
+follow-up, the eight from the skeleton, and the five from preparing to
+code it). **The next step is code, not paper.**
 
 This document is the design that `docs/04`'s answers imply. `docs/04`
 settled *what the operator sees and what the machine promises*; this one
@@ -562,8 +560,10 @@ phase-entry surface [docs/04 answer 8]. Two consequences:
 
 - **Tick spacing is chosen from the displayed scale, not fixed**: the
   smallest step in {10, 20, 50, 100, 200, 500} image columns that leaves
-  ≥ 40 px between labels on screen. At Fit on an IOC 576 chart that is
-  200 columns; at 200% it is 20.
+  ≥ 40 px between labels on screen. At 200% it is 20 columns. At Fit it
+  depends on the window, which the example as first written did not say:
+  200 columns at and near the ~880 px minimum window, 100 at the 980 px
+  default (pinned by `ruler_mapping`, session 19).
 - **While IOC is unknown the ruler is blank and disabled.** In AUTO,
   before a start tone, Nova does not know whether the chart is 1810 or
   905 columns wide, and a ruler drawn on a guess would be a lie in the
@@ -633,6 +633,38 @@ every chart [docs/04 Finding 4 additions].
 where the licence and no-warranty notice live, with a pointer to `NOTICE`
 for the DSP reuse attributions the provenance rule requires.
 
+**Its content, approved verbatim by Sara (session 19)** — the coding
+session copies this text rather than inventing its own. The middle two
+paragraphs follow the GPL's "how to apply" boilerplate deliberately; the
+standards line keeps the "design target, no certified-compliance claim"
+qualifier because dropping it would change what Nova promises; the
+NOTICE pointer is what the provenance rule requires to be reachable from
+the program itself. No version number until versioning exists (a release
+question), and no mention of Isobar or KG-FAX — Nova is standards-first,
+and its lineage story lives in `NOTICE`/`docs/00`, not here.
+
+> **Nova** — an HF weather facsimile (WEFAX) decoder
+>
+> Copyright © 2026 Nova contributors
+>
+> Nova is free software: you can redistribute it and/or modify it under
+> the terms of the GNU General Public License as published by the Free
+> Software Foundation, either version 3 of the License, or (at your
+> option) any later version.
+>
+> Nova is distributed in the hope that it will be useful, but WITHOUT ANY
+> WARRANTY; without even the implied warranty of MERCHANTABILITY or
+> FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+> for more details — the full text is in the LICENSE file distributed
+> with this program.
+>
+> Built from public standards: WMO-No. 386 Vol. I Part III §5 (the
+> signal) and ISO 9876:2015 §4.2 (receiver behaviour as a design target —
+> no certified-compliance claim).
+>
+> DSP reuse attributions and linked-library licences (FLTK, RtAudio):
+> see the NOTICE file.
+
 **Where 7 and 8 live: a menu bar — File / Settings / Help — above the
 control row.** No receiver in the corpus has one, and that is not an
 objection: the survey constrains the *picture-correction* surface, which
@@ -645,6 +677,53 @@ control row sets the window's minimum width.** Adding `Zoom [Fit▾]`
 costs about 120 px there, so the minimum window width rises from 740 px
 to roughly 880. The picture still does not set the floor; the control row
 does, now more than before.
+
+### 8.4 Settings persistence, zoom-scroll, and the transport cycle
+
+**Five questions raised by Sara while looking at the skeleton (session
+19), all DECIDED 2026-08-13.** They are grouped here because they are all
+about how the window behaves over time rather than where anything sits.
+
+**1. Settings persist in a preference file next to the program.** The
+image folder [§8.3 item 7] and the per-station PHASE/SYNC memory [§7]
+live in a plain preference file in the same directory as the executable —
+visible, inspectable, movable with the program, and no hidden platform
+store. Recorded consequence: if that directory is not writable (a
+system-wide install), Nova runs without persistence for the session
+rather than failing — settings are a convenience, never a precondition.
+
+**2. Zoom keeps the left edge.** On a zoom change, the image column at
+the pane's left edge stays where it was; the scroll position is
+preserved and clamped if the new scale shrinks the range. No re-centering
+on the clicked feature, no jump to the start — the operator's frame of
+reference does not move.
+
+**3. Force Start requires explicit IOC and rate.** With both dropdowns
+set to numbers, Force Start begins drawing immediately, skipping tone
+detection [§4]. With either on Auto it cannot start — the operator must
+pick values first. Mechanics: the button is **insensitive until both are
+explicit**, the same deactivate-rather-than-fake rule the rest of the
+shell follows [§3's PHASE/SYNC rule], rather than a click that opens a
+prompt.
+
+**4. The button during DECODING is insensitive, reading "Start".**
+[DECIDED 2026-08-13, Sara, session 19.] Two things were settled to get
+there. First, the button never reads a state name — "Decoding" is a
+state, and states live in the status line [docs/04 Finding 3]; a button
+that narrates is a fake control, and the progress bar exists precisely
+because DECODING is the one state long enough to deserve it. Second, the
+first version of the GUI is **serialized**: the button is greyed while
+the batch decode runs and active again at SAVED, so one thing happens at
+a time. The alternative — an active "Start" letting the next reception
+begin monitoring while the previous decode still runs — stays
+architecturally available (the thread design in §2 permits it, and §8.2
+already accepts overlap elsewhere), but it would make the state machine
+two-track, and that complexity is not bought yet.
+
+**5. The ruler appears suddenly when AUTO resolves the IOC** — accepted
+as designed. It is blank and disabled until the start tone, then lights
+up with no transition and no announcement, the same blank-until-measured
+rule the clock and timebase readouts already follow [§4].
 
 ---
 
@@ -685,9 +764,9 @@ skeleton found the same layout bug twice by two different mechanisms:
    equal the image pane's interior (`x + 2`, `w - 4`) at several window
    sizes, and a window *built* at a size produces output identical to one
    *dragged* to it (`--size` vs `--resize`). Pins §8.0 corrections 2 and
-   4. Guarded by `NOVA_BUILD_GUI`, so the suite count is 23, or 24 with
-   the GUI [wording DECIDED 2026-08-13, Sara, session 18: state it as
-   "23 (+1 with the GUI)"].
+   4. Guarded by `NOVA_BUILD_GUI` — it is the +1 in the suite count.
+   **[BUILT session 19: `tests/gui_layout.cmake`, driving the binary
+   through `cmake -P`.]**
 8. **`ruler_mapping`** — the stronger form of the same claim, and the one
    §8.3 needs: **the image column under a given screen x is the column
    the ruler names at that x**, at every zoom value, every horizontal
@@ -695,11 +774,19 @@ skeleton found the same layout bug twice by two different mechanisms:
    mapping function the click handler uses, so it needs no window and no
    audio device — which is also the argument for that mapping being a
    pure function in `nova-live` rather than arithmetic inside a widget.
+   **[BUILT session 19: `live/ruler.{hpp,cpp}` + `tests/
+   test_ruler_mapping.cpp`, running unguarded in every build.]**
 
-Registered as a gap up front: **nothing here tests RtAudio, and after
-screamers 7 and 8 the FLTK gap is narrowed rather than closed.** Device
-enumeration, callback behaviour under xrun, and widget wiring are still
-verified by running the app, not by a suite. That is the boundary the
+The suite count with both built is **"24 (+1 with the GUI)"** — session
+18's decided wording said "23 (+1 with the GUI)", which assumed item 8
+would be guarded too; but item 8 tests a dependency-free `nova-live`
+function, and a test that can run everywhere should run everywhere, so
+the base count moved to 24 and the GUI conditional stayed at +1.
+
+Registered as a gap up front: **nothing here tests RtAudio, and with
+screamers 7 and 8 built (session 19) the FLTK gap is narrowed rather
+than closed.** Device enumeration, callback behaviour under xrun, and
+widget wiring are still verified by running the app, not by a suite. That is the boundary the
 three-layer split in §1 is drawn to make small.
 
 ---
@@ -868,21 +955,39 @@ question set stays in one place.
 14. ~~**An About box?**~~ Yes; GPLv3+ makes it load-bearing rather than
     decorative. It and Settings live in a File / Settings / Help menu bar.
 
-**No design question remains open, again** — every item in `docs/03`,
-`docs/04` and this document has an answer, and items 7–14 were all decided
-the day they were asked. The claim is worth less than it was on 17's
-reading, though, and the reason is worth keeping: **five of the eight new
-questions were about surfaces this document had simply never mentioned**,
-and none of them surfaced while the design was on paper. A window with
-nothing behind it was enough to find them. Expect the same when the
-picture area first draws real pixels.
+### Raised by Sara preparing the §8.3 coding session (session 19)
+
+Four decided the day they were asked, one open; all written up in §8.4.
+
+15. ~~**Where do settings persist between launches?**~~ A plain
+    preference file in the same directory as the executable; a
+    non-writable directory means no persistence for the session, never a
+    failure.
+16. ~~**What happens to the scroll position on a zoom change?**~~ The
+    left edge is kept; no re-centering, no jump to the start.
+17. ~~**Force Start with the dropdowns on Auto?**~~ It cannot start —
+    the button is insensitive until IOC and rate are both explicit.
+18. ~~**The button during DECODING?**~~ Insensitive, reading "Start";
+    active again at SAVED. Never a state name — states live in the status
+    line. The first GUI is serialized; an overlapping next reception
+    stays architecturally available but unbought.
+19. ~~**How does the ruler appear when AUTO resolves the IOC?**~~
+    Suddenly, with no transition — the blank-until-measured rule.
+
+**No design question remains open, a third time** — item 18 closed the
+same day it was asked. The pattern from session 18 repeated at half
+strength: these five were, again, mostly about behaviour this document
+had never specified — persistence, zoom-scroll interaction, the
+transport cycle — and they surfaced the moment someone prepared to *code*
+the surfaces rather than to look at them. Paper closes the questions it
+can see; code and windows find the rest.
 
 ---
 
 ## 13. Registered gaps
 
-- No screamer covers RtAudio; the FLTK gap narrows to widget wiring and
-  callback behaviour once §9's screamers 7 and 8 exist (§9).
+- No screamer covers RtAudio; the FLTK gap narrowed to widget wiring and
+  callback behaviour when §9's screamers 7 and 8 landed (session 19) (§9).
 - Live decode inherits the short-baseline gap already registered in
   `ROADMAP.md`: on a faded signal, 120 s windows of GYA 2300Z give −1223
   to +320 ppm. The preview's forward EMA (§6) will be wrong there, and

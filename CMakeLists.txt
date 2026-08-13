@@ -24,6 +24,16 @@ add_library(nova-core STATIC
 )
 target_include_directories(nova-core PUBLIC core)
 
+# nova-live: everything M4 adds that can be wrong about a signal, with no
+# FLTK, no RtAudio and no real clock [docs/05 §1], so a test can drive it
+# with a fixture instead of a sound card. Dependency-free and built
+# unconditionally, like nova-core. Starts with the ruler's column mapping
+# (live/ruler.cpp), which the GUI session consumes but does not own.
+add_library(nova-live STATIC
+  live/ruler.cpp
+)
+target_include_directories(nova-live PUBLIC live)
+
 add_executable(nova-decode cli/nova-decode.cpp)
 target_link_libraries(nova-decode PRIVATE nova-core)
 
@@ -270,12 +280,21 @@ add_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
 add_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav --expect-none)
 
+# §9 screamer 8 [docs/05]: the ruler's column mapping — the column under a
+# screen x is the column the ruler names there, at every zoom, scroll
+# offset and both IOC widths. Unguarded: it tests a pure nova-live
+# function, so it needs no window and no audio device and runs in every
+# build, including NOVA_BUILD_GUI=OFF. Suite count is 24, +1 with the GUI.
+add_executable(nova-test-ruler tests/test_ruler_mapping.cpp)
+target_link_libraries(nova-test-ruler PRIVATE nova-live)
+add_test(NAME ruler_mapping COMMAND nova-test-ruler)
+
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an
 # external dependency [docs/05 §11]. The rule that shapes this block: a
 # missing toolkit skips the target and never fails the build, because the
-# core, the CLIs and all 23 tests must keep building on a machine with
-# neither library installed.
+# core, the CLIs and the 24 GUI-independent tests must keep building on a
+# machine with neither library installed.
 #
 # Found by their own tools rather than by find_package: neither FLTK 1.4.5
 # nor RtAudio 6.0.1 installs a CMake config package under Homebrew, but both
@@ -317,6 +336,15 @@ if(NOVA_BUILD_GUI)
     # as a filename. LINK_FLAGS is a string and goes through verbatim.
     set_property(TARGET nova-gui APPEND_STRING PROPERTY
       LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+    # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
+    # window sizes, and a window built at a size producing --metrics
+    # output identical to one dragged to it. The first test in the
+    # project to cover FLTK at all, and the +1 in "24 (+1 with the GUI)".
+    # It drives the built binary through a CMake script so it stays
+    # portable; it exists only when nova-gui does.
+    add_test(NAME gui_layout COMMAND ${CMAKE_COMMAND}
+      -DNOVA_GUI=$<TARGET_FILE:nova-gui>
+      -P ${CMAKE_SOURCE_DIR}/tests/gui_layout.cmake)
     message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
                    "${NOVA_RTAUDIO_VERSION})")
   endif()

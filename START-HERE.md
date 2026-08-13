@@ -14,7 +14,9 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(23 test suites: three synthetic matrices + 20 real-fixture screamers.)
+(24 test suites (+1 with the GUI): three synthetic matrices + 20
+real-fixture screamers + the ruler mapping; `gui_layout` joins when FLTK
+and RtAudio are installed.)
 See the M4 shell, if FLTK and RtAudio are installed — an empty window with
 no decode behind it yet: `./build/nova-gui`
 It also answers without opening anything: `./build/nova-gui --devices` lists

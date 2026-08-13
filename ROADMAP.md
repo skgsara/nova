@@ -385,10 +385,10 @@ Pending:
   pane's *interior*, and FLTK's resizable-group scaling breaks that at
   every size but the built one, so the shell computes its layout on
   resize instead of scaling children.
-  - **Registered gap:** no screamer covers the layout. The ruler/pane
-    alignment has now been wrong twice — once as written, once again
-    under resize — and `nova-gui --metrics` makes the check three lines.
-    It would be the first test in the project to cover FLTK at all.
+  - **Layout gap closed (session 19):** `gui_layout` pins the ruler/pane
+    interior alignment at five window sizes and built-at == dragged-to,
+    from `nova-gui --metrics` — the first test in the project to cover
+    FLTK. The alignment had been wrong twice before it got a screamer.
 - **Picture area, transport and chrome [DECIDED 2026-08-13, Sara,
   session 18; docs/05 §8.3]** — eight questions Sara asked on seeing the
   skeleton, five of them about surfaces docs/05 had never specified.
@@ -420,15 +420,31 @@ Pending:
   - **About**, made load-bearing by GPLv3+, with Settings in a
     File / Settings / Help menu bar. No receiver in the corpus has a menu
     bar; the survey constrains the picture-correction surface, not
-    whether a desktop application has desktop chrome.
+    whether a desktop application has desktop chrome. The About text is
+    approved verbatim (session 19) and lives in docs/05 §8.3 item 8 —
+    the coding session copies it, it does not invent one.
   - Metric consequence: the Zoom control costs ~120 px in the control
     row, so the minimum window width rises from 740 px to ~880. The
     control row still sets the floor, not the picture.
-  - Two more screamers planned from this: `gui_layout` (ruler/pane
-    alignment, built-size == dragged-size) and `ruler_mapping` (the
-    column under a screen x is the column named there, at every zoom,
-    scroll offset and both IOCs). Suite count becomes **"23 (+1 with the
-    GUI)"** [wording decided by Sara, session 18].
+  - **Behaviour over time [DECIDED 2026-08-13, Sara, session 19; docs/05
+    §8.4]** — five questions from preparing the §8.3 coding session, four
+    decided: settings persist in a preference file next to the executable
+    (a non-writable directory means no persistence, never a failure);
+    a zoom change keeps the pane's left edge; Force Start is insensitive
+    until IOC and rate are both explicit; the ruler appears suddenly when
+    AUTO resolves the IOC; and during DECODING the button is insensitive,
+    reading "Start", active again at SAVED — the first GUI is serialized,
+    with an overlapping next reception architecturally available but
+    unbought.
+  - The two screamers from this **[built session 19]**: `gui_layout`
+    (ruler/pane alignment, built-size == dragged-size; guarded by
+    `NOVA_BUILD_GUI`) and `ruler_mapping` (the column under a screen x is
+    the column named there, at every zoom, scroll offset and both IOCs;
+    the mapping is a pure function in `live/ruler.*`, the first
+    `nova-live` code, tested unguarded). Suite count is **"24 (+1 with
+    the GUI)"** — session 18's wording said "23 (+1)", but `ruler_mapping`
+    tests dependency-free code and runs in every build, so the base count
+    moved to 24 and the GUI conditional stayed +1.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind
