@@ -34,7 +34,8 @@ const char* phasing_witness_text(const nova::DecodeResult& r) {
 void usage() {
     std::fprintf(stderr,
                  "usage: nova-decode in.wav out.pgm [--lpm 60|90|120] "
-                 "[--ioc 288|576] [--start SEC] [--no-autolock]\n");
+                 "[--ioc 288|576] [--dev 150|400] [--start SEC] "
+                 "[--no-autolock] [--no-phasing] [--no-segment]\n");
 }
 }  // namespace
 
@@ -44,11 +45,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     nova::DecodeOptions opt;
+    double deviation = 400.0;
     for (int i = 3; i < argc; i++) {
         if (!std::strcmp(argv[i], "--lpm") && i + 1 < argc)
             opt.lpm = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--ioc") && i + 1 < argc)
             opt.ioc = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--dev") && i + 1 < argc)
+            deviation = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--start") && i + 1 < argc)
             opt.start_sec = std::atof(argv[++i]);
         else if (!std::strcmp(argv[i], "--no-autolock"))
@@ -62,20 +66,29 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
+    const bool bad_lpm = opt.lpm != 0 && opt.lpm != 60 && opt.lpm != 90 &&
+                         opt.lpm != 120;
+    const bool bad_ioc = opt.ioc != 0 && opt.ioc != 288 && opt.ioc != 576;
+    if (bad_lpm || bad_ioc ||
+        (deviation != 150.0 && deviation != 400.0)) {
+        usage();
+        return 2;
+    }
 
     try {
         nova::Wav w = nova::read_wav(argv[1]);
         std::vector<float> mono =
             nova::resample(w.samples, w.sample_rate, kInternalRate);
         std::vector<float> video =
-            nova::fm_demod(mono, kInternalRate, 1900.0, 400.0);
+            nova::fm_demod(mono, kInternalRate, 1900.0, deviation);
         nova::DecodeResult r = nova::decode_fax(video, kInternalRate, opt);
         nova::write_pgm(argv[2], r.img);
         std::printf(
-            "lpm=%d (measured %.3f)  clock=%+.1f ppm  lines=%d  "
-            "locked=%d  clamped=%d  max_step=%.2f px  dead=%s(%.2f)%s\n",
-            r.lpm, 60.0 / r.line_period_s, r.clock_ppm, r.lines,
-            r.locked_lines, r.clamped_corrections, r.max_step_px,
+            "lpm=%d (measured %.3f)  ioc=%d  dev=%.0f Hz  clock=%+.1f ppm  "
+            "lines=%d  locked=%d  clamped=%d  max_step=%.2f px  "
+            "dead=%s(%.2f)%s\n",
+            r.lpm, 60.0 / r.line_period_s, r.ioc, deviation, r.clock_ppm,
+            r.lines, r.locked_lines, r.clamped_corrections, r.max_step_px,
             r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
                                                            : "white",
             r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");

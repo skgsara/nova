@@ -705,8 +705,25 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // at §4c, and the one scan is shared by both. See PhasingOptions::t_lo:
     // inside a known transmission the last opening before the picture is
     // the one that matters, and outside one the first is the safe answer.
+    // The tone scan also selects IOC when the caller did not: ISO §4.2.5
+    // makes the 300/675 Hz start signal the receiver's IOC selection, not
+    // merely a crop boundary. Keep the scan shared with segmentation and
+    // the phasing window rather than running it twice.
     const std::vector<ToneEvent> tones =
-        opt.segment ? detect_tones(video, fs) : std::vector<ToneEvent>();
+        (opt.segment || opt.ioc == 0) ? detect_tones(video, fs)
+                                      : std::vector<ToneEvent>();
+    int ioc = opt.ioc;
+    if (ioc == 0) {
+        ioc = 576;
+        for (const auto& e : tones)
+            if (e.kind == ToneKind::kStartIOC288) {
+                ioc = 288;
+                break;
+            } else if (e.kind == ToneKind::kStartIOC576) {
+                break;
+            }
+    }
+    res.ioc = ioc;
     {
         PhasingOptions popt;
         for (const auto& e : tones)
@@ -1176,14 +1193,15 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         }
     }
 
-    // --- 5. assembly: fit + segment-median residual ------------------------
+    // --- 5. assembly: segmented robust fit of the tracked residual --------
     // The template anchor is the sync-pulse start in image lines; in the
     // phasing region the best template match sits ~half a dead sector
-    // earlier (phasing is white-wedge-then-black, the mirror image).
-    // The local-median correction tracks that region-constant offset;
-    // the clamp lets the phasing->image transition through in one step
-    // while rejecting wild jumps.
-    const int width = (opt.ioc == 288) ? 905 : 1810;
+    // earlier (phasing is white-wedge-then-black, the mirror image). The
+    // local window is cut at change points and at the phasing/image
+    // boundary, a Theil-Sen line carries the residual ramp inside each
+    // segment, and the clamp rejects moves the lines on both sides did not
+    // vouch for.
+    const int width = (ioc == 288) ? 905 : 1810;
     const int out_lines = line_hi - line_lo;
     Image img;
     img.width = width;

@@ -10,14 +10,11 @@ Standards basis
 ---------------
 The decoded signal is specified by:
 
-The decoded signal is specified by:
-
   * WMO-No. 386 (Manual on the Global Telecommunication System),
     Volume I, Part III, section 5 — "Technical characteristics of
     equipment for meteorological facsimile (analogue) transmissions".
     Verified against the 2009 AND 2023 editions; the facsimile
-    provisions are identical except the sec. 5.5 restructuring noted
-    in docs/01.
+    provisions cited here are identical in the checked sections.
 
   * ISO 9876:2015, "Ships and marine technology — Marine facsimile
     receivers for meteorological charts" — used as the reference for
@@ -26,23 +23,36 @@ The decoded signal is specified by:
     it has not undergone formal type testing, and no claim of
     certified compliance is made.
 
-Third-party code lineage
-------------------------
+Third-party algorithm lineage
+-----------------------------
 Nova reuses and adapts algorithms from the following free-software
-projects, under their respective licences. Reused files keep their
-original copyright headers; the combined work is GPLv3+.
+projects, under their respective licences. Reuse to date is idea-level:
+every algorithm was re-implemented from the public sources, and no
+third-party code, tables, or files are present in this tree. The
+combined work is GPLv3+.
 
   * ACfax    — Andreas Czechanowski (DL4SDC), 1995–1998, GPLv2+.
-               FIR lowpass coefficient tables; fs/4 quadrature
-               downconversion and amplitude-normalized delay-line
-               discriminator architecture.
+               Quadrature mix-to-baseband and amplitude-normalized
+               delay-line discriminator architecture, re-implemented
+               in floating point in core/demod.cpp. ACFax's FIR
+               coefficient tables are NOT used; Nova computes its FIR
+               at runtime. The retained-raw-stream, non-destructive
+               adjustment architecture planned for M4 is also ACFax's
+               and will be recorded when it lands.
   * HamFax   — Christof Schmitt (DH1CS), 2001–2011, GPLv2+.
-               Program structure reference.
+               Feature-shape reference only (IOC scaling; the TX path
+               exists there alone in the lineage). Its
+               FaxDemodulator.cpp carries ACFax's FIR tables and is the
+               middle link of the lineage evidence. No code taken.
   * weatherfax_pi (OpenCPN weather fax plugin) — Sean D'Epagnier,
                GPLv3. Via yahfax, an improved adaptation of HamFax.
+               Median-with-spread-rejection treatment, re-implemented
+               with Nova's measured constants.
   * KiwiSDR FAX extension — jks-prv/KiwiSDR, file-level GPLv3
-               (D'Epagnier decoder adapted). Fractional sample-rate
-               tracking, phasing wedge-fit with median filtering.
+               (D'Epagnier decoder adapted). Phasing wedge-fit with
+               median filtering and the leaky miss-counter idea,
+               re-implemented with re-measured constants. Fractional
+               sample-rate tracking was surveyed but NOT taken.
   * JWX      — Paul Lutus, 2011–2013, GPLv2+. Studied as prior art
                (PLL demodulation, Goertzel tone detection; clock-
                corrected line accumulation for the sync fold); no code
@@ -50,8 +60,13 @@ original copyright headers; the combined work is GPLv3+.
   * Isobar   — Sara Sakuragawa, 2026, GPLv3+ (this project's author's
                own prior work). Per-line resync approach adapted.
   * fldigi   — David Freese (W1HKJ) et al., GPLv3+. Studied as prior
-               art.
+               art. Rule shapes reused with re-measured constants:
+               abandon a phasing run after N consecutive failures,
+               frequency coherence across a run, and per-line
+               correlation kept per line rather than collapsed to a
+               histogram mode. No code taken.
 
-GPLv2+ code is incorporated under the "or any later version" clause as
-GPLv3. If you believe attribution is missing or incorrect, please open
-an issue — provenance accuracy is a project rule, not a courtesy.
+No GPLv2+ code is incorporated; where reuse is of GPLv2+-licensed
+algorithms, the re-implementation is GPLv3+. If you believe attribution
+is missing or incorrect, please open an issue — provenance accuracy is
+a project rule, not a courtesy.

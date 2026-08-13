@@ -13,8 +13,9 @@
 // exists anywhere, is here.
 //
 // Method follows weatherfax_pi / KiwiSDR [docs/00]: fit the wedge over a
-// fraction of the line, take the median position over the phasing lines,
-// and reject the result if the 10-90% spread is too wide.
+// fraction of the line to identify phasing, then refine its position to
+// the local white leading-edge crossing, take the median over the phasing
+// lines, and reject the result if the 10-90% spread is too wide.
 #pragma once
 #include <vector>
 

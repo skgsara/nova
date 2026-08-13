@@ -22,7 +22,9 @@ namespace nova {
 
 struct DecodeOptions {
     int lpm = 0;                 // 60/90/120; 0 = measure from signal
-    int ioc = 576;               // 576 or 288 (picture width)
+    // 576/288 manual; 0 = select from the 300/675 Hz start tone, falling
+    // back to 576 when the recording carries none [ISO §4.2.3, §4.2.5].
+    int ioc = 0;
     double start_sec = 0.0;      // skip this much of the input
     bool autolock = true;        // per-line dead-sector relock
     // Per-line sync search window, fraction of a line. Must exceed the
@@ -78,6 +80,8 @@ enum class PhasingWitness {
 struct DecodeResult {
     Image img;
     int lpm = 0;
+    // Selected from the start tone unless DecodeOptions::ioc overrode it.
+    int ioc = 576;
     double line_period_s = 0.0;  // measured, fractional
     double clock_ppm = 0.0;      // measured vs nominal
     int lines = 0;

@@ -39,7 +39,7 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
     const double fs = opt.fs;
     const double period = fs * 60.0 / opt.lpm;  // samples per line
     const int plen = static_cast<int>(period);
-    const double dead = 0.045 * period;         // [WMO §5.1.3.3]
+    const double dead = opt.dead_frac * period;  // [WMO §5.1.3.3]
 
     // Build the video waveform v(t) in [0,1] (0=black, 1=white).
     std::vector<float> vid;
@@ -61,7 +61,8 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
     };
 
     if (opt.start_tone)
-        push_tone(opt.ioc == 288 ? 675.0 : 300.0, 5.0);  // [WMO §5.2.2]
+        push_tone(opt.ioc == 288 ? 675.0 : 300.0,
+                  opt.start_sec);  // [WMO §5.2.2]
 
     const int phasing_lines = opt.phasing ? opt.phasing_lines : 0;
     const int total_lines = phasing_lines + image_lines;
@@ -83,7 +84,9 @@ std::vector<float> gen_fax_signal(const Image& content, int image_lines,
             // has no per-line sync at all and must draw on the measured
             // clock alone.
             for (int i = 0; i < plen; i++)
-                line[i] = (opt.dead_pulse && i < 0.015 * plen) ? 0.0f : 1.0f;
+                line[i] = (opt.dead_pulse && i < opt.pulse_frac * plen)
+                              ? 0.0f
+                              : 1.0f;
             const int pic0 = static_cast<int>(0.036 * plen);
             const int pic1 = static_cast<int>(0.984 * plen);
             const int row = (l - phasing_lines) % content.height;

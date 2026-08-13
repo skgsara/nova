@@ -191,7 +191,16 @@ int main() {
             for (int cand : {60, 90, 120}) {
                 nova::PhasingResult p =
                     nova::detect_phasing(v, kFs, kFs * 60.0 / cand);
-                if (p.found && p.lines > best.lines) {
+                // A harmonic can contain MORE wedge-shaped windows (a 1 Hz
+                // phasing signal has two candidate windows at 2 Hz), so
+                // line count alone convicts the wrong rate. Agreement is
+                // the rate evidence: measured after edge refinement, the
+                // true rate spreads 0.0 samples while the 60->120 harmonic
+                // spreads 35.5.
+                if (p.found &&
+                    (!best.found || p.spread < best.spread - 1.0 ||
+                     (std::fabs(p.spread - best.spread) <= 1.0 &&
+                      p.lines > best.lines))) {
                     best = p;
                     best_lpm = cand;
                 }

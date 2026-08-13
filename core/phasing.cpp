@@ -90,19 +90,91 @@ Fit wedge_fit(const std::vector<float>& v, size_t s, size_t plen,
     std::vector<double> cum(plen + 1, 0.0);
     for (size_t i = 0; i < plen; i++) cum[i + 1] = cum[i] + v[s + i];
     const double total = cum[plen];
-    Fit best{0.0, -2.0};
-    for (size_t o = 0; o < plen; o++) {
+    auto score_at = [&](size_t o) {
         double wsum;
         if (o + wlen <= plen)
             wsum = cum[o + wlen] - cum[o];
         else
             wsum = (cum[plen] - cum[o]) + cum[o + wlen - plen];  // wrap
         const double rest = total - wsum;
-        const double sc = wsum / static_cast<double>(wlen) -
-                          rest / static_cast<double>(plen - wlen);
+        return wsum / static_cast<double>(wlen) -
+               rest / static_cast<double>(plen - wlen);
+    };
+    Fit best{0.0, -2.0};
+    for (size_t o = 0; o < plen; o++) {
+        const double sc = score_at(o);
         if (sc > best.score) best = Fit{static_cast<double>(o), sc};
     }
+    // A clean wedge can leave a run of adjacent offsets with the SAME
+    // score; taking the first turns the plateau's own width into fake
+    // per-line steps. A ±150 Hz synthetic exposes this: its positions
+    // snapped between two levels 10 samples apart and a linear recording
+    // was convicted as a stepping timebase. The edge estimate is the
+    // plateau's centre, not whichever end the scan reached first. If the
+    // whole line ties (a solid white line), keep the first offset: there
+    // is no edge to centre.
+    size_t lo = static_cast<size_t>(best.pos);
+    size_t hi = lo;
+    size_t span = 1;
+    constexpr double kTie = 1e-12;
+    while (span < plen) {
+        const size_t n = (lo + plen - 1) % plen;
+        if (std::fabs(score_at(n) - best.score) > kTie) break;
+        lo = n;
+        span++;
+    }
+    while (span < plen) {
+        const size_t n = (hi + 1) % plen;
+        if (std::fabs(score_at(n) - best.score) > kTie) break;
+        hi = n;
+        span++;
+    }
+    if (span < plen)
+        best.pos = static_cast<double>((lo + span / 2) % plen);
     return best;
+}
+
+// Refine a coarse wedge position to the leading edge of the white run
+// [WMO §5.2.3.4]. The wedge fit is the right detector, but its maximum is
+// a plateau whose position can move with the FM carrier phase: on a clean
+// ±150 Hz synthetic it alternated by 10 samples line to line, which the
+// timebase test then read as persistent steps. The 50% crossing of the
+// same edge stays put (measured 30.5 samples on every line). The wedge
+// answer still decides which feature is phasing; this only locates its
+// edge more honestly.
+double refine_leading_edge(const std::vector<float>& v, size_t s,
+                           size_t plen, double approx) {
+    const long c = static_cast<long>(approx);
+    const long rad = static_cast<long>(plen / 20);  // ±5% of a line
+    auto at = [&](long off) {
+        long k = (c + off) % static_cast<long>(plen);
+        if (k < 0) k += static_cast<long>(plen);
+        return static_cast<double>(v[s + static_cast<size_t>(k)]);
+    };
+    double lo = at(-rad), hi = lo;
+    for (long k = -rad; k <= rad; k++) {
+        const double x = at(k);
+        lo = std::min(lo, x);
+        hi = std::max(hi, x);
+    }
+    if (hi - lo < 0.1) return approx;  // no edge the crossing can name
+    const double mid = (lo + hi) / 2.0;
+    double best_off = approx - c;
+    double best_abs = static_cast<double>(rad) + 1.0;
+    for (long k = -rad; k < rad; k++) {
+        const double x0 = at(k), x1 = at(k + 1);
+        if (x0 < mid && x1 >= mid && x1 > x0) {
+            const double off = k + (mid - x0) / (x1 - x0);
+            if (std::fabs(off) < best_abs) {
+                best_abs = std::fabs(off);
+                best_off = off;
+            }
+        }
+    }
+    if (best_abs > rad) return approx;
+    double out = std::fmod(c + best_off, static_cast<double>(plen));
+    if (out < 0.0) out += plen;
+    return out;
 }
 
 }  // namespace
@@ -126,11 +198,11 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         const Fit a = wedge_fit(video, l * plen, plen, w_asym);
         const Fit s = wedge_fit(video, l * plen, plen, w_sym);
         if (a.score >= s.score) {
-            pos[l] = a.pos;
+            pos[l] = refine_leading_edge(video, l * plen, plen, a.pos);
             score[l] = a.score;
             asym[l] = 1;
         } else {
-            pos[l] = s.pos;
+            pos[l] = refine_leading_edge(video, l * plen, plen, s.pos);
             score[l] = s.score;
             asym[l] = 0;
         }

@@ -148,10 +148,12 @@ staircase is the open half of that milestone.
 Manual override of everything [ISO §4.2.6] is still untouched and needs
 the GUI (M4).
 
-Synthetic tests cover 60/90/120 lpm, IOC 288/576, ±150/±400 Hz
-deviation, clock error to ±250 ppm (including a white-only signal with
-nothing to lock onto), heavy noise, and both phasing waveforms.
-See `ROADMAP.md` for the milestone map.
+Synthetic tests cover the full {IOC 288, 576} × {60, 90, 120 lpm} matrix
+with automatic selection, ±150/±400 Hz deviation, a two-order-of-magnitude
+input-amplitude span, dead-sector tolerance edges, the eight-tone gray
+scale, clock error to ±250 ppm (including a white-only signal with nothing
+to lock onto), heavy noise, and both phasing waveforms. See `ROADMAP.md`
+for the milestone map.
 
 ## Platforms
 

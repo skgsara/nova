@@ -19,6 +19,11 @@ struct GenOptions {
     double noise = 0.0;     // Gaussian RMS, relative to full scale
     double amplitude = 0.5;
     double deviation = 400.0;  // 400 (HF) or 150 (LF) [WMO §5.5.2]
+    double start_sec = 5.0;    // start tone duration, 5-10 s [WMO §5.2.2]
+    // Tolerance knobs [WMO §5.1.3.3]: dead sector 4.5% ± 0.5%, black pulse
+    // no more than half of it. Defaults are the nominal/measured layout.
+    double dead_frac = 0.045;
+    double pulse_frac = 0.015;
     bool start_tone = true;
     bool phasing = true;
     bool stop_tone = true;

@@ -1,14 +1,14 @@
 # 01 — Signal specification (authoritative)
 
 The HF weather-fax signal as Nova implements it. Normative source:
-**WMO-No. 386, Vol. I, Part III, §5** — verified identical in the 2009
-and 2023 editions except where noted — with definitions from
-**ISO 9876:2015 §3**. Where the two differ in level of detail,
-WMO governs the signal; ISO governs what the receiver must do with it.
+**WMO-No. 386, Vol. I, Part III, §5** — verified against the 2009 and
+2023 editions — with definitions from **ISO 9876:2015 §3**. Where the two
+differ in level of detail, WMO governs the signal; ISO governs what the
+receiver must do with it.
 
 Citations `[WMO §x]` / `[ISO §x]` are the claim IDs of this project —
-every load-bearing number below traces to one. Section numbers follow
-the 2023 edition (§5.5 was restructured vs 2009; see note in §2 below).
+every load-bearing number below traces to one. Section numbers follow both
+WMO editions checked here.
 
 ## 1. Scanning geometry
 
@@ -27,6 +27,10 @@ Derived: full-line pixels at IOC 576 ≈ 576·π ≈ 1809.6 (JWX/others use
 
 ## 2. Subcarrier modulation (FM)
 
+Nova decodes the FM/F3C audio signal. WMO §5.3.1.1 also describes an AM
+variant; it is outside Nova's scope and is recorded here so the omission
+is deliberate.
+
 | Parameter | Value | Source |
 |---|---|---|
 | Centre frequency | 1900 Hz | WMO §5.3.1.2, §5.5.1 |
@@ -34,17 +38,26 @@ Derived: full-line pixels at IOC 576 ≈ 576·π ≈ 1809.6 (JWX/others use
 | White | 2300 Hz | WMO §5.3.1.2, §5.5.1 |
 | Audio shift at receiver | ±400 Hz (HF circuits), ±150 Hz (LF circuits) about the 1900 Hz centre | ISO §4.2.2, WMO §5.5.2 |
 | Tone stability | black/white freqs within 8 Hz over 30 s; 16 Hz over 15 min | WMO §5.3.1.2 |
-| Gray scale | 8 tones, linear: 1500, 1614, 1729, 1843, 1957, 2071, 2186, 2300 Hz | WMO §5.4.3 |
-| Input level range (receiver) | −10 dBm … +10 dBm equivalent | ISO §4.2.2 |
+| Gray scale | 8 tones, linear by recommendation: 1500, 1614, 1729, 1843, 1957, 2071, 2186, 2300 Hz | WMO §5.4.1, §5.4.3 |
+| Recording-unit AF input | at least −10 dBm … +10 dBm equivalent | ISO §4.2.2 |
+| FM receiver input | 0 … −35 dBm | WMO §5.3.3 |
+| Transmitter FM output / contrast | −10 … 0 dBm; black/white contrast 12–25 dB (transmitter-side context, not a decoder test) | WMO §5.3.2 |
 
-**Edition note (2023 vs 2009).** The 2023 edition restructured §5.5:
-§5.5.1 is now explicitly the audio **subcarrier** FM (1500/1900/2300 Hz),
-and a new §5.5.2 covers **direct FSK of the RF carrier** (HF: f₀±400 Hz;
-LF: f₀±150 Hz). In the 2009 text the ±400/±150 figures sat under the
-subcarrier heading and read ambiguously. For a decoder the practical
-content is unchanged and is pinned by ISO §4.2.2 anyway: the audio
-presented to the demodulator shifts by ±400 Hz (HF) or ±150 Hz (LF)
-about 1900 Hz. Nova's deviation mode implements exactly that.
+For software the two input ranges become one requirement: tolerate a wide
+amplitude span without the picture changing. The demodulator is
+amplitude-normalized by construction [ISO §4.2.2]; the amplitude sweep is
+pinned by `roundtrip [11]`. WMO §5.2.4's optional recording-level
+adjustment from the phasing signal is therefore unnecessary in Nova.
+
+**Edition note (2023 vs 2009), corrected by the session-13 audit.** The
+two editions' §5.5 texts checked here make the same distinction: §5.5.1 is
+the audio **subcarrier** FM (1500/1900/2300 Hz), and §5.5.2 is **direct
+FSK of the RF carrier** (HF: f₀±400 Hz; LF: f₀±150 Hz). An earlier note
+here called that a 2023 restructuring; the 2009 PDF carries the same two
+subsections, so that claim was wrong. For a decoder the practical content
+is pinned by ISO §4.2.2 anyway: the audio presented to the demodulator
+shifts by ±400 Hz (HF) or ±150 Hz (LF) about 1900 Hz. Nova's deviation
+mode implements exactly that.
 
 ## 3. Remote-control signals
 
@@ -157,6 +170,16 @@ library, so that registered gap stands.
   the chart is drawn half a line rotated. Verified against the picture:
   the title box lands at the left margin, as it does on GYA 2324Z.
   [`fixture_faded_phasing`, `tones [12]`]
+- **The wedge fit finds phasing; the white leading edge places it.** A
+  wedge-score plateau can move with the FM carrier phase even when the
+  signal's edge does not. The clean ±150 Hz synthetic exposed this in the
+  session-13 audit: the plateau alternated by 10 samples line to line and
+  the phasing timebase witness called a linear recording "steps". The
+  detector therefore keeps the wedge fit for membership and score, then
+  refines the position to the local 50% black→white crossing
+  [WMO §5.2.3.4]. Measured after the fix: LF synthetic timebase linear,
+  nonlinearity 0.0 samples; all fixture anchor tests unchanged.
+  [`roundtrip [6]`]
 - **Which phasing interval, when a recording holds two — never the
   longest.** Two shapes occur and they want opposite answers, which is why
   the control tones decide it. `jmh sample` holds two complete

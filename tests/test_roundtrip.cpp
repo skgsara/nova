@@ -2,15 +2,23 @@
 //
 // Claims defended (docs/01, docs/02):
 //   [WMO §5.3.1.2] 1500/1900/2300 Hz FM subcarrier decodes to gray
-//   [WMO §5.1.3.3] dead-sector edge is a usable per-line sync anchor
+//   [WMO §5.1.3.3] dead-sector edge is a usable per-line sync anchor,
+//                  across its whole tolerance range
 //   [ISO §4.2.6]   clock error is measured and corrected (no slant)
 //   [WMO §5.1.5]   60/90/120 lpm all decode; rate auto-detected
+//   [ISO §5.4.1]   all six {288,576} x {60,90,120} combinations decode,
+//                  rate AND IOC auto-selected
+//   [ISO §4.2.2]   input level 0.5..0.005 of full scale decodes identically
+//   [WMO §5.4.3]   gray scale is linear (eight-band step chart)
+//   [WMO §5.2.2]   a 10 s start tone is segmented to the same picture
+//                  boundary as a 5 s one
 //
 // Every assertion compares against a MEASURED bound, set between
 // known-bad (unlocked decode at +100 ppm) and known-good (locked).
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
 #include "../core/gen.hpp"
+#include "../core/resample.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -212,27 +220,48 @@ int main() {
               "noisy decode stays straight");
     }
 
-    std::printf("[4] 60 lpm / IOC 288 auto-detect + width\n");
+    // [ISO §5.4.1] the full rate/IOC matrix a receiver must accept: IOC 576
+    // and 288 crossed with 60/90/120 lpm. Both selectors are left on auto —
+    // lpm from the line comb, IOC from the 300/675 Hz start tone
+    // [ISO §4.2.3, §4.2.5] — so every leg also pins the auto-selection.
+    // Subsumes the old [4] (60 lpm / IOC 288) and [5] (90 lpm) groups.
+    std::printf("[4] ISO §5.4.1 matrix: {288,576} x {60,90,120}, all auto\n");
     {
-        nova::GenOptions g;
-        g.lpm = 60;
-        g.ioc = 288;
-        nova::DecodeOptions d;
-        d.ioc = 288;
-        nova::DecodeResult r = run(g, 100, d);
-        check(r.lpm == 60, "auto-detected 60 lpm");
-        check(r.img.width == 905, "IOC 288 width");
-    }
-
-    std::printf("[5] 90 lpm round-trip\n");
-    {
-        nova::GenOptions g;
-        g.lpm = 90;
-        nova::DecodeOptions d;
-        nova::DecodeResult r = run(g, 150, d);
-        check(r.lpm == 90, "auto-detected 90 lpm");
-        check(edge_stdev(crop_rows(r.img, 40, 150)) < 1.5,
-              "90 lpm decode straight");
+        for (int ioc : {288, 576}) {
+            for (int lpm : {60, 90, 120}) {
+                nova::GenOptions g;
+                g.lpm = lpm;
+                g.ioc = ioc;
+                nova::DecodeOptions d;  // lpm AND ioc auto: that is the test
+                nova::DecodeResult r = run(g, 120, d);
+                // Head = 5 s start tone + 30 phasing lines, in lines at
+                // this lpm; crop two lines inside it so the tone/phasing
+                // boundary row cannot leak into the straightness measure.
+                const int head = static_cast<int>(5.0 * lpm / 60) + 30;
+                const double sd = edge_stdev(crop_rows(r.img, head + 2, 110));
+                std::printf("  IOC %d / %3d lpm: got IOC %d, %d lpm, width "
+                            "%d, clock %+.1f ppm, bar stdev %.2f px\n",
+                            ioc, lpm, r.ioc, r.lpm, r.img.width, r.clock_ppm,
+                            sd);
+                char what[96];
+                std::snprintf(what, sizeof what, "auto-selected %d lpm", lpm);
+                check(r.lpm == lpm, what);
+                std::snprintf(what, sizeof what, "auto-selected IOC %d", ioc);
+                check(r.ioc == ioc, what);
+                std::snprintf(what, sizeof what, "IOC %d line width", ioc);
+                check(r.img.width == (ioc == 288 ? 905 : 1810), what);
+                check(sd < 1.5, "decode straight (stdev<1.5px)");
+                // 90 lpm reads -62 ppm on a zero-ppm signal, and the fault
+                // is the GENERATOR's: 8000*60/90 = 5333.33 samples truncates
+                // to 5333, so the generated line is genuinely 62.5 ppm
+                // short (measured -62.4, both IOCs; 60 and 120 lpm divide
+                // 8000 exactly and read 0.0). Pin the generated truth, not
+                // the intended one.
+                const double clock_true = (lpm == 90) ? -62.5 : 0.0;
+                check(std::fabs(r.clock_ppm - clock_true) < 15,
+                      "clock near the generated truth");
+            }
+        }
     }
 
     std::printf("[6] LF deviation +/-150 Hz [ISO §4.2.2]\n");
@@ -243,6 +272,8 @@ int main() {
         nova::DecodeResult r = run(g, kLines, d);
         check(edge_stdev(crop_rows(r.img, 40, kLines)) < 2.0,
               "150 Hz deviation decodes straight");
+        check(r.timebase == nova::Timebase::kLinear,
+              "a clean LF signal is not called a stepping timebase");
     }
 
     // The station sends no sync pulse [WMO §5.1.3.3 makes it optional], so
@@ -575,6 +606,187 @@ int main() {
         check(one.phasing_found, "the interval around the skip is found");
         check(one.timebase != nova::Timebase::kSteps,
               "one skip in the phasing edge is not a rate");
+    }
+
+    // [ISO §4.2.2, WMO §5.3.3] receiver level handling: the same
+    // transmission at 0.5, 0.05 and 0.005 of full scale — two orders of
+    // magnitude of input level. Measured: the decoder is level-blind across
+    // the whole span (the FM subcarrier carries its information in
+    // frequency, not amplitude), so these are the clean-decode bounds, not
+    // loosened-for-weak-signal ones: all three levels measured IDENTICAL
+    // (179 locks, clock +0.0 ppm, bar stdev 0.00 px).
+    std::printf("[11] input amplitude 0.5 / 0.05 / 0.005 [ISO §4.2.2, WMO "
+                "§5.3.3]\n");
+    {
+        for (double amp : {0.5, 0.05, 0.005}) {
+            nova::GenOptions g;
+            g.amplitude = amp;
+            nova::DecodeOptions d;
+            nova::DecodeResult r = run(g, 150, d);
+            const double sd = edge_stdev(crop_rows(r.img, 42, 140));
+            std::printf("  amplitude %.3f: %d locks, clock %+.1f ppm, bar "
+                        "stdev %.2f px\n",
+                        amp, r.locked_lines, r.clock_ppm, sd);
+            check(r.lpm == 120, "rate still auto-detected");
+            check(std::fabs(r.clock_ppm) < 15, "clock still measured");
+            check(r.locked_lines > 150,
+                  "per-line sync still locks (179 measured at every level)");
+            check(sd < 1.5, "picture still straight");
+        }
+    }
+
+    // [WMO §5.4.3] gray scale linearity: an eight-band step chart, black to
+    // white in equal 1/7 steps, must come back monotonic, with plausible
+    // endpoints and roughly even spacing. Measured on the current decoder:
+    // every band within 1 LSB of the generated level (0/36/72/109/145/182/
+    // 218/255 in, the same out). The bounds below are that truth with room
+    // around it — a step outside [15,60] is either a lost band or a
+    // doubled one, and the endpoints pin black and white themselves.
+    std::printf("[12] gray linearity: eight-band step chart [WMO §5.4.3]\n");
+    {
+        constexpr int kBands = 8;
+        nova::Image bands;
+        bands.width = 1810;
+        bands.height = 100;
+        bands.px.assign(static_cast<size_t>(1810) * 100, 0);
+        for (int b = 0; b < kBands; b++)
+            for (int y = 0; y < bands.height; y++)
+                for (int x = b * 1810 / kBands; x < (b + 1) * 1810 / kBands;
+                     x++)
+                    bands.px[static_cast<size_t>(y) * 1810 + x] =
+                        static_cast<uint8_t>(255 * b / (kBands - 1));
+        nova::GenOptions g;
+        nova::DecodeOptions d;
+        nova::DecodeResult r = run(g, 100, d, &bands);
+        nova::Image crop = crop_rows(r.img, 40, 100);
+        const int W = crop.width;
+        const int pic0 = static_cast<int>(0.036 * W);
+        const int pic1 = static_cast<int>(0.984 * W);
+        double level[kBands];
+        std::printf("  recovered band levels:");
+        for (int b = 0; b < kBands; b++) {
+            const int cx = pic0 + static_cast<int>((b + 0.5) / kBands *
+                                                   (pic1 - pic0));
+            double acc = 0;
+            int n = 0;
+            for (int y = 20; y < 80; y++)
+                for (int x = cx - 5; x <= cx + 5; x++) {
+                    acc += crop.px[static_cast<size_t>(y) * W + x];
+                    n++;
+                }
+            level[b] = acc / n;
+            std::printf(" %.0f", level[b]);
+        }
+        std::printf(" (generated 0 36 73 109 146 182 219 255)\n");
+        check(level[0] < 40, "black band is black (0.0 measured)");
+        check(level[kBands - 1] > 215, "white band is white (255 measured)");
+        bool steps_even = true;
+        for (int b = 1; b < kBands; b++) {
+            const double step = level[b] - level[b - 1];
+            if (step < 15 || step > 60) steps_even = false;
+        }
+        check(steps_even,
+              "levels monotonic, steps roughly even (36-37 measured)");
+    }
+
+    // [WMO §5.2.2] the start tone may run 5-10 s; [9] pins the 5 s form,
+    // this pins the 10 s one. The boundary that matters is WHERE the
+    // picture starts: 10 s of tone + 15 s of phasing = 25.0 s, and the
+    // decoder puts it at exactly 25.00 (row 0 of the output is image line
+    // 0, MAD 15.4 measured). lines_dropped_head reads 36, NOT the naive 50:
+    // it is counted from the comb onset, and a long pure tone holds no
+    // line comb, so the onset gate only fires 7.5 s in (with the 5 s tone
+    // the onset lands at 0.0 s and the same boundary reads head=40, [9]).
+    // The "~50 lines" form of this assertion failed on a decode whose
+    // picture is provably right; the time boundary is the honest pin.
+    std::printf("[13] 10 s start tone: segmentation boundary [WMO §5.2.2, "
+                "§5.2.3]\n");
+    {
+        constexpr int kLines13 = 200;
+        nova::GenOptions g;
+        g.start_sec = 10.0;
+        nova::Image content = nova::gen_test_pattern(1810, kLines13);
+        std::vector<float> sig = nova::gen_fax_signal(content, kLines13, g);
+        std::vector<float> video =
+            nova::fm_demod(sig, g.fs, 1900.0, g.deviation);
+        nova::DecodeOptions d;  // segmentation ON — this is the test
+        nova::DecodeResult r = nova::decode_fax(video, g.fs, d);
+        std::printf("  lines=%d dropped head=%d tail=%d image=%.2f-%.2f s\n",
+                    r.lines, r.lines_dropped_head, r.lines_dropped_tail,
+                    r.image_t_start, r.image_t_end);
+        check(r.segmented, "segmentation applied");
+        check(std::fabs(r.image_t_start - 25.0) <= 1.0,
+              "picture starts at the tone+phasing boundary (25.0 s)");
+        check(r.lines_dropped_head >= 30,
+              "at least the phasing interval is dropped from the head");
+        check(std::abs(r.lines - kLines13) <= 3, "the picture lines survive");
+        const int rows = std::min(r.lines, kLines13) - 2;
+        nova::Image ref = make_full_ref(1810, rows);
+        nova::Image crop = crop_rows(r.img, 0, rows);
+        const double mad = mean_abs_diff(crop, ref);
+        std::printf("  MAD from row 0 (no crop offset) = %.1f\n", mad);
+        check(mad < 20, "row 0 of the output is image line 0");
+    }
+
+    // Live captures arrive at the sound card's rate, not 8 kHz: generate at
+    // 44100, resample to 8000 with core/resample.hpp, demod and decode
+    // there. Same bounds as the native-8k clean round-trip [1]; measured
+    // essentially identical (149 locks, clock +0.02 ppm, bar stdev 0.00).
+    std::printf("[14] 44.1 kHz capture resampled to 8 kHz decodes clean\n");
+    {
+        constexpr int kLines14 = 120;
+        nova::GenOptions g;
+        g.fs = 44100;
+        nova::Image content = nova::gen_test_pattern(1810, kLines14);
+        std::vector<float> sig44 = nova::gen_fax_signal(content, kLines14, g);
+        std::vector<float> sig8 = nova::resample(sig44, 44100, 8000);
+        std::vector<float> video =
+            nova::fm_demod(sig8, 8000, 1900.0, g.deviation);
+        nova::DecodeOptions d;
+        d.segment = false;
+        nova::DecodeResult r = nova::decode_fax(video, 8000, d);
+        nova::Image crop = crop_rows(r.img, 40, kLines14);
+        const double mad = mean_abs_diff(crop, make_full_ref(1810, kLines14));
+        const double sd = edge_stdev(crop);
+        std::printf("  %d locks, clock %+.2f ppm, MAD %.1f, bar stdev "
+                    "%.2f px\n",
+                    r.locked_lines, r.clock_ppm, mad, sd);
+        check(r.lpm == 120 && r.ioc == 576,
+              "rate and IOC auto-selected at 8 kHz");
+        check(std::fabs(r.clock_ppm) < 15,
+              "clock near zero through the resample");
+        check(mad < 20, "image content matches (MAD<20)");
+        check(sd < 1.5, "picture straight");
+    }
+
+    // [WMO §5.1.3.3] tolerance edges of the dead sector: the sector itself
+    // is 4.5% ± 0.5% of a line, and the black pulse may fill up to half of
+    // it. Generated at both sector edges crossed with a narrow (1.0%) pulse
+    // and a pulse exactly half of that sector — the four permitted corners.
+    // Measured on all four: phasing found, pulse style detected, 173-179
+    // locks of 220 drawn lines, bar stdev 0.00 px, place rms <= 0.01 px.
+    std::printf("[15] dead-sector tolerance edges [WMO §5.1.3.3]\n");
+    {
+        for (double dead : {0.040, 0.050})
+            for (double pulse : {0.010, dead * 0.5}) {
+                nova::GenOptions g;
+                g.dead_frac = dead;
+                g.pulse_frac = pulse;
+                nova::DecodeOptions d;
+                nova::DecodeResult r = run(g, 150, d);
+                const double sd = edge_stdev(crop_rows(r.img, 42, 140));
+                std::printf("  dead %.1f%% pulse %.2f%%: phasing %s, %s "
+                            "style, %d/%d locks, bar stdev %.2f px\n",
+                            dead * 100, pulse * 100,
+                            r.phasing_found ? "found" : "MISSING",
+                            r.per_line_sync ? "pulse" : "white-only",
+                            r.locked_lines, r.lines, sd);
+                check(r.phasing_found, "phasing found");
+                check(r.per_line_sync, "pulse style detected");
+                check(r.locked_lines > r.lines / 2,
+                      "most drawn lines lock (173-179/220 measured)");
+                check(sd < 1.5, "picture straight");
+            }
     }
 
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",

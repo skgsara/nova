@@ -7,6 +7,120 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 13: pre-M4 audit — the standards were mostly right; the provenance file was not
+
+Agent: Kimi Code CLI (Kimi k2). Code changed: `core/fax.cpp`,
+`core/fax.hpp`, `core/phasing.cpp`, `core/phasing.hpp`, `core/gen.cpp`,
+`core/gen.hpp`, `cli/nova-decode.cpp`, `tests/test_roundtrip.cpp`,
+`tests/test_tones.cpp`, `NOTICE`, `README.md`, `ROADMAP.md`,
+`docs/00`–`docs/03`.
+
+**Task as accepted:** Sara reviewed the session-12 pictures ("they're all
+right") and asked for a whole-project audit before M4: ISO 9876 as the
+highest-level receiver truth, WMO-386 for the signal, prior art checked
+before inventing anything, Isobar included, and the codebase kept simple
+and readable.
+
+**Method.** The ISO and WMO PDFs were read directly (text extracted only
+under ignored `build/audit/`; the licensed ISO text is not in the repo).
+The WMO 2009 edition was spot-checked as well as the 2023 edition Sara
+provided. ACFax, HamFax, weatherfax_pi, KiwiSDR FAX, JWX, fldigi and the
+local Isobar/KG-FAX archive were checked as prior art. Baseline before
+touching anything: 22/22 suites, 61.91 s.
+
+**Standards gaps closed.** The decoder already detected 300 vs 675 Hz
+start tones but never used the answer: an IOC-288 signal decoded with
+default options would have been drawn 1810 px wide. `DecodeOptions::ioc`
+is now automatic by default, the first start tone selects IOC 576/288
+unless overridden, and `DecodeResult::ioc` reports it [ISO §4.2.5].
+`nova-decode --dev 150|400` exposes the LF/HF deviation mode that was in
+the core but unreachable from the shipped CLI. The generator gained
+`start_sec`, `dead_frac` and `pulse_frac` so the spec edges are tests,
+not prose.
+
+**New screamers.** `roundtrip [4]` is now the full ISO §5.4.1 matrix —
+{288,576}×{60,90,120}, all with automatic IOC and rate selection; all six
+legs measured 0.00 px of bar-edge scatter. The 90 lpm legs read
+−62.4/−62.5 ppm because the generator truncates a 5333.33-sample line to
+5333; the test pins the generated truth. `[11]` sweeps amplitude over two
+orders of magnitude: 0.5, 0.05 and 0.005 decode identically (179 locks,
++0.0 ppm, 0.00 px). `[12]` pins the eight-band gray scale to within 1 LSB.
+`[13]` pins a 10 s start tone by the picture boundary (25.5 s, MAD 15.3
+from row 0); the naive "50 dropped lines" assertion was wrong because the
+onset comb cannot see a long pure tone. `[14]` generates at 44.1 kHz and
+resamples through the production path (+0.02 ppm, MAD 16.6, 0.00 px).
+`[15]` covers the four permitted WMO §5.1.3.3 corners: dead sector 4.0%
+or 5.0%, pulse 1.0% or exactly half the sector.
+
+**The audit found a real LF reporting bug.** A clean generated ±150 Hz
+signal decoded straight but its phasing witness said the timebase stepped.
+The cause was not the timebase: at LF the generated phasing line contains
+a half-cycle carrier-phase alternation, and the wedge-score plateau moved
+by 10 samples line to line. The wedge fit is still the right detector,
+but WMO §5.2.3.4 names the leading edge of white, so the position is now
+refined to the local 50% black→white crossing. Measured on the LF
+synthetic: nonlinearity 10.7 samples / 25 fake steps before, 0.0 / linear
+after. `roundtrip [6]` now pins that a clean LF signal is not convicted.
+All fixture anchor tests still pass.
+
+**One test harness was wrong, and the full suite caught it.** `tones [7]`
+used to choose a candidate line rate by the most recovered phasing lines.
+After the edge refinement, a 60 lpm signal tested as 120 lpm produced 42
+windows against the true rate's 30 — but the true rate's positions agree
+to 0.0 samples and the harmonic's spread is 35.5. The harness now prefers
+position agreement and uses count only as a tie-break. This was a test
+selector bug, not a decoder regression.
+
+**Provenance audit.** NOTICE was wrong, not the code. It claimed ACFax's
+FIR coefficient tables were reused; `git log -S firwide` reaches only the
+initial scaffold, and the source tree computes its own Blackman
+windowed-sinc at runtime. NOTICE now says idea-level reuse, no copied
+code/tables/files, and `docs/00`'s ledger names the actual reused rules:
+ACFax discriminator architecture, Isobar per-line sync, JWX fold and
+Goertzel/domain choice, weatherfax_pi/KiwiSDR wedge/median/spread and
+leaky counter, fldigi's run-abandon/coherence/per-line-correlation rule
+shapes. HamFax's stale 403 note is corrected; the mirror's
+`FaxDemodulator.cpp` confirms the ACFax table lineage. Isobar's local
+canonical archive was found at `../isobar-dev.zip`; its `LiveScan` design
+(one incremental state machine, batch as one feed, chunking-invariance
+test, manual nudge, thread-safe finish) is now the named M4 reference.
+
+**Contradictions found.** Ten, all fixed or registered in
+`docs/03-pre-m4-audit.md`: the duplicated NOTICE sentence; the phantom
+ACFax FIR reuse; the empty-ledger-vs-NOTICE mismatch; stale HamFax access;
+the false 2009-vs-2023 WMO §5.5 restructuring claim (the 2009 PDF has the
+same §5.5.1/§5.5.2 split); the nonexistent §4.2.7 assertion; §4.2.3 being
+graded as if automatic AND manual were required; detected-but-unused IOC
+selection; unreachable ±150 Hz; the LF timebase false positive; and three
+WMO clauses missing from the distilled spec (levels, AM scope, optional
+recording-level adjustment).
+
+**M4 readiness verdict.** The batch core is ready to build against: no
+global mutable state, value results, exceptions at the boundary, and a
+strong picture-domain test net. The audit deliberately did NOT rewrite
+streaming. The small pre-GUI seam work is named in `docs/03`: replace
+`getenv` debug output with a log/progress callback, add cooperative
+cancellation and structured errors, split `decode_fax` at its numbered
+stages, and only then design the FLTK/RtAudio shell around Isobar's
+single-state-machine architecture and ACFax's retained-raw model.
+
+**Validation.** Final suite: **22/22 pass, 83.19 s** (roundtrip 59.46 s).
+CLI smoke: generated IOC-288 ±150 Hz signal decodes with automatic IOC
+selection and, after the phasing fix, reports a linear timebase. The two
+pictures sensitive to the phasing change were inspected:
+`vmw-phasing-image-160s` uses the phasing anchor with the title box at
+the left margin; `test-chart-jmh-60s` keeps its tracked anchor and a
+continuous chart border. `git diff --check` is clean.
+
+**Next step:** begin M4 with the core seams named in
+`docs/03-pre-m4-audit.md`: log/progress callback, cooperative
+cancellation, structured decode errors, and a behaviour-preserving stage
+split of `decode_fax`; then design the FLTK/RtAudio shell around Isobar's
+`LiveScan` chunking-invariance model and ACFax's retained-raw
+non-destructive adjustment architecture.
+
+---
+
 ## 2026-08-13 — Session 12: the dropout rows were findable all along — ask the signal, not the picture
 
 Agent: Kimi Code CLI (Kimi k2). Code changed: `core/fax.cpp`, `core/fax.hpp`,

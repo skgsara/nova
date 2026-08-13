@@ -284,6 +284,8 @@ flat but RAMPS, because the period fit absorbs the mean insertion rate —
 1.9 samples per line on the ground-truth synthetic, 19 samples of tilt
 across an 11-line segment, twice the step it sits between. A median
 through a slope is wrong at both ends by half of it; Theil-Sen is not.
+Theil–Sen is the textbook robust slope estimator (Theil 1950; Sen 1968),
+not taken from any surveyed decoder — none of the six contains it.
 
 fldigi's discarded per-line correlation is the idea to take where no sync
 residual exists to segment. **Session 11b takes it, in the narrowest form
@@ -303,20 +305,46 @@ cannot be trusted to run on every row of a page.
 
 ## Reuse ledger
 
-Running record — one row per reused artifact, added the day it enters
-the tree. Empty at scaffold time.
+Running record — one row per reused algorithm or rule shape. All reuse to
+date is idea-level: Nova re-implemented it, and no third-party code,
+tables, or files are present in the tree. A copied artifact would get its
+own row the day it enters, with the source file named.
 
-| Artifact | From | Licence | Where in Nova | Date |
+| Artifact (idea, re-implemented) | From | Licence | Where in Nova | Date |
 |---|---|---|---|---|
-| _(none yet)_ | | | | |
+| Quadrature mix-to-baseband + amplitude-normalized delay discriminator | ACFax `mod_demod.c` | GPLv2+ | `core/demod.cpp` | 2026-08-12 |
+| Per-line dead-sector sync lock | Isobar (author's own work) | GPLv3+ | `core/fax.cpp` pass A | 2026-08-12 |
+| Clock-corrected accumulation: a fold lifts a stable line shape out of fading | JWX `CommonCode.clock_correct_line`, `DecodeFax.s_sync` | GPLv2+ | `core/fax.cpp` block-fold period estimate | 2026-08-12 |
+| Median + 10–90% spread rejection applied to fold block pairs | weatherfax_pi/KiwiSDR wedge treatment | GPLv3 | `core/fax.cpp` block-fold period estimate | 2026-08-12 |
+| Phasing wedge-fit + median + spread rejection, constants re-measured | weatherfax_pi/KiwiSDR `FaxDecoder.cpp` | GPLv3 | `core/phasing.cpp` | 2026-08-12 |
+| Single-bin Goertzel tone power measured on demodulated video | JWX `GoertzelFilter`; fldigi's domain choice | GPLv2+/GPLv3+ | `core/tones.cpp` | 2026-08-12 |
+| Two-consecutive-window frequency agreement, generalized to a 10–90% spread over a run | fldigi `wefax.cxx` | GPLv3+ | `core/tones.cpp` | 2026-08-12 |
+| Leaky run counter: decrement on a miss rather than reset | KiwiSDR `typecount` | GPLv3 | `core/phasing.cpp`, `core/tones.cpp` | 2026-08-12 |
+| Abandon a phasing run after N consecutive failed lines (N re-measured) | fldigi `decode_phasing` | GPLv3+ | `core/phasing.cpp` | 2026-08-12 |
+| Per-line correlation against the previous line, kept per line rather than collapsed to a histogram mode | fldigi `correlation_shift` | GPLv3+ | `core/fax.cpp` adrift-row fallback | 2026-08-12 |
 
 ## Access notes
 
-- hamfax.sourceforge.net and sourceforge.net/projects/hamfax return
-  HTTP 403 to this host (fetcher and curl); HamFax was surveyed via
-  its GitHub mirror (sergioisidoro/ham-fax) README and the FreeBSD
-  ports tree metadata.
+- HamFax: hamfax.sourceforge.net returned HTTP 403 at survey time
+  (2026-08-12). Re-checked 2026-08-13: the SourceForge files page answers
+  200, and the full source is readable via the GitHub mirror
+  `sergioisidoro/ham-fax`; `src/FaxDemodulator.cpp` carries ACFax's FIR
+  tables and is the middle link of the lineage evidence.
 - ACFax source: ftp.funet.fi/pub/ham/unix/Linux/misc/acfax-981011.tar.gz
-  (still the FreeBSD MASTER_SITE).
-- KiwiSDR repo has no root LICENSE; FaxDecoder.cpp carries a per-file
-  GPLv3 header (D'Epagnier). Reuse per-file-licensed accordingly.
+  (still the FreeBSD MASTER_SITE). Re-verified 2026-08-13: the
+  `firwide`/`firmiddle`/`firnarrow` tables are in `mod_demod.c`.
+- KiwiSDR and weatherfax_pi re-verified 2026-08-13: both `FaxDecoder.cpp`
+  files still carry ACFax's tables as anonymous symmetric 17-tap arrays,
+  and both retain their per-file D'Epagnier GPLv3 headers. KiwiSDR has no
+  root LICENSE; reuse is per-file-licensed accordingly.
+- JWX: local `JWX_source.tar.bz2` in the parent folder. The tarball bundles
+  no COPYING file; the licence is the per-file GPLv2+ headers.
+- Isobar: author's own prior project, development name KG-FAX. The local
+  canonical copy is `isobar-dev.zip` in the folder above this repo's
+  parent, containing the full git tree (LICENSE, NOTICE, README,
+  SESSION-LOG) and the built `Isobar-1-8-0.app`.
+- Correction record, 2026-08-13: the scaffold-era NOTICE claimed ACFax's
+  FIR coefficient tables were reused. They never entered the source tree
+  (`git log -S firwide` hits only the scaffold commit, where the strings
+  are in NOTICE and this survey); Nova computes its FIR at runtime. NOTICE
+  was corrected the same day.

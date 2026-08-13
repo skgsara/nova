@@ -193,6 +193,12 @@ STILL OPEN, and small:
 
 ## M3 — full auto sequencing  [done except manual override, which needs M4]
 
+Done (session 13) — the pre-M4 standards audit closed the last silent
+automatic-selection gap: the 300/675 Hz start tone now selects IOC 576/288
+when the operator did not override it [ISO §4.2.5], and the synthetic
+{288,576}×{60,90,120} matrix runs with automatic IOC and rate selection.
+A real 675 Hz recording remains a registered fixture gap, not a code gap.
+
 Done (session 6) — detection, measured against the library:
 - Start/stop tones [ISO §4.2.5]: `core/tones.cpp`. Accept test is spectral
   **purity** in the tone's own bin, not a transition rate, because a rate
