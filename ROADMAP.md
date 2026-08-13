@@ -299,8 +299,13 @@ Pending:
   - Manual PHASE/SYNC corrections at both moments [docs/04, decided
     session 16]: forward-only on the live preview; non-destructive
     re-render from retained raw on the saved image; live-path overrides
-    seed the batch re-decode as its initial anchor; values persist
-    per station.
+    seed the batch re-decode as its initial anchor — PHASE as a seed,
+    SYNC only as a fallback [docs/05 §7.1]. ~~values persist per
+    station~~ **removed session 20**: neither value persists between
+    transmissions, because no key the operator can supply names the
+    (transmitter, receive chain) pair a clock trim belongs to, and a
+    remembered PHASE seeds the anchor search at last week's line phase
+    [docs/05 §8.5 item 6].
 - FLTK GUI, RtAudio capture, input level meter, image tools,
   post-decode realign / line-start adjust on retained raw stream
   (ACFax architecture: non-destructive; now load-bearing, since the
@@ -473,6 +478,15 @@ Pending:
   renames a saved file**: a label changed after the save reaches the PNG
   metadata, and renaming is a file operation like deleting, because the
   image list is a view of a folder.
+  - **And one reversal**: the **per-station PHASE/SYNC memory is
+    removed**. The operator label is unstable free text, the receive
+    chain changes the number while the key does not notice, `clock_ppm`
+    belongs to the (transmitter, receive chain) pair that no label can
+    name, and a stale PHASE actively misleads because it seeds the anchor
+    search. The corpus does persist these per station [docs/04 Finding 1]
+    — on machines with a preset key and a fixed receive chain, which is
+    §8.1's insight for the second time. The preference file keeps the
+    image folder alone.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind

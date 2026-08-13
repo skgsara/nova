@@ -7,6 +7,85 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 20, continued: the per-station PHASE/SYNC memory is removed, and it was inherited from a machine that owns its radio
+
+Agent: Kimi. Code changed: none — the memory was never built, which is
+why removing it costs nothing today and would have cost a session next
+week. Files changed: `docs/05-m4-shell-design.md` (§7's persistence line,
+§8.4 item 1, new §8.5 item 6, §12 items 5, 15 and 25), `docs/04-receiver-
+ui-survey.md` (a correction under Finding 1), `ROADMAP.md`,
+`SESSION-LOG.md`.
+
+**Sara asked the question the last entry's own "not built yet" note
+should have provoked and did not**: the per-station PHASE/SYNC memory was
+listed as unfinished business, and she asked whether it is realistic to
+store at all — one station gets typed "JMH", then "JMA", then "Japan",
+and the operator moves between their own radio, a local SDR and a
+KiwiSDR. **DECIDED 2026-08-13 (Sara): removed.** PHASE and SYNC reset to
+measured-or-blank every transmission; the live override still carries
+into that transmission's batch re-decode (§7.1 untouched); the
+preference file keeps the image folder alone.
+
+**This reverses a decision the document had taken twice** — §7's "both
+values persist per station" and §8.4 item 1's description of the
+preference file — and it survived three "no design question remains
+open" declarations. The reasoning is in `docs/05` §8.5 item 6; the two
+parts worth repeating here are the ones nobody had assembled:
+
+1. **There is no correct key, not merely a bad one.** `clock_ppm` is the
+   sum of the transmitter's offset and the receive chain's — sessions 5
+   and 8 measured the −66 to −114 ppm family, and the two recordings of
+   one station agreeing to ~1 ppm were made on the same receiver. The
+   value belongs to the **(transmitter, receive chain) pair**, and the
+   operator can only ever supply half of that.
+2. **§7.1's asymmetry decides persistence too, in opposite directions.**
+   A stale SYNC is merely ignored, because SYNC is a fallback the batch
+   fit overrules wherever it has a baseline. A stale PHASE is *harmful*,
+   because PHASE seeds the anchor search and its position depends on when
+   the capture started relative to the transmitter's line clock — so a
+   remembered PHASE aims the search at last week's arbitrary line phase
+   and can pull it onto the wrong candidate, which is the exact failure
+   PHASE exists to correct.
+
+**Where the wrong decision came from, because that is the reusable part.**
+`docs/04` Finding 1 records that the SR-97 stores slant per station and
+the JAX-9B warns SYNC holds per station — true of those machines, and it
+was read as a recommendation. They can do it because their key is a
+machine-generated station preset and their receive chain is fixed: one
+box, one clock. **Both properties are "the receiver contains its own
+radio", which is exactly what §8.1 caught once already** when the status
+panel showed a frequency Nova cannot know. Finding 1 now carries a
+correction saying so, and its own next sentence had the answer all along
+— "Nova measures this per transmission, so it inherits the benefit for
+free."
+
+**Contradictions found: one, and it is the entry above.** The reversal is
+itself the contradiction between `docs/05` §7/§8.4 and what the corpus
+evidence actually supports. Three documents said the memory persists,
+none of them had a mechanism, and the code never had one — so the tree
+and the paper disagreed in the tree's favour.
+
+**Accepted cost, recorded rather than hidden:** an operator on fixed
+hardware receiving a white-only station nightly will retype a SYNC trim
+each night. The correctly-keyed alternative would be per input device and
+measured automatically rather than typed, and even that still contains
+the transmitter's share. Not built, not scheduled, written down so it is
+not rediscovered from scratch.
+
+**Validation.** No code changed; the suite is unchanged at 26/26 with the
+GUI and 24/24 with `NOVA_BUILD_GUI=OFF`, re-run after the edits.
+
+**Next step: unchanged — `nova-live` proper, streaming resample/demod by
+block-with-overlap with `live_demod_equiv` as its screamer.** It is what
+puts a picture behind the surfaces built earlier today, and only then do
+§8.5's answers become reachable code: the automatic save when the batch
+decode completes, Apply re-rendering and overwriting the same file, the
+edit-in-progress boundary that holds the pane, and the timestamp-plus-
+label filename. Nothing in it depends on the memory that was just
+removed, which is the other reason to have removed it now.
+
+---
+
 ## 2026-08-13 — Session 20: the §8.3 + §8.4 surfaces in code, and five questions about the life of one chart
 
 Agent: Kimi. Code changed: `gui/nova-gui.cpp` (the surfaces — menu bar,

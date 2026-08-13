@@ -302,8 +302,11 @@ Behaviour differs by moment, as decided:
 - *After the stop tone*: a re-render from the retained snapshot,
   non-destructive and repeatable. This is the home of the remaining
   ISO §4.2.6 / §5.4.3 compliance item [docs/02].
-- A live override carries into the batch re-decode, and both values
-  persist per station.
+- A live override carries into the batch re-decode — but **only into
+  that transmission's**. Neither value persists between transmissions.
+  This line read "and both values persist per station" until session 20
+  reversed it; the reasoning is in §8.5 item 6, and it is a departure
+  from the corpus [docs/04 Finding 1] with a stated cause.
 
 ### 7.1 How the live values reach the batch decode — and they do NOT behave the same way
 
@@ -687,13 +690,18 @@ does, now more than before.
 19), all DECIDED 2026-08-13.** They are grouped here because they are all
 about how the window behaves over time rather than where anything sits.
 
-**1. Settings persist in a preference file next to the program.** The
-image folder [§8.3 item 7] and the per-station PHASE/SYNC memory [§7]
-live in a plain preference file in the same directory as the executable —
-visible, inspectable, movable with the program, and no hidden platform
-store. Recorded consequence: if that directory is not writable (a
-system-wide install), Nova runs without persistence for the session
-rather than failing — settings are a convenience, never a precondition.
+**1. Settings persist in a preference file next to the program.** A plain
+preference file in the same directory as the executable — visible,
+inspectable, movable with the program, and no hidden platform store.
+Recorded consequence: if that directory is not writable (a system-wide
+install), Nova runs without persistence for the session rather than
+failing — settings are a convenience, never a precondition.
+
+What it holds is **the image folder** [§8.3 item 7], and that is all. As
+first written this item also gave it the per-station PHASE/SYNC memory of
+§7; **session 20 removed that** — the folder is a path the operator
+chose, while PHASE and SYNC are measurements of a signal, and only the
+first is a preference. See §8.5 item 6.
 
 **2. Zoom keeps the left edge.** On a zoom change, the image column at
 the pane's left edge stays where it was; the scroll position is
@@ -730,12 +738,13 @@ rule the clock and timebase readouts already follow [§4].
 
 ### 8.5 The save/edit lifecycle: when the file is written, and what an edit owns
 
-**Five questions raised by Sara while the §8.3 surfaces were being coded
+**Six questions raised by Sara while the §8.3 surfaces were being coded
 (session 20).** Two of them turned out to be already answered elsewhere
 in this document and are restated here rather than pointed at, because
 the answers were spread across §3, §4, §8.2 and §8.3 item 6 and nobody
-could see them in one place. The other three were open, and are
-**DECIDED 2026-08-13 (Sara)**.
+could see them in one place. Three were open. The sixth **reverses a
+decision this document had already taken twice**, and is written at
+length for that reason. All are **DECIDED 2026-08-13 (Sara)**.
 
 **1. When is the picture saved automatically? At the end of the batch
 decode — before any editing is possible.** `DECODING` completing writes
@@ -843,6 +852,85 @@ a second way a file can move and a failure path (a rename that fails)
 in exchange for tidiness in the minority case. The label identifies the
 station being received and is typed before or during reception, not
 after it.
+
+**6. Is the per-station PHASE/SYNC memory worth storing at all? No — it
+is removed.** [DECIDED 2026-08-13, Sara, session 20. **This reverses a
+decision**, so it is written at length.] PHASE and SYNC reset to
+measured-or-blank for every transmission. A live override still carries
+into *that transmission's* batch re-decode under the asymmetry of §7.1,
+which is untouched; what disappears is any memory between transmissions.
+The preference file keeps the image folder and nothing else.
+
+Sara raised it while reviewing what the preference file did not yet do,
+and the question was the right one: *is this realistic to store?* Four
+reasons say no, in ascending order of force.
+
+- **The key is unstable free text.** One station is "JMH" tonight, "JMA"
+  next week and "Japan" the week after, and blank is a legitimate value
+  [§8.1]. The memory then silently misses — which is the *harmless*
+  failure.
+- **The receive chain changes the number, and the key does not notice.**
+  Own radio, local SDR, KiwiSDR are three different sample clocks. Here
+  the label still matches, so a wrong value loads confidently. That is
+  the harmful failure, and it is the ordinary case for an SDR operator.
+- **There is no correct key available.** `clock_ppm` is the sum of the
+  transmitter's clock offset and the receive chain's — sessions 5 and 8
+  measured a −66 to −114 ppm family across the library, and the two
+  recordings of one station that agree to ~1 ppm were made on the *same*
+  receiver. The value is therefore a property of the **(transmitter,
+  receive chain) pair**, and a station label cannot name a pair. This is
+  not a key that could be fixed by choosing a better one; the operator
+  does not have the second half of it.
+- **A stale PHASE is not merely useless, it is harmful — and §7.1 is why
+  nobody saw it.** SYNC is a *fallback*, so a wrong remembered SYNC is
+  ignored wherever the batch fit has a baseline. PHASE is a *seed* for
+  the anchor search, which starts at the operator's value and refines
+  locally; and PHASE's numeric position depends on when the capture began
+  relative to the transmitter's line clock, which differs every
+  reception. A remembered PHASE is therefore a seed aimed at last week's
+  arbitrary line phase, and it can pull the search onto the wrong
+  candidate feature — **the exact failure PHASE exists to correct**. The
+  asymmetry that §7.1 established for the batch path turns out to decide
+  the persistence question too, in opposite directions for the two
+  values.
+
+Add that auto re-measures from the phasing interval on every
+transmission, and the mechanism's best case is a saved keystroke in a
+narrow case, paid for with a confidently wrong number in a common one.
+
+**This is a departure from the corpus, which is why it needs a cause.**
+`docs/04` Finding 1 records that both values are per-station and persist:
+the SR-97 stores the slant setting independently per station, and the
+JAX-9B warns that SYNC holds for a station and usually needs
+re-adjustment when the station changes. Those machines can do it because
+of two properties Nova lacks, and both are the §8.1 insight again —
+*every receiver in the corpus contains its own radio*:
+
+1. their key is a machine-generated **channel or station preset**, not
+   free text an operator retypes; and
+2. their receive chain is **fixed** — one box, one clock — so the stored
+   number cannot be invalidated by changing hardware.
+
+Nova is a decoder on the end of a cable from someone else's receiver, so
+it has neither. Finding 1's own sentence anticipated the outcome without
+drawing it: *"Nova measures this per transmission, so it inherits the
+benefit for free."* It does — and that is the whole benefit, obtained
+without a memory.
+
+**The accepted cost, stated so it is not hidden.** An operator on fixed
+hardware receiving a white-only station nightly, who trims SYNC by eye
+each time, will retype it each time. If that ever becomes a real
+complaint, the correctly-keyed form is *per input device*, measured
+automatically from a good decode rather than typed — and even that is
+imperfect, because the number still contains the transmitter's share.
+Not built, not scheduled, recorded here so the option is not rediscovered
+from scratch.
+
+**Consequence for §8.1's operator label.** The label loses its second
+job. It was justified partly as the key for this memory [§12 item 5]; it
+keeps its first and real job, which is telling the operator which chart
+they are looking at, in the status panel and in the saved filename
+[§8.5 item 5].
 
 **The closing note this section owes the document.** "No design question
 remains open" has now been written four times — sessions 17, 18, 19 and
@@ -1063,10 +1151,12 @@ Sara's answer to item 2, is open at the end.
    not available at all**, because Nova is fed audio from a sound card
    and never sees the radio. This retired the question as posed — the
    proposed key did not exist. Resolved as an **operator-typed label**,
-   blank by default and legitimately blank, which keys the per-station
-   PHASE/SYNC memory; the timestamp comes from the system clock and
-   names the file. See §8.1, which corrects the status panel this
-   mistake had already reached.
+   blank by default and legitimately blank; the timestamp comes from the
+   system clock and names the file. See §8.1, which corrects the status
+   panel this mistake had already reached. *(Session 20: this item also
+   gave the label a second job, keying the per-station PHASE/SYNC memory.
+   That memory is gone — item 25 — and the label keeps only its first
+   job, which was always the real one.)*
 
 ### Raised by the answer to item 2, and closed the same day
 
@@ -1117,7 +1207,8 @@ Four decided the day they were asked, one open; all written up in §8.4.
 15. ~~**Where do settings persist between launches?**~~ A plain
     preference file in the same directory as the executable; a
     non-writable directory means no persistence for the session, never a
-    failure.
+    failure. *(Session 20: what it holds narrowed to the image folder
+    alone — item 25.)*
 16. ~~**What happens to the scroll position on a zoom change?**~~ The
     left edge is kept; no re-centering, no jump to the start.
 17. ~~**Force Start with the dropdowns on Auto?**~~ It cannot start —
@@ -1163,12 +1254,24 @@ All written up in §8.5.
     alone — `20260813T220417Z.png`, and `20260813T220417Z-JMH.png` with
     a label. UTC to seconds, timestamp first, label sanitized and capped,
     and Nova never renames a saved file.
+25. ~~**Is the per-station PHASE/SYNC memory worth storing at all?**~~
+    **No — and this reverses a decision taken in §7 and repeated in §8.4
+    item 1.** The label is unstable free text; the receive chain changes
+    the number while the key does not notice; `clock_ppm` belongs to the
+    (transmitter, receive chain) pair, which no label can name; and a
+    stale PHASE is *harmful* rather than useless, because PHASE is a seed
+    for the anchor search and its position differs every reception. The
+    preference file keeps the image folder alone. See §8.5 item 6, which
+    also records why the corpus can do this and Nova cannot.
 
-**No design question remains open, a fourth time.** The count of times
-that sentence has been written is now the evidence for what §8.5's
-closing note says about where the next questions will come from: not from
-looking at the window, but from asking what happens across the whole life
-of one chart.
+**No design question remains open, a fourth time** — and this is the
+first time the set contained a **reversal** rather than a gap. Items
+20–24 were things the document had never said; item 25 is something it
+said twice and had wrong, and it survived two "complete" declarations
+because it was inherited from the receiver corpus, where it is correct.
+Copying a good decision from a machine that contains its own radio is
+exactly the mistake §8.1 caught once already, with the frequency readout.
+It is worth expecting a third instance somewhere in this document.
 
 ---
 

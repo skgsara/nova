@@ -100,6 +100,18 @@ when the station changes. Nova measures this per transmission, so it
 inherits the benefit for free — but it confirms per-station memory is
 the natural unit for anything the operator does adjust.
 
+**Correction, session 20 (2026-08-13): that last clause does not
+transfer to Nova, and it should not have been read as a recommendation.**
+The survey's observation is accurate about the machines; Nova took it as
+a design decision and carried "both values persist per station" into
+`docs/05` §7, where it was wrong for the reasons set out in `docs/05`
+§8.5 item 6 — chiefly that these receivers key on a machine-generated
+station preset and own the receive chain whose clock the number
+describes, while Nova is fed audio over a cable and is keyed on free text
+the operator retypes. The sentence above already contains the part that
+does transfer: Nova measures it per transmission and inherits the benefit
+for free. Nova stores neither value between transmissions.
+
 ---
 
 ## Finding 2 — AUTO is a value, not a mode
