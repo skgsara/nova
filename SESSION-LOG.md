@@ -116,6 +116,29 @@ mapping function can and should exist before the widget does. Write it,
 test it against both IOC widths and every zoom value, and let the GUI
 session consume it.
 
+**Documentation carried out to the rest of the tree, and merged, at
+Sara's request at the end of the session.** `README.md` (M4 status
+paragraph; the Build section now says what it costs — the decoder, the
+CLIs and the whole suite have no external dependencies, FLTK and RtAudio
+are the GUI binary's alone, a missing one skips the target), `NOTICE` (a
+new "Linked libraries" section — FLTK's LGPL-with-exceptions and
+RtAudio's MIT-style terms, and the statement that the build *enforces*
+the separation rather than documenting it), `docs/00` (the reuse ledger
+gains a note that linked libraries are not reuse and do not belong in its
+table, plus — worth more — the observation that the M4 UI is idea-level
+reuse of the sixteen-manual corpus, which the ledger had never recorded
+because no software was involved).
+
+The NOTICE entry was checked against the installed licence files rather
+than from memory: FLTK 1.4.5's COPYING carries the LGPL plus the
+subclassing and static-linking exceptions, RtAudio 6.0.1's LICENSE is
+MIT-style with a non-binding request to send modifications upstream.
+Both are compatible with GPLv3+ and neither obliges anything Nova is not
+already doing.
+
+Merged to `main`: four commits, fast-forward from `942b433`. No remote is
+configured, so nothing is left unpushed. 23/23 pass on the merge commit.
+
 ---
 
 ## 2026-08-13 — Session 18: the walking skeleton, and the mockup was wrong about the ruler

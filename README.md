@@ -148,6 +148,23 @@ staircase is the open half of that milestone.
 Manual override of everything [ISO §4.2.6] is still untouched and needs
 the GUI (M4).
 
+**M4 has started (2026-08-13): the shell exists, with nothing behind it.**
+The design was settled first, against a survey of sixteen commercial
+weather-fax receiver manuals — which is where Nova's two picture
+corrections, its named protocol states and its refusal to show a progress
+percentage all come from — and the first code is a walking skeleton: the
+window laid out in real FLTK widgets, RtAudio device enumeration, and the
+dependency wiring that keeps FLTK and RtAudio out of everything except
+the GUI binary. No decode, no threads, no audio stream yet.
+
+Two things it was built to find, it found. The image pane's ruler is the
+surface the operator sets the picture phase on, and it has to name the
+image column beneath it exactly; drawn from the mockup it was six pixels
+out, and fixing that at one window size did not fix it at any other,
+because the toolkit's own resize logic stretched it back off. The layout
+is therefore computed rather than scaled, and a window built at a size is
+now provably identical to one dragged to it.
+
 Synthetic tests cover the full {IOC 288, 576} × {60, 90, 120 lpm} matrix
 with automatic selection, ±150/±400 Hz deviation, a two-order-of-magnitude
 input-amplitude span, dead-sector tolerance edges, the eight-tone gray
@@ -162,13 +179,30 @@ Tier 2 (CI-built, community-tested): 32-bit Windows/Linux, ARM, FreeBSD.
 
 ## Build
 
-Plain C++17 + CMake. Dependencies: FLTK (GUI), RtAudio (live audio);
-the DSP core is dependency-free.
+Plain C++17 + CMake.
 
 ```
 cmake -B build -S .
 cmake --build build
 ctest --test-dir build
+```
+
+**The decoder, the command-line tools and the whole test suite have no
+external dependencies.** FLTK and RtAudio are needed by the GUI binary
+alone (`nova-gui`), behind `option(NOVA_BUILD_GUI)`, which is ON by
+default. If either library is absent the configure step prints
+`nova-gui: SKIPPED` and everything else builds and passes as before;
+`-DNOVA_BUILD_GUI=OFF` does the same deliberately. FLTK is located
+through `fltk-config` and RtAudio through `pkg-config`, since neither
+ships a CMake config package.
+
+The GUI is a shell at present — the window, the device menu and the
+layout, with no decode behind them yet (M4). It answers two questions
+without opening anything:
+
+```
+./build/nova-gui --devices
+./build/nova-gui --metrics
 ```
 
 ## License

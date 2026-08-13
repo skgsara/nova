@@ -70,3 +70,25 @@ No GPLv2+ code is incorporated; where reuse is of GPLv2+-licensed
 algorithms, the re-implementation is GPLv3+. If you believe attribution
 is missing or incorrect, please open an issue — provenance accuracy is
 a project rule, not a courtesy.
+
+Linked libraries
+----------------
+Distinct from the lineage above, which is idea-level reuse: these are
+libraries Nova links against, added 2026-08-13 with the M4 GUI shell.
+Neither contributes any algorithm to the decoder. Both are used
+unmodified, as installed by the system's package manager.
+
+  * FLTK     — the Fast Light Toolkit, https://www.fltk.org/.
+               LGPL with the FLTK exceptions (see the library's own
+               COPYING), which state that subclassing FLTK widgets does
+               not create a derivative work and that static linking does
+               not oblige an application to relicense. Used for the
+               window and widgets in gui/.
+  * RtAudio  — Gary P. Scavone, 2001–2023, MIT-style permissive licence.
+               Used for audio device enumeration and capture in gui/.
+
+Both are linked by the `nova-gui` target ALONE, behind
+`option(NOVA_BUILD_GUI)`. The decoder core, the command-line tools and
+the entire test suite link neither and build with the option OFF; this
+is enforced by the build rather than by convention — a missing library
+skips the GUI target instead of failing the build.

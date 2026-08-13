@@ -323,6 +323,24 @@ own row the day it enters, with the source file named.
 | Abandon a phasing run after N consecutive failed lines (N re-measured) | fldigi `decode_phasing` | GPLv3+ | `core/phasing.cpp` | 2026-08-12 |
 | Per-line correlation against the previous line, kept per line rather than collapsed to a histogram mode | fldigi `correlation_shift` | GPLv3+ | `core/fax.cpp` adrift-row fallback | 2026-08-12 |
 
+**Linked libraries are not reuse and do not belong in the table above**,
+but they are recorded here so the ledger is not read as the whole
+dependency picture. Session 18 added the first two the tree has ever had:
+FLTK (LGPL with the FLTK static-linking and subclassing exceptions) and
+RtAudio (MIT-style), linked by the `nova-gui` target alone behind
+`option(NOVA_BUILD_GUI)`. Neither contributes an algorithm to the
+decoder; the core, the CLIs and the whole test suite link neither. Full
+terms in `NOTICE`.
+
+**The M4 UI itself is idea-level reuse of a different corpus**, and it is
+worth naming here even though no software was involved: the sixteen
+commercial receiver manuals surveyed in `docs/04` are where Nova's two
+picture corrections, its ruler-and-coordinate phase entry, its
+always-available forced start, its named protocol states and its refusal
+to display a progress percentage all come from. Facts about interface
+conventions only — no text is reproduced, and the manuals stay outside
+the repository under the never-commit rule.
+
 ## Access notes
 
 - HamFax: hamfax.sourceforge.net returned HTTP 403 at survey time
