@@ -8,6 +8,7 @@
 #include "../core/resample.hpp"
 #include "../core/tones.hpp"
 #include "../core/wav.hpp"
+#include "env_hooks.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -57,6 +58,7 @@ int main(int argc, char** argv) {
         }
         std::vector<float> video =
             nova::fm_demod(mono, kInternalRate, 1900.0, 400.0);
+        const nova::DecodeHooks hooks = nova::hooks_from_env();
 
         if (dump) {
             const size_t n =
@@ -78,7 +80,7 @@ int main(int argc, char** argv) {
         }
 
         std::vector<nova::ToneEvent> ev =
-            nova::detect_tones(video, kInternalRate, opt);
+            nova::detect_tones(video, kInternalRate, opt, hooks);
         std::printf("%s: %zu tone(s)\n", argv[1], ev.size());
         for (const auto& e : ev)
             std::printf("  %-10s %7.2f - %7.2f s  (%.2f s)  f=%6.1f Hz  "
@@ -93,7 +95,8 @@ int main(int argc, char** argv) {
         int best_lpm = 0;
         for (int lpm : {60, 90, 120}) {
             nova::PhasingResult p = nova::detect_phasing(
-                video, kInternalRate, kInternalRate * 60.0 / lpm);
+                video, kInternalRate, kInternalRate * 60.0 / lpm,
+                nova::PhasingOptions(), hooks);
             if (p.found && p.lines > best.lines) {
                 best = p;
                 best_lpm = lpm;

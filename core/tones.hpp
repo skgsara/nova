@@ -15,6 +15,7 @@
 // a rectangular control tone is one line in the spectrum and a page of
 // weather text is broadband.
 #pragma once
+#include "hooks.hpp"
 #include <vector>
 
 namespace nova {
@@ -63,9 +64,11 @@ struct ToneOptions {
     double max_spread = 0.01;
 };
 
-// All control tones found in `video`, in time order.
+// All control tones found in `video`, in time order. `hooks` carries the
+// log/cancellation seams (core/hooks.hpp); the default is silent.
 std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
-                                    const ToneOptions& opt = ToneOptions());
+                                    const ToneOptions& opt = ToneOptions(),
+                                    const DecodeHooks& hooks = DecodeHooks());
 
 // Fraction of the AC power of video[s .. s+n) that lies in the bin at `f`.
 // 1.0 = a pure sinusoid at f; 8/pi^2 = 0.811 = an ideal square wave at f

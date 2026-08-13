@@ -16,6 +16,7 @@ add_library(nova-core STATIC
   core/resample.cpp
   core/demod.cpp
   core/image.cpp
+  core/hooks.cpp
   core/fax.cpp
   core/gen.cpp
   core/tones.cpp
@@ -249,6 +250,12 @@ add_test(NAME fixture_faded_phasing COMMAND nova-test-fixture
 add_executable(nova-test-tones tests/test_tones.cpp)
 target_link_libraries(nova-test-tones PRIVATE nova-core)
 add_test(NAME tones COMMAND nova-test-tones)
+
+# M4 seam screamers: structured decode errors, log/progress callbacks,
+# cooperative cancellation (docs/03 "Small core changes").
+add_executable(nova-test-hooks tests/test_hooks.cpp)
+target_link_libraries(nova-test-hooks PRIVATE nova-core)
+add_test(NAME hooks COMMAND nova-test-hooks)
 
 # M3 fixture screamers on real off-air signals. Bounds measured 2026-08-12
 # (session 6). The start/phasing case is VMW, a WHITE-ONLY station: it has

@@ -5,9 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-#include <stdexcept>
-#include <cstdio>
-#include <cstdlib>
 #include <vector>
 
 namespace nova {
@@ -344,7 +341,7 @@ double fold_shift(const std::vector<double>& a, const std::vector<double>& b,
 }
 
 double refine_period(const std::vector<float>& v, size_t start, double period,
-                     int n_lines) {
+                     int n_lines, const DecodeHooks& hooks) {
     const int nb = std::min(kFoldMaxBlocks, n_lines / kFoldMinLines);
     if (nb < 3) return period;  // too short to see drift; coarse is all there is
     const int per_block = n_lines / nb;
@@ -412,11 +409,10 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
                 phase[b] = phase[b - 1] + sh[b];
             }
         }
-        if (std::getenv("NOVA_DEBUG_FOLD")) {
+        if (hooks.log)
             for (int b = 1; b < nb; b++)
-                std::fprintf(stderr, "dbg: fold blk %2d shift %+9.2f %s\n", b,
-                             sh[b], good[b] ? "" : "REJECT");
-        }
+                dlog(hooks, LogTopic::kFold, "dbg: fold blk %2d shift %+9.2f %s",
+                     b, sh[b], good[b] ? "" : "REJECT");
         std::vector<double> slopes;
         for (int i = 0; i < nb; i++)
             for (int j = i + 1; j < nb; j++)
@@ -425,12 +421,10 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
         if (slopes.empty()) return period;
         const double drift = median(slopes);  // samples per block
         const double next = period + drift / per_block;
-        if (std::getenv("NOVA_DEBUG"))
-            std::fprintf(stderr,
-                         "dbg: fold pass %d: %d blocks x %d lines, drift "
-                         "%+.2f samples/block -> period %.4f (%+.1f ppm)\n",
-                         pass, nb, per_block, drift, next,
-                         (next / period - 1.0) * 1e6);
+        dlog(hooks, LogTopic::kInfo,
+             "dbg: fold pass %d: %d blocks x %d lines, drift "
+             "%+.2f samples/block -> period %.4f (%+.1f ppm)",
+             pass, nb, per_block, drift, next, (next / period - 1.0) * 1e6);
         // A "correction" of more than 3% is not a clock error, it is a
         // misfolded signal; keep the coarse period rather than invent one.
         if (std::fabs(next - period) > 0.03 * period) return period;
@@ -441,12 +435,64 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
 
 }  // namespace
 
-DecodeResult decode_fax(const std::vector<float>& video, int fs,
-                        const DecodeOptions& opt) {
-    if (video.empty()) throw std::invalid_argument("decode_fax: empty input");
+// --- decode_fax: state and stages -----------------------------------------
+// decode_fax is a fixed pipeline of the numbered stages below, run in
+// order. The split is a seam, not a reorganization: each stage function is
+// the section the single function used to carry inline, with the same
+// logic, the same constants and the same comments. What the split buys is
+// the M4 surface (docs/03): progress is reported at stage boundaries and
+// inside the long loops, cancellation is checked there too, and a future
+// incremental pipeline can drive stages rather than one monolith.
+namespace {
+
+// Everything a stage leaves for the next one. Only cross-stage values live
+// here; anything one stage uses internally stays a local of that stage.
+struct DecodeState {
+    DecodeState(const std::vector<float>& v, int f, const DecodeOptions& o)
+        : video(v), fs(f), opt(o), hooks(o.hooks) {}
+
+    const std::vector<float>& video;
+    const int fs;
+    const DecodeOptions& opt;
+    const DecodeHooks& hooks;
     DecodeResult res;
 
-    // --- 1. signal onset + coarse line rate ------------------------------
+    // 1. onset + period
+    int lpm = 0;
+    size_t start = 0;   // signal onset, in samples
+    double nominal = 0.0;  // nominal line length, samples
+    double period0 = 0.0;  // refined coarse line length, samples
+    double pulse = 0.0;    // sync pulse width, samples
+    double dead = 0.0;     // dead sector width, samples
+    int n_lines = 0;
+
+    // 2. dead-sector style + coarse anchor
+    int plen = 0;
+    bool has_pulse = false;
+    double dead_start0 = 0.0;
+
+    // 2b. control tones (shared with segmentation) and 3/4. the track
+    std::vector<ToneEvent> tones;
+    const double lock = kPulseLock;
+    std::vector<double> spos, sstr;
+
+    // 4. pass B fit
+    double a = 0.0, b = 0.0;
+
+    // 4c. segmentation
+    int line_lo = 0, line_hi = 0;
+
+    // 4e. change points
+    std::vector<char> cpoint;
+};
+
+// --- 1. signal onset + coarse line rate -----------------------------------
+void stage_onset(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const std::vector<float>& video = st.video;
+    const int fs = st.fs;
+
     // Real recordings do not start with signal: receivers are started
     // early, stations send leader/tuning tones, and SDR streams stall and
     // replay fill. Autocorrelation over signal-free audio returns a
@@ -459,7 +505,8 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     const size_t start200 = std::min(
         static_cast<size_t>(opt.start_sec * 200.0), v200.size());
     if (v200.size() - start200 < 600)
-        throw std::runtime_error("decode_fax: recording too short");
+        throw DecodeError(DecodeErrorKind::kTooShort,
+                          "decode_fax: recording too short");
 
     // Gate: relative to the strongest window in the file, with an absolute
     // floor. Measured on the library (session 3): fill <= 0.05 (looped
@@ -479,6 +526,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     std::vector<Win> wins;
     double file_max = 0.0;
     for (size_t s = start200; s + wlen <= v200.size(); s += hop) {
+        throw_if_cancelled(st.hooks, "onset");
         Win w{s, {0.0, 0.0, 0.0}};
         for (size_t ri = 0; ri < 3; ri++) {
             if (opt.lpm != 0 && kRates[ri] != opt.lpm) continue;
@@ -486,10 +534,12 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             file_max = std::max(file_max, w.score[ri]);
         }
         wins.push_back(w);
-        if (std::getenv("NOVA_DEBUG"))
-            std::fprintf(stderr,
-                         "dbg: comb win@%.1fs 60=%.3f 90=%.3f 120=%.3f\n",
-                         s / 200.0, w.score[0], w.score[1], w.score[2]);
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: comb win@%.1fs 60=%.3f 90=%.3f 120=%.3f",
+             s / 200.0, w.score[0], w.score[1], w.score[2]);
+        report(st.hooks, "onset",
+               static_cast<double>(s - start200) /
+                   std::max<size_t>(1, v200.size() - wlen));
         if (wlen == avail200) break;  // short file: single window
     }
     const double gate = std::max(kGateFloor, 0.5 * file_max);
@@ -527,8 +577,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         have_onset = true;
     }
     if (!have_onset)
-        throw std::runtime_error(
-            "decode_fax: no fax line comb found (fill or no signal)");
+        throw DecodeError(DecodeErrorKind::kNoSignal,
+                          "decode_fax: no fax line comb found (fill or no "
+                          "signal)");
 
     // Period: autocorrelation over everything from onset to EOF (the
     // onset gate has already excluded fill, the historical bias source).
@@ -539,15 +590,15 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     std::vector<float> pwin(v200.begin() + onset200, v200.end());
     const double period_200 =
         best_period(pwin, nom200 * 0.97, nom200 * 1.03);
-    if (std::getenv("NOVA_DEBUG"))
-        std::fprintf(stderr, "dbg: onset=%.1fs lpm=%d coarse=%.5f lpm (%+.1f "
-                             "ppm)\n",
-                     onset200 / 200.0, lpm, 60.0 * 200.0 / period_200,
-                     (lpm * period_200 / (200.0 * 60.0) - 1.0) * 1e6);
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: onset=%.1fs lpm=%d coarse=%.5f lpm (%+.1f ppm)",
+         onset200 / 200.0, lpm, 60.0 * 200.0 / period_200,
+         (lpm * period_200 / (200.0 * 60.0) - 1.0) * 1e6);
     res.lpm = lpm;
+    st.lpm = lpm;
 
-    const size_t start = onset200 * static_cast<size_t>(fs) / 200;
-    const double nominal = fs * 60.0 / lpm;
+    st.start = onset200 * static_cast<size_t>(fs) / 200;
+    st.nominal = fs * 60.0 / lpm;
 
     // Refine the coarse period against the whole recording before anything
     // is measured on it. The coarse fit is off by 30-180 ppm on real
@@ -555,23 +606,34 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // +261 coarse vs +438 fitted, XSG ASPN +26 vs -90). A pulse station
     // survives that because pass B refits from its locks; a white-only
     // station draws on it directly and slants by exactly that error.
-    const size_t avail = video.size() - start;
+    const size_t avail = video.size() - st.start;
     int n_lines0 = static_cast<int>(avail / (period_200 * fs / 200.0));
     if (opt.max_lines > 0) n_lines0 = std::min(n_lines0, opt.max_lines);
-    const double period0 =
-        refine_period(video, start, period_200 * fs / 200.0, n_lines0);
-    if (std::getenv("NOVA_DEBUG"))
-        std::fprintf(stderr, "dbg: period refined to %.4f (%+.1f ppm)\n",
-                     period0, (period0 / nominal - 1.0) * 1e6);
+    const double period0 = refine_period(video, st.start,
+                                         period_200 * fs / 200.0, n_lines0,
+                                         st.hooks);
+    dlog(st.hooks, LogTopic::kInfo, "dbg: period refined to %.4f (%+.1f ppm)",
+         period0, (period0 / st.nominal - 1.0) * 1e6);
+    st.period0 = period0;
 
-    const double pulse = kPulseFrac * period0;
-    const double dead = kDeadFrac * period0;
+    st.pulse = kPulseFrac * period0;
+    st.dead = kDeadFrac * period0;
 
     int n_lines = static_cast<int>(avail / period0);
     if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
-    if (n_lines < 4) throw std::runtime_error("decode_fax: too few lines");
+    if (n_lines < 4)
+        throw DecodeError(DecodeErrorKind::kTooFewLines,
+                          "decode_fax: too few lines");
+    st.n_lines = n_lines;
+}
 
-    // --- 2. coarse phase + dead-sector style, from across-line consistency -
+// --- 2. coarse phase + dead-sector style, from across-line consistency ----
+void stage_dead_sector(DecodeState& st) {
+    DecodeResult& res = st.res;
+    const std::vector<float>& video = st.video;
+    const double period0 = st.period0;
+    const int n_lines = st.n_lines;
+
     // The dead sector is the one part of the line that looks the same on
     // EVERY line [WMO §5.1.3.3]. Picture content does not: a chart border
     // is dark on many lines, never on all of them. So the anchor is found
@@ -584,6 +646,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // textbook sync pulse. Same failure on jmh sample, test chart, XSG
     // ASPN, JSC2, NMC, HDSDR.
     const int plen = static_cast<int>(period0);
+    st.plen = plen;
     // Profile length is bounded by clock smear, not by taste: the profile
     // is stacked on the coarse period, so a relative period error e spreads
     // the pulse by prof_lines*period0*e. The autocorrelation period is good
@@ -600,11 +663,12 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // The onset gate anchors on the line comb, and phasing has one, so
     // phasing is exactly what onset lands on when a station sends it.
     const int prof0 =
-        std::min(n_lines / 4, static_cast<int>(30.0 * lpm / 60.0));
+        std::min(n_lines / 4, static_cast<int>(30.0 * st.lpm / 60.0));
     const int prof_lines = std::min(n_lines - prof0, 120);
     std::vector<double> dark_frac(plen, 0.0), white_frac(plen, 0.0);
     for (int l = 0; l < prof_lines; l++) {
-        const double base = start + (prof0 + l) * period0;
+        throw_if_cancelled(st.hooks, "dead-sector");
+        const double base = st.start + (prof0 + l) * period0;
         for (int i = 0; i < plen; i++) {
             const float x = lerp_at(video, base + i);
             if (x < kDarkLevel) dark_frac[i] += 1.0;
@@ -657,10 +721,10 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     }
     const double pulse_cons = win_mean(dark_frac, pulse_at, pulse_w);
     const double white_cons = win_mean(white_frac, white_at, dead_w);
-    if (std::getenv("NOVA_DEBUG_PROFILE"))
+    if (st.hooks.log)
         for (int i = 0; i < plen; i += std::max(1, plen / 200))
-            std::fprintf(stderr, "prof %5d dark=%.2f white=%.2f\n", i,
-                         dark_frac[i], white_frac[i]);
+            dlog(st.hooks, LogTopic::kProfile, "prof %5d dark=%.2f white=%.2f",
+                 i, dark_frac[i], white_frac[i]);
 
     // The pulse is optional. Take it when the station really sends one,
     // because it is by far the stronger template; otherwise anchor on the
@@ -673,15 +737,24 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // Only a black pulse gives per-line phase. See the note on white_score
     // above: a white-only dead sector is decoded on the measured clock.
     res.per_line_sync = has_pulse;
-    if (std::getenv("NOVA_DEBUG"))
-        std::fprintf(stderr,
-                     "dbg: pulse shape %.2f cons %.2f @%d | white shape %.2f "
-                     "cons %.2f @%d -> %s\n",
-                     pulse_shape, pulse_cons, pulse_at, white_shape,
-                     white_cons, white_at,
-                     has_pulse ? "black-pulse" : "white-only");
+    st.has_pulse = has_pulse;
+    st.dead_start0 = dead_start0;
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: pulse shape %.2f cons %.2f @%d | white shape %.2f "
+         "cons %.2f @%d -> %s",
+         pulse_shape, pulse_cons, pulse_at, white_shape,
+         white_cons, white_at,
+         has_pulse ? "black-pulse" : "white-only");
+}
 
-    // --- 2b. phasing: the line-start reference the picture cannot give -----
+// --- 2b. phasing: the line-start reference the picture cannot give --------
+void stage_phasing(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const std::vector<float>& video = st.video;
+    const int fs = st.fs;
+    const double period0 = st.period0;
+
     // [WMO §5.2.3.4] puts the leading edge of the phasing white at entry
     // into the dead sector — the same feature the image profile above is
     // hunting for, measured on 30 s that contain no picture content to be
@@ -709,9 +782,10 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // makes the 300/675 Hz start signal the receiver's IOC selection, not
     // merely a crop boundary. Keep the scan shared with segmentation and
     // the phasing window rather than running it twice.
-    const std::vector<ToneEvent> tones =
-        (opt.segment || opt.ioc == 0) ? detect_tones(video, fs)
-                                      : std::vector<ToneEvent>();
+    st.tones = (opt.segment || opt.ioc == 0)
+                   ? detect_tones(video, fs, ToneOptions(), st.hooks)
+                   : std::vector<ToneEvent>();
+    const std::vector<ToneEvent>& tones = st.tones;
     int ioc = opt.ioc;
     if (ioc == 0) {
         ioc = 576;
@@ -724,68 +798,81 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             }
     }
     res.ioc = ioc;
-    {
-        PhasingOptions popt;
-        for (const auto& e : tones)
-            if (e.kind != ToneKind::kStop) {
-                popt.t_lo = e.t_end;
-                break;
-            }
-        for (const auto& e : tones)
-            if (e.kind == ToneKind::kStop && e.t_start > popt.t_lo) {
-                popt.t_hi = e.t_start;
-                break;
-            }
-        const PhasingResult ph = detect_phasing(video, fs, period0, popt);
-        res.phasing_found = ph.found;
-        if (ph.found) {
-            res.phasing_t_start = ph.t_start;
-            res.phasing_t_end = ph.t_end;
-            res.phasing_lines = ph.lines;
-            res.phasing_spread = ph.spread;
-            res.phasing_nonlinearity = ph.nonlinearity;
-            res.phasing_roughness = ph.roughness;
-            res.phasing_steps = ph.steps;
-            res.phasing_score = ph.score;
-            const double phase =
-                std::fmod(std::fmod(ph.anchor - start, period0) + period0,
-                          period0);
-            double d = phase - dead_start0;
-            while (d > period0 / 2.0) d -= period0;
-            while (d < -period0 / 2.0) d += period0;
-            res.phasing_anchor_delta = d;
-            // Only where the image has nothing to offer. A pulse station
-            // already anchors on a feature it re-measures every line, at
-            // 88-99% lock rates; swapping that for a phase measured once,
-            // 30 s in, would trade a tracked reference for a fixed one.
-            // The delta is reported either way, so the day a pulse station
-            // disagrees by more than a porch, it will be in the output.
-            if (opt.use_phasing && !has_pulse) {
-                dead_start0 = phase;
-                res.anchor_from_phasing = true;
-            }
+    PhasingOptions popt;
+    for (const auto& e : tones)
+        if (e.kind != ToneKind::kStop) {
+            popt.t_lo = e.t_end;
+            break;
         }
-        if (std::getenv("NOVA_DEBUG"))
-            std::fprintf(stderr,
-                         "dbg: phasing found=%d %.2f-%.2f s lines=%d "
-                         "anchor=%.1f delta=%+.1f -> %s\n",
-                         ph.found, ph.t_start, ph.t_end, ph.lines, ph.anchor,
-                         res.phasing_anchor_delta,
-                         res.anchor_from_phasing ? "USED" : "image anchor");
+    for (const auto& e : tones)
+        if (e.kind == ToneKind::kStop && e.t_start > popt.t_lo) {
+            popt.t_hi = e.t_start;
+            break;
+        }
+    const PhasingResult ph = detect_phasing(video, fs, period0, popt,
+                                            st.hooks);
+    res.phasing_found = ph.found;
+    if (ph.found) {
+        res.phasing_t_start = ph.t_start;
+        res.phasing_t_end = ph.t_end;
+        res.phasing_lines = ph.lines;
+        res.phasing_spread = ph.spread;
+        res.phasing_nonlinearity = ph.nonlinearity;
+        res.phasing_roughness = ph.roughness;
+        res.phasing_steps = ph.steps;
+        res.phasing_score = ph.score;
+        const double phase =
+            std::fmod(std::fmod(ph.anchor - st.start, period0) + period0,
+                      period0);
+        double d = phase - st.dead_start0;
+        while (d > period0 / 2.0) d -= period0;
+        while (d < -period0 / 2.0) d += period0;
+        res.phasing_anchor_delta = d;
+        // Only where the image has nothing to offer. A pulse station
+        // already anchors on a feature it re-measures every line, at
+        // 88-99% lock rates; swapping that for a phase measured once,
+        // 30 s in, would trade a tracked reference for a fixed one.
+        // The delta is reported either way, so the day a pulse station
+        // disagrees by more than a porch, it will be in the output.
+        if (opt.use_phasing && !st.has_pulse) {
+            st.dead_start0 = phase;
+            res.anchor_from_phasing = true;
+        }
     }
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: phasing found=%d %.2f-%.2f s lines=%d "
+         "anchor=%.1f delta=%+.1f -> %s",
+         ph.found, ph.t_start, ph.t_end, ph.lines, ph.anchor,
+         res.phasing_anchor_delta,
+         res.anchor_from_phasing ? "USED" : "image anchor");
+}
 
-    // --- 3. pass A: sequential sync tracking -------------------------------
+}  // namespace
+
+namespace {
+
+// --- 3. pass A: sequential sync tracking ------------------------------------
+void stage_track(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const std::vector<float>& video = st.video;
+    const int n_lines = st.n_lines;
+    const double period0 = st.period0;
+
     // Walk line to line: each search window is centred on the previous
     // lock + coarse period, so sound-card drift can never walk the sync
     // out of the window (the failure mode of a fixed coarse grid).
     // Lines with no real sync match are coasted (prediction only).
-    const double lock = kPulseLock;
-    std::vector<double> spos(n_lines), sstr(n_lines);
+    const double lock = st.lock;
+    st.spos.assign(n_lines, 0.0);
+    st.sstr.assign(n_lines, 0.0);
+    std::vector<double>& spos = st.spos;
+    std::vector<double>& sstr = st.sstr;
     if (!res.per_line_sync) {
         // Nothing to track. Draw on the measured clock from the coarse
         // anchor and leave every line unlocked, honestly.
         for (int l = 0; l < n_lines; l++) {
-            spos[l] = start + dead_start0 + l * period0;
+            spos[l] = st.start + st.dead_start0 + l * period0;
             sstr[l] = -1.0;
         }
     } else {
@@ -795,12 +882,12 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         // phasing->image boundary and coasts to EOF
         const double narrow = opt.search_frac * period0;
         // the template reads a dead sector's worth either side of p
-        const double margin = 2.0 * dead + 2.0;
+        const double margin = 2.0 * st.dead + 2.0;
         const double pmin = margin;
         const double pmax = video.size() - margin;
-        double pred = start + dead_start0;
+        double pred = st.start + st.dead_start0;
         spos[0] = best_sync(video, std::max(pmin, pred - wide),
-                            std::min(pmax, pred + wide), pulse, &sstr[0]);
+                            std::min(pmax, pred + wide), st.pulse, &sstr[0]);
         double last_good = spos[0];
         long last_good_l = 0;
         if (sstr[0] < lock) last_good = pred;  // coast from coarse
@@ -816,12 +903,17 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         // outcome.
         int miss = 0;
         for (int l = 1; l < n_lines; l++) {
+            if ((l & 63) == 0) {
+                throw_if_cancelled(st.hooks, "sync-track");
+                report(st.hooks, "sync-track",
+                       static_cast<double>(l) / n_lines);
+            }
             const double c = last_good + (l - last_good_l) * period0;
             const bool reacq = miss >= kReacqMisses && (miss % kReacqEvery) == 0;
             const double span = reacq ? 0.5 * period0 : narrow;
             const double lo = std::max(pmin, c - span);
             const double hi = std::min(pmax, c + span);
-            spos[l] = best_sync(video, lo, hi, pulse, &sstr[l],
+            spos[l] = best_sync(video, lo, hi, st.pulse, &sstr[l],
                                 reacq ? kReacqStep : 1.0);
             if (sstr[l] >= lock) {
                 last_good = spos[l];
@@ -832,9 +924,18 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             }
         }
     }
+}
 
+// --- 4. pass B: robust period/phase from median LONG-baseline slope --------
+void stage_fit(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const int n_lines = st.n_lines;
+    const double period0 = st.period0;
+    const double lock = st.lock;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
 
-    // --- 4. pass B: robust period/phase from median LONG-baseline slope ----
     // Least squares bends here by design of the signal: phasing lines and
     // image lines anchor the template ~half a dead sector apart (the wedge
     // is the mirror of the pulse), so a single fitted line through both
@@ -854,7 +955,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // 2*search, so nothing downstream caught it. Precision is baseline, not
     // averaging: pairing each locked line with the one half a recording
     // later turns the same ±2 samples into fractions of a ppm.
-    double a = start + dead_start0, b = period0;
+    double a = st.start + st.dead_start0, b = period0;
     {
         std::vector<int> lk;
         for (int l = 0; l < n_lines; l++)
@@ -911,26 +1012,43 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             a = median(intercepts);
         }
     }
-    res.line_period_s = b / fs;
-    res.clock_ppm = (b / nominal - 1.0) * 1e6;
+    st.a = a;
+    st.b = b;
+    res.line_period_s = b / st.fs;
+    res.clock_ppm = (b / st.nominal - 1.0) * 1e6;
 
     if (!opt.autolock) {
         // no clock correction at all: coarse phase, nominal period
-        a = start + dead_start0;
-        b = nominal;
+        st.a = st.start + st.dead_start0;
+        st.b = st.nominal;
     }
 
-    if (std::getenv("NOVA_DEBUG")) {
-        std::fprintf(stderr,
-                     "dbg: dead_start0=%.1f a=%.1f b=%.4f n_lines=%d\n",
-                     dead_start0, a, b, n_lines);
-        const int step = std::getenv("NOVA_DEBUG_FULL") ? 1 : 10;
-        for (int l = 0; l < n_lines; l += step)
-            std::fprintf(stderr, "dbg: l=%3d spos=%.1f sstr=%.2f resid=%+.1f\n",
-                         l, spos[l], sstr[l], spos[l] - (a + b * l));
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: dead_start0=%.1f a=%.1f b=%.4f n_lines=%d",
+         st.dead_start0, st.a, st.b, n_lines);
+    for (int l = 0; l < n_lines; l++) {
+        // NOVA_DEBUG printed every 10th line, NOVA_DEBUG_FULL every line;
+        // as topics that is kInfo for the sparse form, kDetail for the
+        // dense one.
+        if (l % 10 == 0)
+            dlog(st.hooks, LogTopic::kInfo,
+                 "dbg: l=%3d spos=%.1f sstr=%.2f resid=%+.1f",
+                 l, spos[l], sstr[l], spos[l] - (st.a + st.b * l));
+        else
+            dlog(st.hooks, LogTopic::kDetail,
+                 "dbg: l=%3d spos=%.1f sstr=%.2f resid=%+.1f",
+                 l, spos[l], sstr[l], spos[l] - (st.a + st.b * l));
     }
+}
 
-    // --- 4c. segmentation: start -> phasing -> image -> stop ---------------
+// --- 4c. segmentation: start -> phasing -> image -> stop --------------------
+void stage_segment(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const int n_lines = st.n_lines;
+    const double lock = st.lock;
+    const std::vector<double>& sstr = st.sstr;
+
     // The transmission sequence of WMO §5.2.3 is not picture: the start
     // tone and the phasing interval precede the image and the stop tone
     // ends it [WMO §5.2.5]. Drawing them produced tens of lines of black/
@@ -945,7 +1063,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // moves — only what is drawn.
     int line_lo = 0, line_hi = n_lines;
     if (opt.segment) {
-        const std::vector<ToneEvent>& ev = tones;  // scanned once, at §2b
+        const std::vector<ToneEvent>& ev = st.tones;  // scanned once, at §2b
         // Segment the FIRST transmission. A recording can hold more than
         // one: `jmh sample` carries a start at 6 s, its stop at 404 s, and
         // then the NEXT transmission's start at 425 s. Every boundary rule
@@ -962,7 +1080,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                 break;
             }
         // ...then the first stop tone that follows the opening.
-        double t1 = static_cast<double>(video.size()) / fs;
+        double t1 = static_cast<double>(st.video.size()) / st.fs;
         for (const auto& e : ev)
             if (e.kind == ToneKind::kStop && e.t_start > t0) {
                 t1 = e.t_start;
@@ -981,10 +1099,10 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         // rounding of the line index alone would report "dropped 1 line of
         // stop" on a recording with no stop tone in it (JSC1).
         const int lo = have_head
-                           ? static_cast<int>(std::ceil((t0 * fs - a) / b))
+                           ? static_cast<int>(std::ceil((t0 * st.fs - st.a) / st.b))
                            : 0;
         const int hi = have_tail
-                           ? static_cast<int>(std::floor((t1 * fs - a) / b))
+                           ? static_cast<int>(std::floor((t1 * st.fs - st.a) / st.b))
                            : n_lines;
         const int clo = std::max(0, std::min(lo, n_lines));
         const int chi = std::max(clo, std::min(hi, n_lines));
@@ -996,17 +1114,17 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             line_hi = chi;
             res.segmented = (line_lo != 0 || line_hi != n_lines);
         }
-        if (std::getenv("NOVA_DEBUG"))
-            std::fprintf(stderr,
-                         "dbg: segment t0=%.2f t1=%.2f -> lines [%d,%d) of "
-                         "%d%s\n",
-                         t0, t1, line_lo, line_hi, n_lines,
-                         res.segmented ? "" : " (not applied)");
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: segment t0=%.2f t1=%.2f -> lines [%d,%d) of %d%s",
+             t0, t1, line_lo, line_hi, n_lines,
+             res.segmented ? "" : " (not applied)");
     }
+    st.line_lo = line_lo;
+    st.line_hi = line_hi;
     res.lines_dropped_head = line_lo;
     res.lines_dropped_tail = n_lines - line_hi;
-    res.image_t_start = (a + b * line_lo) / fs;
-    res.image_t_end = (a + b * line_hi) / fs;
+    res.image_t_start = (st.a + st.b * line_lo) / st.fs;
+    res.image_t_end = (st.a + st.b * line_hi) / st.fs;
 
     // Honest lock metric: lines where the sync template actually matched.
     // (Before session 3 this counted "correction did not jump", which is
@@ -1016,8 +1134,22 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     res.locked_lines = 0;
     for (int l = line_lo; l < line_hi; l++)
         if (sstr[l] >= lock) res.locked_lines++;
+}
 
-    // --- 4d. is the timebase linear? --------------------------------------
+}  // namespace
+
+namespace {
+
+// --- 4d. is the timebase linear? --------------------------------------------
+void stage_timebase(DecodeState& st) {
+    DecodeResult& res = st.res;
+    const int n_lines = st.n_lines;
+    const int fs = st.fs;
+    const double lock = st.lock;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
+    const int line_lo = st.line_lo, line_hi = st.line_hi;
+
     // Everything upstream models the recording's time axis as ONE straight
     // line: a period, an intercept, and a clock error in ppm. Two library
     // recordings break that model — JSC2 and JSC3 carry ~21-sample steps
@@ -1060,84 +1192,90 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // absorbs steps without being told they are there. What it changes is
     // the meaning of clock_ppm, and whether phasing_anchor_delta can be
     // compared against the rest of the library at all.
-    {
-        const double step_min = kStepSec * fs;
-        std::vector<double> smoothed;
-        for (int l = line_lo; l < line_hi; l++) {
-            std::vector<double> r;
-            for (int k = std::max(0, l - kMedRad);
-                 k <= std::min(n_lines - 1, l + kMedRad); k++)
-                if (sstr[k] >= lock) r.push_back(spos[k] - (a + b * k));
-            if (!r.empty()) smoothed.push_back(median(r));
-        }
-        if (smoothed.size() >= kStepMinLines) {
-            res.timebase_lines = static_cast<int>(smoothed.size());
-            int n = 0;
-            for (size_t m = 1; m < smoothed.size(); m++)
-                if (std::fabs(smoothed[m] - smoothed[m - 1]) > step_min) n++;
-            res.timebase_step_lines = n;
-            res.timebase_step_rate =
-                1000.0 * n / static_cast<double>(smoothed.size() - 1);
-            res.timebase = res.timebase_step_rate > kStepRateLimit
-                               ? Timebase::kSteps
-                               : Timebase::kLinear;
-        }
-        // Either statistic can convict on its own; only one has to be
-        // available. They agree wherever both are (JSC2/3/4 both ways).
-        //
-        // Session 10: "the edge is not straight" is not the same claim as
-        // "the timebase steps", and until this session the second was read
-        // off the first. Three things bend a phasing edge, and the library
-        // holds one of each:
-        //
-        //   NOISE. GYA 2300Z's interval is faded; its per-line edge moves
-        //   ~15 samples line to line, so a 10-sample threshold is below its
-        //   own measurement floor and any verdict is a coin toss. Read raw
-        //   it scored 46.2 — worse than JSC2, on a recording with no steps.
-        //   ONE SKIP. JMH KiwiSDR Himawari's interval straddles a single
-        //   ~95-sample jump with textbook-linear edge either side. Session 9
-        //   already settled that one skip is not a rate — in the image
-        //   domain, which counts steps. This domain measured a spread and so
-        //   could not tell one jump from fifty; it now counts too. Its 1922
-        //   tracked lines read 1.6 steps per 1000, i.e. linear, and the
-        //   60-line phasing interval was over-ruling them.
-        //   STEPS. JSC2 and JSC3, 16 and 17 persistent moves in 59 lines.
-        //
-        // The same kNonlinSec does all three jobs, so there is one number to
-        // move and not three: it is the resolution the test claims. An
-        // interval whose own line-to-line noise exceeds it cannot resolve it
-        // in either direction, and says so rather than guessing.
-        if (res.phasing_found && res.phasing_lines >= 8) {
-            const double limit = kNonlinSec * fs;
-            if (res.phasing_roughness >= limit) {
-                res.phasing_witness = PhasingWitness::kNoisy;
-            } else if (res.phasing_nonlinearity <= limit) {
-                res.phasing_witness = PhasingWitness::kStraight;
-            } else if (res.phasing_steps >= kMinPhasingSteps) {
-                res.phasing_witness = PhasingWitness::kSteps;
-            } else {
-                res.phasing_witness = PhasingWitness::kOneSkip;
-            }
-            if (res.phasing_witness == PhasingWitness::kSteps)
-                res.timebase = Timebase::kSteps;
-            else if (res.phasing_witness == PhasingWitness::kStraight &&
-                     res.timebase == Timebase::kUnknown)
-                res.timebase = Timebase::kLinear;
-        } else if (res.phasing_found) {
-            res.phasing_witness = PhasingWitness::kTooShort;
-        }
-        if (std::getenv("NOVA_DEBUG"))
-            std::fprintf(stderr,
-                         "dbg: timebase %s step_lines=%d rate=%.1f/1000 "
-                         "phasing_nonlin=%.1f smp\n",
-                         res.timebase == Timebase::kSteps ? "STEPS"
-                         : res.timebase == Timebase::kLinear ? "linear"
-                                                             : "unknown",
-                         res.timebase_step_lines, res.timebase_step_rate,
-                         res.phasing_nonlinearity);
+    const double step_min = kStepSec * fs;
+    std::vector<double> smoothed;
+    for (int l = line_lo; l < line_hi; l++) {
+        std::vector<double> r;
+        for (int k = std::max(0, l - kMedRad);
+             k <= std::min(n_lines - 1, l + kMedRad); k++)
+            if (sstr[k] >= lock) r.push_back(spos[k] - (st.a + st.b * k));
+        if (!r.empty()) smoothed.push_back(median(r));
     }
+    if (smoothed.size() >= kStepMinLines) {
+        res.timebase_lines = static_cast<int>(smoothed.size());
+        int n = 0;
+        for (size_t m = 1; m < smoothed.size(); m++)
+            if (std::fabs(smoothed[m] - smoothed[m - 1]) > step_min) n++;
+        res.timebase_step_lines = n;
+        res.timebase_step_rate =
+            1000.0 * n / static_cast<double>(smoothed.size() - 1);
+        res.timebase = res.timebase_step_rate > kStepRateLimit
+                           ? Timebase::kSteps
+                           : Timebase::kLinear;
+    }
+    // Either statistic can convict on its own; only one has to be
+    // available. They agree wherever both are (JSC2/3/4 both ways).
+    //
+    // Session 10: "the edge is not straight" is not the same claim as
+    // "the timebase steps", and until this session the second was read
+    // off the first. Three things bend a phasing edge, and the library
+    // holds one of each:
+    //
+    //   NOISE. GYA 2300Z's interval is faded; its per-line edge moves
+    //   ~15 samples line to line, so a 10-sample threshold is below its
+    //   own measurement floor and any verdict is a coin toss. Read raw
+    //   it scored 46.2 — worse than JSC2, on a recording with no steps.
+    //   ONE SKIP. JMH KiwiSDR Himawari's interval straddles a single
+    //   ~95-sample jump with textbook-linear edge either side. Session 9
+    //   already settled that one skip is not a rate — in the image
+    //   domain, which counts steps. This domain measured a spread and so
+    //   could not tell one jump from fifty; it now counts too. Its 1922
+    //   tracked lines read 1.6 steps per 1000, i.e. linear, and the
+    //   60-line phasing interval was over-ruling them.
+    //   STEPS. JSC2 and JSC3, 16 and 17 persistent moves in 59 lines.
+    //
+    // The same kNonlinSec does all three jobs, so there is one number to
+    // move and not three: it is the resolution the test claims. An
+    // interval whose own line-to-line noise exceeds it cannot resolve it
+    // in either direction, and says so rather than guessing.
+    if (res.phasing_found && res.phasing_lines >= 8) {
+        const double limit = kNonlinSec * fs;
+        if (res.phasing_roughness >= limit) {
+            res.phasing_witness = PhasingWitness::kNoisy;
+        } else if (res.phasing_nonlinearity <= limit) {
+            res.phasing_witness = PhasingWitness::kStraight;
+        } else if (res.phasing_steps >= kMinPhasingSteps) {
+            res.phasing_witness = PhasingWitness::kSteps;
+        } else {
+            res.phasing_witness = PhasingWitness::kOneSkip;
+        }
+        if (res.phasing_witness == PhasingWitness::kSteps)
+            res.timebase = Timebase::kSteps;
+        else if (res.phasing_witness == PhasingWitness::kStraight &&
+                 res.timebase == Timebase::kUnknown)
+            res.timebase = Timebase::kLinear;
+    } else if (res.phasing_found) {
+        res.phasing_witness = PhasingWitness::kTooShort;
+    }
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: timebase %s step_lines=%d rate=%.1f/1000 "
+         "phasing_nonlin=%.1f smp",
+         res.timebase == Timebase::kSteps ? "STEPS"
+         : res.timebase == Timebase::kLinear ? "linear"
+                                             : "unknown",
+         res.timebase_step_lines, res.timebase_step_rate,
+         res.phasing_nonlinearity);
+}
 
-    // --- 4e. change points: where the line start REALLY moves --------------
+// --- 4e. change points: where the line start REALLY moves -------------------
+void stage_change_points(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    const int n_lines = st.n_lines;
+    const int fs = st.fs;
+    const double lock = st.lock;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
+
     // A smoother and a corrector want opposite things from the same window.
     // The ±kMedRad median exists to reject a bad template match on one line,
     // and it does; but where the line start genuinely moves — a sample-level
@@ -1168,7 +1306,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // (`phasingSkipData` → `m_skip`), then never look again. All four
     // correct a CLOCK; none corrects a timebase, and the one that already
     // computes the per-line number throws it away.
-    std::vector<char> cpoint(n_lines, 0);
+    st.cpoint.assign(n_lines, 0);
     if (opt.autolock) {
         std::vector<int> lk;
         for (int l = 0; l < n_lines; l++)
@@ -1185,15 +1323,32 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         for (size_t j = kSegHalf; j + kSegHalf <= lk.size(); j++) {
             std::vector<double> pre, post;
             for (size_t k = j - kSegHalf; k < j; k++)
-                pre.push_back(spos[lk[k]] - (a + b * lk[k]));
+                pre.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
             for (size_t k = j; k < j + kSegHalf; k++)
-                post.push_back(spos[lk[k]] - (a + b * lk[k]));
+                post.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
             if (std::fabs(median(post) - median(pre)) > move_min)
-                cpoint[lk[j]] = 1;
+                st.cpoint[lk[j]] = 1;
         }
     }
+}
 
-    // --- 5. assembly: segmented robust fit of the tracked residual --------
+}  // namespace
+
+namespace {
+
+// --- 5. assembly: segmented robust fit of the tracked residual --------------
+void stage_assembly(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const std::vector<float>& video = st.video;
+    const int fs = st.fs;
+    const double lock = st.lock;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
+    const int line_lo = st.line_lo, line_hi = st.line_hi;
+    const double a = st.a, b = st.b;
+    const std::vector<char>& cpoint = st.cpoint;
+
     // The template anchor is the sync-pulse start in image lines; in the
     // phasing region the best template match sits ~half a dead sector
     // earlier (phasing is white-wedge-then-black, the mirror image). The
@@ -1201,7 +1356,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // boundary, a Theil-Sen line carries the residual ramp inside each
     // segment, and the clamp rejects moves the lines on both sides did not
     // vouch for.
-    const int width = (ioc == 288) ? 905 : 1810;
+    const int width = (res.ioc == 288) ? 905 : 1810;
     const int out_lines = line_hi - line_lo;
     Image img;
     img.width = width;
@@ -1312,11 +1467,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             if (seam && have_corr) {
                 res.seams++;
                 res.max_seam_px = std::max(res.max_seam_px, step_px);
-                if (std::getenv("NOVA_DEBUG_SEAMS"))
-                    std::fprintf(stderr,
-                                 "dbg: seam line %d (drawn %d): %+.1f smp "
-                                 "= %.1f px\n",
-                                 l, l - line_lo, corr - prev_corr, step_px);
+                dlog(st.hooks, LogTopic::kSeams,
+                     "dbg: seam line %d (drawn %d): %+.1f smp = %.1f px",
+                     l, l - line_lo, corr - prev_corr, step_px);
             } else {
                 res.max_step_px = std::max(res.max_step_px, step_px);
             }
@@ -1331,11 +1484,11 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                 place_sq += err * err;
                 place_n++;
                 res.place_max_px = std::max(res.place_max_px, std::fabs(err));
-                if (std::fabs(err) > 20.0 && std::getenv("NOVA_DEBUG_SEAMS"))
-                    std::fprintf(stderr,
-                                 "dbg: line %d (drawn %d) drawn %.1f px from "
-                                 "where the signal put it (sstr %.2f)\n",
-                                 l, l - line_lo, err, sstr[l]);
+                if (std::fabs(err) > 20.0)
+                    dlog(st.hooks, LogTopic::kSeams,
+                         "dbg: line %d (drawn %d) drawn %.1f px from "
+                         "where the signal put it (sstr %.2f)",
+                         l, l - line_lo, err, sstr[l]);
             }
         }
 
@@ -1408,11 +1561,10 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                 const double moved =
                     std::fabs((starts[j + 1] - starts[i - 1]) -
                               b * (j + 1 - (i - 1)));
-                if (std::getenv("NOVA_DEBUG_SEAMS"))
-                    std::fprintf(stderr,
-                                 "dbg: unlocked run rows %d-%d (%d), phase "
-                                 "moved %.1f smp across it\n",
-                                 i, j, j - i + 1, moved);
+                dlog(st.hooks, LogTopic::kSeams,
+                     "dbg: unlocked run rows %d-%d (%d), phase "
+                     "moved %.1f smp across it",
+                     i, j, j - i + 1, moved);
                 if (moved > kNonlinSec * fs) {
                     // The run is bracketed by two known levels: the locked
                     // lines before it (old phase) and after it (new). The
@@ -1438,13 +1590,12 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                             starts[j + 1] + b * (m - (j + 1));
                         double so, sn;
                         const double po = best_sync(video, l_old - 20,
-                                                    l_old + 20, pulse, &so);
+                                                    l_old + 20, st.pulse, &so);
                         const double pn = best_sync(video, l_new - 20,
-                                                    l_new + 20, pulse, &sn);
-                        if (std::getenv("NOVA_DEBUG_SEAMS"))
-                            std::fprintf(stderr,
-                                         "dbg: run row %d: old %.2f  new "
-                                         "%.2f\n", m, so, sn);
+                                                    l_new + 20, st.pulse, &sn);
+                        dlog(st.hooks, LogTopic::kSeams,
+                             "dbg: run row %d: old %.2f  new %.2f",
+                             m, so, sn);
                         if (sn >= lock && so < lock - 0.15) {
                             starts[m] = pn;
                             unlocked[m] = 0;
@@ -1471,6 +1622,11 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     std::vector<uint8_t> cand(width), best(width);
     for (int l = line_lo; l < line_hi; l++) {
         const int row = l - line_lo;
+        if ((row & 31) == 0) {
+            throw_if_cancelled(st.hooks, "assembly");
+            report(st.hooks, "assembly",
+                   static_cast<double>(row) / out_lines);
+        }
         const double s0 = starts[row];
         const double k =
             (row + 1 < out_lines) ? (starts[row + 1] - s0 - b) : 0.0;
@@ -1585,19 +1741,53 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
 
     if (place_n > 0)
         res.place_rms_px = std::sqrt(place_sq / place_n);
-    if (std::getenv("NOVA_DEBUG"))
-        std::fprintf(stderr,
-                     "dbg: place rms=%.2f px max=%.1f px over %d locked "
-                     "drawn lines; %d seam(s), largest %.1f px; %d intra-line "
-                     "break(s); %d row(s) re-locked past a dropout; %d row(s) "
-                     "placed by the picture\n",
-                     res.place_rms_px, res.place_max_px, place_n, res.seams,
-                     res.max_seam_px, res.intra_line_breaks,
-                     res.relocked_lines, res.picture_placed);
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: place rms=%.2f px max=%.1f px over %d locked "
+         "drawn lines; %d seam(s), largest %.1f px; %d intra-line "
+         "break(s); %d row(s) re-locked past a dropout; %d row(s) "
+         "placed by the picture",
+         res.place_rms_px, res.place_max_px, place_n, res.seams,
+         res.max_seam_px, res.intra_line_breaks,
+         res.relocked_lines, res.picture_placed);
 
     res.img = std::move(img);
     res.lines = out_lines;
-    return res;
+}
+
+}  // namespace
+
+DecodeResult decode_fax(const std::vector<float>& video, int fs,
+                        const DecodeOptions& opt) {
+    if (video.empty())
+        throw DecodeError(DecodeErrorKind::kEmptyInput,
+                          "decode_fax: empty input");
+    DecodeState st(video, fs, opt);
+    // The numbered stages of the pre-M4 decode_fax, in the same order,
+    // with the same logic. The table is the progress surface: a caller
+    // sees each stage as it is entered, and the long ones report their
+    // fraction from inside.
+    struct Stage {
+        const char* name;
+        void (*run)(DecodeState&);
+    };
+    static const Stage kStages[] = {
+        {"onset", stage_onset},
+        {"dead-sector", stage_dead_sector},
+        {"phasing", stage_phasing},
+        {"sync-track", stage_track},
+        {"period-fit", stage_fit},
+        {"segmentation", stage_segment},
+        {"timebase", stage_timebase},
+        {"change-points", stage_change_points},
+        {"assembly", stage_assembly},
+    };
+    for (const Stage& s : kStages) {
+        throw_if_cancelled(opt.hooks, s.name);
+        report(opt.hooks, s.name, 0.0);
+        s.run(st);
+        report(opt.hooks, s.name, 1.0);
+    }
+    return std::move(st.res);
 }
 
 }  // namespace nova

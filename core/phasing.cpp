@@ -2,8 +2,6 @@
 #include "phasing.hpp"
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 
 namespace nova {
 namespace {
@@ -180,12 +178,12 @@ double refine_leading_edge(const std::vector<float>& v, size_t s,
 }  // namespace
 
 PhasingResult detect_phasing(const std::vector<float>& video, int fs,
-                             double period, const PhasingOptions& opt) {
+                             double period, const PhasingOptions& opt,
+                             const DecodeHooks& hooks) {
     PhasingResult res;
     const size_t plen = static_cast<size_t>(period);
     if (plen < 16 || video.size() < plen * 2) return res;
     const size_t n_lines = video.size() / plen;
-    const bool dbg = std::getenv("NOVA_DEBUG") != nullptr;
 
     // Both waveforms WMO §5.2.3.2 permits. Whichever fits better per line
     // wins; the answer is reported, not configured.
@@ -195,6 +193,7 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
     std::vector<double> pos(n_lines, 0.0), score(n_lines, -1.0);
     std::vector<char> asym(n_lines, 1);
     for (size_t l = 0; l < n_lines; l++) {
+        if ((l & 63) == 0) throw_if_cancelled(hooks, "phasing");
         const Fit a = wedge_fit(video, l * plen, plen, w_asym);
         const Fit s = wedge_fit(video, l * plen, plen, w_sym);
         if (a.score >= s.score) {
@@ -413,19 +412,16 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         }
         unwrap_about(abs_est, median_of(abs_est), period);
         const double anchor = median_of(abs_est);
-        if (dbg) {
-            std::fprintf(stderr,
-                         "dbg: phasing cand %zu lines of %zu @line %zu "
-                         "pos=%.1f spread=%.1f (limit %.1f) score=%.3f\n",
-                         len, j - i + 1, i, med, sp,
-                         opt.max_spread_frac * period, median_of(sc));
-            for (size_t k = 0; k < p.size() && std::getenv("NOVA_DEBUG_FULL");
-                 k++)
-                if (k < 3 || k + 3 >= p.size())
-                    std::fprintf(stderr,
-                                 "dbg:   line %zu pos=%.1f (%+.1f) score=%.3f\n",
-                                 mem[k], p[k], p[k] - med, sc[k]);
-        }
+        dlog(hooks, LogTopic::kInfo,
+             "dbg: phasing cand %zu lines of %zu @line %zu "
+             "pos=%.1f spread=%.1f (limit %.1f) score=%.3f",
+             len, j - i + 1, i, med, sp,
+             opt.max_spread_frac * period, median_of(sc));
+        for (size_t k = 0; k < p.size(); k++)
+            if (k < 3 || k + 3 >= p.size())
+                dlog(hooks, LogTopic::kDetail,
+                     "dbg:   line %zu pos=%.1f (%+.1f) score=%.3f",
+                     mem[k], p[k], p[k] - med, sc[k]);
 
         // The spread test is what stops a stretch of dark picture lines
         // from passing: they can each score well, but they do not agree on
@@ -437,11 +433,11 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         const bool ok = len >= static_cast<size_t>(opt.min_lines) &&
                         (j - i + 1) <= max_lines &&
                         sp <= opt.max_spread_frac * period;
-        if (ok && dbg)
-            std::fprintf(stderr,
-                         "dbg:   -> qualifies: nonlin=%.1f (raw %.1f) "
-                         "noise=%.1f steps=%d\n",
-                         nonlin, spread_10_90(resid), rough, n_steps);
+        if (ok)
+            dlog(hooks, LogTopic::kInfo,
+                 "dbg:   -> qualifies: nonlin=%.1f (raw %.1f) "
+                 "noise=%.1f steps=%d",
+                 nonlin, spread_10_90(resid), rough, n_steps);
         // Which qualifying run wins: the LAST one inside the transmission
         // the caller named, or the FIRST one when it named none. Never the
         // longest — see PhasingOptions::t_lo. Segmentation states the same
