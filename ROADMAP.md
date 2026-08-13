@@ -389,6 +389,46 @@ Pending:
     alignment has now been wrong twice — once as written, once again
     under resize — and `nova-gui --metrics` makes the check three lines.
     It would be the first test in the project to cover FLTK at all.
+- **Picture area, transport and chrome [DECIDED 2026-08-13, Sara,
+  session 18; docs/05 §8.3]** — eight questions Sara asked on seeing the
+  skeleton, five of them about surfaces docs/05 had never specified.
+  - **Ruler reads image columns**: 0–1809 at IOC 576, 0–904 at IOC 288
+    (width = round(IOC × π); 1810 and 905 px, both measured on real
+    decoder output). Tick step chosen from the displayed scale; blank and
+    disabled while IOC is unknown, as the clock readouts already are.
+  - **Zoom**: Fit (default), 25%, 50%, 100%, 200%, with Fit as a value in
+    the list. An IOC 576 chart does not fit at 100% — it fits at ~43% in
+    a 772 px pane — so the range runs below Fit and above 100%, the
+    latter because PHASE placement is a per-column judgement.
+  - **Scrollbars** in both axes when the image exceeds the pane, and the
+    **ruler tracks zoom and horizontal scroll**. This upgrades the
+    alignment invariant into a mapping invariant — the column under the
+    cursor is the column the ruler names — testable with no window.
+  - **Start becomes Stop while receiving.** Stop runs the full
+    end-of-transmission path and saves; it does not discard [docs/04
+    Finding 6: operator stop is the first of three ways a transmission
+    ends, and the SR-97 holds the image at a SAVE? prompt].
+  - **No sidebar waterfall reservation** — wrong shape for a 200 px
+    column, and that space is already §8.2's receiving indicator. M4.5's
+    waterfall extends the full-width meter strip.
+  - **No autosave toggle**: every completed transmission is saved, which
+    is the retention decision already taken (answer 7).
+  - **Settings sets the folder; format stays greyscale PNG only.** BMP
+    rejected: a second writer, larger files, and no metadata — where PNG
+    text chunks are the home for Nova's decode QA, with precedent in the
+    Furunos' printed Phase OK/NG header.
+  - **About**, made load-bearing by GPLv3+, with Settings in a
+    File / Settings / Help menu bar. No receiver in the corpus has a menu
+    bar; the survey constrains the picture-correction surface, not
+    whether a desktop application has desktop chrome.
+  - Metric consequence: the Zoom control costs ~120 px in the control
+    row, so the minimum window width rises from 740 px to ~880. The
+    control row still sets the floor, not the picture.
+  - Two more screamers planned from this: `gui_layout` (ruler/pane
+    alignment, built-size == dragged-size) and `ruler_mapping` (the
+    column under a screen x is the column named there, at every zoom,
+    scroll offset and both IOCs). Suite count becomes **"23 (+1 with the
+    GUI)"** [wording decided by Sara, session 18].
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind

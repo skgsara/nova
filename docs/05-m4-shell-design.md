@@ -209,6 +209,15 @@ Forced start [docs/04 Finding 2 — every receiver has one, without
 exception] jumps `READY → DRAWING — PREVIEW` with operator-supplied IOC
 and rate, skipping tone detection entirely.
 
+**Operator stop [DECIDED 2026-08-13, Sara, session 18; §8.3 item 4].**
+The Start button reads `Stop` from `READY` onwards, and pressing it takes
+`DRAWING — PREVIEW → DECODING` by exactly the path a stop tone takes:
+freeze the snapshot, batch decode, save. It is the first of docs/04
+Finding 6's three ways a transmission ends, and the SR-97's behaviour is
+the precedent for what it must not do — **stop holds the image, it does
+not discard it.** From `READY`, where no rows have been drawn, Stop
+returns to `IDLE` with nothing to save.
+
 **Where the nine decode stages go.** They are the sub-progress *inside*
 `DECODING`, and nowhere else — see the contradiction in §10.
 
@@ -370,15 +379,17 @@ boxy `FL_UP_BOX` / `FL_DOWN_FRAME` edges — in the mockup page. Regions:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ Device [▾]  IOC [Auto▾]  Rate [Auto▾]   [Start] [Force Start]│  25 px
+│ File   Settings   Help                                       │  menu
+├──────────────────────────────────────────────────────────────┤
+│ Device[▾] IOC[Auto▾] Rate[Auto▾] Zoom[Fit▾]  [Stop] [Force S]│  25 px
 ├───────────────────────────────────────────┬──────────────────┤
-│ 0    100   200   300   400   500   600 ▲ruler                │
+│ 0    200   400   600   800  1000  1200 ▲ruler (image columns)│
 │ ┌───────────────────────────────────────┐ │  STATUS          │
-│ │                                       │ │  mode  IOC  rate │
-│ │        image pane                     │ │  state  quality  │
-│ │        (preview, or saved)            │ │  started (clock) │
+│ │                                     ▲ │ │  mode  IOC  rate │
+│ │        image pane                   ║ │ │  state  quality  │
+│ │        (preview, or saved)          ▼ │ │  started (clock) │
 │ │                                       │ │  label [______]  │
-│ │                                       │ ├──────────────────┤
+│ │ ◀═══════════════════════════════════▶ │ ├──────────────────┤
 │ │                                       │ │  PHASE [ 412 ]   │
 │ │                                       │ │  SYNC  [ +0.0 ]  │
 │ └───────────────────────────────────────┘ │  [Apply] [Auto]  │
@@ -392,7 +403,9 @@ boxy `FL_UP_BOX` / `FL_DOWN_FRAME` edges — in the mockup page. Regions:
 The status line carries the state name [Finding 3, Finding 4]; the
 progress bar is populated **only** during `DECODING`, from the nine
 stages. Saved images are a view of the user's folder — no slot table, no
-LOCK, no ring [docs/04 answer 7].
+LOCK, no ring [docs/04 answer 7]. The menu bar, the Zoom control, the
+scrollbars and the Start/Stop relabelling are all session-18 decisions —
+see §8.3.
 
 ### 8.0 Measured against real FLTK (session 18) — four corrections
 
@@ -525,6 +538,114 @@ S/N while receiving [docs/04 Finding 4]. **No receiver in the sixteen-
 manual corpus has a waterfall**; it is an SDR-era affordance for tuning,
 which is exactly the job M4 is deferring.
 
+### 8.3 The picture area, the transport, and the desktop chrome
+
+**Eight questions asked by Sara on seeing the skeleton, all DECIDED
+2026-08-13 (Sara, session 18).** They are grouped here because the first
+three are one mechanism. Two measurements shaped the answers, both taken
+from the real decoder rather than assumed:
+
+| IOC | Image width | Source |
+|---|---|---|
+| 576 | **1810 px** | `nova-decode` on `test-chart-jmh-kiwisdr-image-60s.wav` |
+| 288 | **905 px** | `nova-decode` on a synthetic `nova-gen --ioc 288` file |
+
+Width is `round(IOC × π)`. The image pane at the default 980 px window is
+772 px wide, so **an IOC 576 chart does not fit at 100% — it fits at about
+43%**, and a ten-minute chart at 120 lpm is ~1200 lines against a 613 px
+pane. Everything below follows from those two numbers.
+
+**1. The ruler reads in IMAGE COLUMNS: 0–1809 at IOC 576, 0–904 at IOC
+288.** This is not a presentation choice. PHASE is a column position in
+the decoded image [§7], so a ruler in any other unit cannot be the
+phase-entry surface [docs/04 answer 8]. Two consequences:
+
+- **Tick spacing is chosen from the displayed scale, not fixed**: the
+  smallest step in {10, 20, 50, 100, 200, 500} image columns that leaves
+  ≥ 40 px between labels on screen. At Fit on an IOC 576 chart that is
+  200 columns; at 200% it is 20.
+- **While IOC is unknown the ruler is blank and disabled.** In AUTO,
+  before a start tone, Nova does not know whether the chart is 1810 or
+  905 columns wide, and a ruler drawn on a guess would be a lie in the
+  one place a lie is most expensive. This is the same rule §4 already
+  applies to the clock and timebase readouts: blank until measured.
+
+**2. Zoom is a five-value list — Fit (default), 25%, 50%, 100%, 200%.**
+"Fit" is a value in the same dropdown, never a separate checkbox: that is
+docs/04 Finding 2's AUTO-is-a-value pattern, already used for IOC and
+Rate. The range extends *below* Fit and *above* 100% for opposite
+reasons. Below, because a 1810-column chart at 100% shows 43% of itself.
+Above, because at Fit one screen pixel is 2.3 image columns, and PHASE
+placement is a per-column judgement — the operator has to be able to get
+close enough to see the dead-sector edge they are clicking on.
+
+**3. Scrollbars appear only when the image exceeds the pane**, in both
+axes, which above Fit is almost always. **The ruler tracks zoom AND
+horizontal scroll.** This changes the shape of the ruler's correctness
+claim, and for the better: session 18 fixed "the ruler's left edge equals
+the pane's interior left edge" [§8.0 correction 2], but with zoom and
+scroll the real invariant is
+
+> the image column under the cursor is the column the ruler names there,
+
+which holds at every zoom, every scroll offset and both IOCs, and which
+is testable without a window from the same mapping function the click
+handler uses. That is the M4 screamer this whole area needs [§9].
+
+**4. Start becomes Stop while receiving**, one button relabelled by
+state, with Force Start insensitive during reception. What Stop *means*
+is the load-bearing half: docs/04 Finding 6 says a transmission ends in
+exactly three ways and operator stop is the first of them, with the
+SR-97 then holding the image at a `SAVE?` prompt — **stop does not mean
+discard.** So operator stop runs the same end-of-transmission path as a
+stop tone: freeze the snapshot, `DRAWING — PREVIEW` → `DECODING`, batch
+decode, save. It declares that the transmission ended here, not that its
+picture is worthless.
+
+**5. No waterfall region is reserved in the sidebar.** The sidebar is
+200 px and a waterfall wants width for a frequency axis; its home in M4.5
+is the full-width strip where the level meter already sits. Reserving
+space early buys nothing, because §8's layout is computed from constants
+in one `layout(W, H)` function — adding a region later is an edit, not a
+redesign. And the sidebar's empty lower area is **already spoken for**:
+it is where §8.2's compact receiving indicator (state, line count,
+thumbnail) goes when an edit holds the pane.
+
+**6. No autosave toggle: every completed transmission is saved.** This
+follows the retention decision already taken [docs/04 answer 7 —
+unbounded, user-set folder, no ring, no LOCK]. A toggle would create a
+mode in which a transmission is lost, and an unsaved chart is the one
+failure an operator cannot undo. The corpus's `SAVE?` prompts exist to
+protect a 12-to-200-image ring, which is the same 1990s constraint that
+already argued the ring buffer and the LOCK control away. Deleting is a
+file operation, because the image list is a view of a folder.
+
+**7. Settings sets the folder; the file type is not a choice.** The
+folder was decided as "user-set" and the skeleton has nowhere to set it,
+which is a real hole. The format stays **greyscale PNG only** [session
+16]: BMP is a second writer to build and test, produces larger files, and
+cannot carry metadata — whereas PNG text chunks are where Nova's decode
+QA belongs (anchor source, clock ppm, timebase verdict), which has direct
+precedent in the Furunos printing a `Phase OK` / `Phase NG` header on
+every chart [docs/04 Finding 4 additions].
+
+**8. An About item, and it is not decoration.** Nova is GPLv3+; About is
+where the licence and no-warranty notice live, with a pointer to `NOTICE`
+for the DSP reuse attributions the provenance rule requires.
+
+**Where 7 and 8 live: a menu bar — File / Settings / Help — above the
+control row.** No receiver in the corpus has one, and that is not an
+objection: the survey constrains the *picture-correction* surface, which
+is what those machines and Nova genuinely share, not whether a desktop
+application has desktop chrome. Buttons were rejected because the control
+row is already the width constraint on the whole window.
+
+**The one metric consequence, stated because §8.0 correction 3 says the
+control row sets the window's minimum width.** Adding `Zoom [Fit▾]`
+costs about 120 px there, so the minimum window width rises from 740 px
+to roughly 880. The picture still does not set the floor; the control row
+does, now more than before.
+
 ---
 
 ## 9. How M4 gets screamers
@@ -557,8 +678,27 @@ existing 20 fixtures:
    not. Pins §7.1's "fallback, not winner", which is the half of the
    decision most likely to be quietly implemented as a plain override.
 
-Registered as a gap up front: **nothing here tests RtAudio or FLTK.**
-Device enumeration, callback behaviour under xrun, and widget wiring are
+Two more, added session 18. Both are cheap, and both exist because the
+skeleton found the same layout bug twice by two different mechanisms:
+
+7. **`gui_layout`** — from `nova-gui --metrics`, the ruler's x and width
+   equal the image pane's interior (`x + 2`, `w - 4`) at several window
+   sizes, and a window *built* at a size produces output identical to one
+   *dragged* to it (`--size` vs `--resize`). Pins §8.0 corrections 2 and
+   4. Guarded by `NOVA_BUILD_GUI`, so the suite count is 23, or 24 with
+   the GUI [wording DECIDED 2026-08-13, Sara, session 18: state it as
+   "23 (+1 with the GUI)"].
+8. **`ruler_mapping`** — the stronger form of the same claim, and the one
+   §8.3 needs: **the image column under a given screen x is the column
+   the ruler names at that x**, at every zoom value, every horizontal
+   scroll offset, and both IOC widths (1810 and 905). It tests the
+   mapping function the click handler uses, so it needs no window and no
+   audio device — which is also the argument for that mapping being a
+   pure function in `nova-live` rather than arithmetic inside a widget.
+
+Registered as a gap up front: **nothing here tests RtAudio, and after
+screamers 7 and 8 the FLTK gap is narrowed rather than closed.** Device
+enumeration, callback behaviour under xrun, and widget wiring are still
 verified by running the app, not by a suite. That is the boundary the
 three-layer split in §1 is drawn to make small.
 
@@ -696,14 +836,53 @@ Sara's answer to item 2, is open at the end.
    pushes rows through the GUI queue rather than drawing to a widget, and
    the entire edit state is two numbers.
 
-**No design question remains open.** Every item in `docs/03`,
-`docs/04` and this document has an answer. The next step is code.
+### Raised by Sara on seeing the skeleton, and closed the same day
+
+**"No design question remains open" was true when session 17 wrote it and
+stopped being true the moment there was something to look at.** Eight
+questions followed from a window with nothing behind it, five of them
+about surfaces this document had never specified at all — zoom, scrolling,
+manual stop, the settings folder, About. All are **DECIDED 2026-08-13
+(Sara, session 18)** and written up in §8.3; they are listed here so the
+question set stays in one place.
+
+7. ~~**What is the ruler's range, given both IOC 576 and IOC 288?**~~
+   Image columns, 0–1809 and 0–904 respectively (width = `round(IOC × π)`,
+   measured). Blank and disabled while IOC is unknown.
+8. ~~**Should the picture area zoom, and over what range?**~~ Fit
+   (default), 25%, 50%, 100%, 200% — Fit as a value in the list. The
+   question assumed 100% fits; it does not, and that reframed the answer.
+9. ~~**Scrollbars when the image exceeds the pane? Does the ruler follow
+   the zoom?**~~ Yes and yes, and the ruler follows the horizontal scroll
+   too — which upgrades §8.0's edge-alignment invariant into a mapping
+   invariant, and gives §9 screamer 8.
+10. ~~**How does the operator stop a reception in progress?**~~ Start
+    becomes Stop; stop runs the full end-of-transmission path and saves.
+    Stop does not mean discard [docs/04 Finding 6].
+11. ~~**Reserve sidebar space for the M4.5 waterfall?**~~ No — wrong
+    shape, wrong place, and the sidebar's spare area is already §8.2's.
+12. ~~**An autosave on/off control?**~~ No; every completed transmission
+    is saved, which is the retention decision already taken.
+13. ~~**A settings dialog for the folder and the file type?**~~ Folder
+    yes, file type no — greyscale PNG only.
+14. ~~**An About box?**~~ Yes; GPLv3+ makes it load-bearing rather than
+    decorative. It and Settings live in a File / Settings / Help menu bar.
+
+**No design question remains open, again** — every item in `docs/03`,
+`docs/04` and this document has an answer, and items 7–14 were all decided
+the day they were asked. The claim is worth less than it was on 17's
+reading, though, and the reason is worth keeping: **five of the eight new
+questions were about surfaces this document had simply never mentioned**,
+and none of them surfaced while the design was on paper. A window with
+nothing behind it was enough to find them. Expect the same when the
+picture area first draws real pixels.
 
 ---
 
 ## 13. Registered gaps
 
-- No screamer covers RtAudio or FLTK (§9).
+- No screamer covers RtAudio; the FLTK gap narrows to widget wiring and
+  callback behaviour once §9's screamers 7 and 8 exist (§9).
 - Live decode inherits the short-baseline gap already registered in
   `ROADMAP.md`: on a faded signal, 120 s windows of GYA 2300Z give −1223
   to +320 ppm. The preview's forward EMA (§6) will be wrong there, and

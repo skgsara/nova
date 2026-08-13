@@ -7,6 +7,117 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 18, continued: eight questions from a window with nothing behind it
+
+Agent: Claude Opus 5. Code changed: none. Files changed:
+`docs/05-m4-shell-design.md` (§8 layout diagram, new §8.3, §4 operator
+stop, §9 screamers 7 and 8, §12 items 7–14, §13), `ROADMAP.md`,
+`SESSION-LOG.md`. Same branch, `m4-skeleton`.
+
+A separate entry rather than an edit to the session-18 entry above, which
+is committed and stays as it was written: this log is append-only.
+
+**What happened.** Sara looked at the skeleton and asked eight questions.
+Five were about surfaces `docs/05` had never specified at all — zoom,
+scrolling, manual stop, the settings folder, About — in a document that
+had ended, the same day, with "no design question remains open". All
+eight are now decided and written up in `docs/05` §8.3.
+
+**The lesson, and it is the same shape as this project's other ones: a
+design question you cannot see is not a design question you have
+answered.** Sessions 15 to 17 answered fourteen design questions on paper
+across three documents and closed the gate. One window with nothing
+behind it produced five more in an afternoon, none of them exotic, all of
+them obvious in hindsight — the picture is 1810 px wide and the pane is
+772, so *of course* someone will ask about zoom. Expect a third batch
+when the pane first draws real pixels.
+
+**Two measurements shaped the answers**, taken from the decoder rather
+than assumed, and the first one inverted the question as asked:
+
+| IOC | Width | How |
+|---|---|---|
+| 576 | 1810 px | `nova-decode` on the JMH test-chart fixture |
+| 288 | 905 px | `nova-decode` on a synthetic `nova-gen --ioc 288` file |
+
+Width is `round(IOC × π)`. Sara asked for zoom "from 100% to 50%", which
+assumes the chart fits at 100%. **It does not** — 1810 px into a 772 px
+pane is about 43% — so the range had to run *below* fit as well as above
+100%, and the answer became Fit / 25 / 50 / 100 / 200 with Fit as a value
+in the list rather than a checkbox [docs/04 Finding 2's AUTO-is-a-value
+pattern, now used for the third time].
+
+**The decisions, in one line each** (all DECIDED 2026-08-13, Sara):
+
+1. **Ruler reads image columns**, 0–1809 or 0–904, tick step chosen from
+   the displayed scale, **blank and disabled while IOC is unknown** —
+   Sara's own framing, and it is the rule §4 already applies to the clock
+   and timebase readouts.
+2. **Zoom**: Fit (default), 25, 50, 100, 200%.
+3. **Scrollbars both axes when needed; the ruler tracks zoom and
+   horizontal scroll.**
+4. **Start becomes Stop while receiving**, and stop runs the full
+   end-of-transmission path — freeze, decode, save. **Stop does not mean
+   discard** [docs/04 Finding 6; the SR-97 holds the image at `SAVE?`].
+5. **No sidebar waterfall reservation** — wrong shape for a 200 px
+   column, and that space is already §8.2's receiving indicator.
+6. **No autosave toggle**; every completed transmission is saved.
+7. **Settings sets the folder; greyscale PNG only.** BMP rejected: a
+   second writer, larger files, no metadata — and PNG text chunks are
+   where the decode QA belongs, with precedent in the Furunos printing
+   their own `Phase OK` / `Phase NG` header.
+8. **About**, made load-bearing by GPLv3+, with Settings in a
+   File / Settings / Help menu bar.
+
+**The most valuable of the eight is item 3, and not for the reason it was
+asked.** A ruler that follows zoom and scroll cannot be checked by the
+edge-alignment rule session 18 fixed this morning ("ruler's left edge
+equals the pane's interior left edge"). The invariant becomes **the image
+column under a given screen x is the column the ruler names there**,
+which holds at every zoom, every scroll offset and both IOC widths — a
+strictly stronger claim, and a pure function of numbers, so it is
+testable with no window and no audio device. `docs/05` §9 gains it as
+screamer 8, `ruler_mapping`, alongside `gui_layout` from this morning.
+It is also an argument about placement: that mapping belongs in
+`nova-live`, not as arithmetic inside a widget.
+
+**Contradictions found: one, in this document, and it was mine.**
+`docs/05` §12 asserted "no design question remains open" and §13 listed
+"no screamer covers RtAudio or FLTK" as a flat gap. Both needed
+qualifying rather than deleting — §12 now records *why* the claim was
+weaker than it read, and §13 says the FLTK gap narrows to widget wiring
+and callback behaviour once screamers 7 and 8 exist, rather than closing.
+
+**One metric consequence, recorded because §8.0 correction 3 says the
+control row sets the window's minimum width:** the Zoom control costs
+~120 px there, so the minimum rises from 740 px to about 880. The picture
+still does not set the floor.
+
+**Also decided: the suite count is stated as "23 (+1 with the GUI)".**
+Not applied to `START-HERE.md` yet, deliberately — the +1 does not exist
+until `gui_layout` is written, and the file should not promise a test the
+tree does not have.
+
+**Validation.** None applicable — no code changed, no tests run. The
+skeleton from the entry below is untouched and still passes 23/23.
+
+**Next step: unchanged in order, larger in scope.** First `gui_layout`
+and `ruler_mapping` as ctest targets guarded by `NOVA_BUILD_GUI`, then
+`START-HERE.md` gains the "(+1 with the GUI)" wording once they exist.
+Then the §8.3 surfaces in code — menu bar, Zoom control, `Fl_Scroll`
+around the pane, the ruler's column mapping, Start/Stop relabelling —
+which is a GUI session and, per Sara's session-17 rule that UI design and
+UI coding stay in separate sessions, is the one that comes after this
+one. `nova-live` and `live_demod_equiv` follow, unchanged from the entry
+below.
+
+Note for whoever writes `ruler_mapping` before the pane can scroll: the
+mapping function can and should exist before the widget does. Write it,
+test it against both IOC widths and every zoom value, and let the GUI
+session consume it.
+
+---
+
 ## 2026-08-13 — Session 18: the walking skeleton, and the mockup was wrong about the ruler
 
 Agent: Claude Opus 5. Code changed: `gui/nova-gui.cpp` (new, 594 lines),
