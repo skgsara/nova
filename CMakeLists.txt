@@ -57,7 +57,7 @@ target_link_libraries(nova-test-fixture PRIVATE nova-core)
 # 0.84 px of place error, unchanged by session 11).
 add_test(NAME fixture COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav 120 115 125 -130 -40 0.95
-  --expect-straight-strip 1.5)
+  --expect-straight-strip 1.5 --expect-rigid-rows 3.0)
 # Session 7: line counts below are POST-SEGMENTATION — the start tone and
 # phasing interval are no longer drawn [WMO §5.2.3], so a fixture that
 # opens inside one decodes fewer lines than it holds. Both of these do:
@@ -95,6 +95,22 @@ add_test(NAME fixture_60lpm COMMAND nova-test-fixture
 add_test(NAME fixture_picture_head COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav 120 100 200 -130 -60 0.7
   --expect-straight-strip 1.5)
+# JMH KiwiSDR Himawari 340-460 s: the DROPOUT case, cut session 11b. The
+# recording's phase moves ~1270 samples in the middle of it, and the eight
+# lines that straddle the move carry no sync lock — so the ±8-line window
+# places them where the lines BEFORE the move are, ~75 px from the rest of
+# the chart. Sara found that band still there after session 11. Nothing the
+# decoder reports about itself sees it (place rms 0.60 px either way) and
+# neither does the dead-sector edge, because those rows have no clean edge
+# to measure: only the picture does, by asking what each row matches.
+# 2 rows out of place before, 1 after — the one that remains is the seam
+# itself, where the phase genuinely moved. The check lives ONLY here: it
+# asks what each row matches, and a resolution grating matches its
+# neighbour at several shifts by construction (the JMH test chart reads 23
+# on a picture with nothing wrong with it).
+add_test(NAME fixture_dropout COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav 120 230 245 -130 -40 0.9
+  --expect-rows-in-place 1)
 add_test(NAME fixture_white_sector COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
   --expect-white-only)
@@ -159,6 +175,13 @@ add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
 #   in the fixture set. One skip is not a stepping timebase, and a detector
 #   that convicts on max_step or on any single event calls this file
 #   non-linear and fails here. (Its rate is 1.6/1000.)
+# Session 11b adds the third: the rows are RIGID. Samples inserted in the
+# middle of a line move everything after the insertion point and nothing
+# before it, which no per-line offset can undo — the two ends of a JSC2 row
+# disagree by 10.0 px of 1810 without the intra-line pass and 1.0 px with
+# it. The clean fixture above carries the same check at the same bound, so
+# a picture with nothing wrong with it cannot be split into pieces either.
+#
 # Session 11 adds the second claim this fixture can carry: the timebase
 # steps AND the picture is drawn straight anyway. Its 239 lines are 100%
 # locked, so nothing here is excused by a weak signal — the pre-session-11
@@ -166,7 +189,7 @@ add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
 # +/-8-line median lagging every step. 1.42 px now.
 add_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav 120 230 245 150 450 0.95
-  --expect-timebase steps --expect-straight-strip 1.5)
+  --expect-timebase steps --expect-straight-strip 1.5 --expect-rigid-rows 3.0)
 add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
   --expect-timebase linear)

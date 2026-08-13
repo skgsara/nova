@@ -7,6 +7,126 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 11b: Sara looked again, and the rows were stretched, not moved
+
+Agent: Claude Opus 5. Continuation of session 11, same day, same milestone.
+
+**Task as accepted:** Sara reviewed the session-11 decodes and rejected
+three of them. "JMH KiwiSDR Himawari 13986.6 ... it lose sync here", "so
+does test chart, lose sync at the bottom", "HDSDR ... right black strip is
+not consistant", and "for JSCs, small zigzag are still zigzags, still
+cause difficulties of reading".
+
+**The JSC verdict was the important one, and it was not what session 11
+assumed.** Session 11 corrected where each line STARTS. Measured in its own
+decodes: on JSC1 the left end and the right end of the same drawn row move
+independently — correlation **+0.12**, and the two disagree by 5 px of 1810
+at the 90th percentile, 10 px on JSC2 — against 1 px on XSG FYCI, whose
+timebase is linear. **The rows are stretched, not moved.** A capture chain
+does not wait for a line boundary to insert samples; when it lands mid-line
+everything after that point is displaced and everything before it is not,
+and no per-line offset can place such a row. That is why the zig-zag
+survived a corrector that measurably fixed the line starts.
+
+**The size of the move was already known; only its position was missing.**
+It is the difference between this line's correction and the next line's.
+Where inside the line it happened, the picture answers: a weather fax moves
+1/1810 of a page between lines, so the break goes where splitting the row
+there makes it agree best with the row above. Coarse search over the line,
+then refine; the candidates include "at the very start" and "not in this
+line at all", so the search cannot choose worse than the un-split row.
+**JSC2 fixture: the two ends of a row disagree by 10.0 px without this pass
+and 1.0 px with it.** Whole library, against the session-10 baseline: JSC2
+edge 5.0 → 1.0 px and rigidity 10.0 → 1.0, JSC4 2.0 → 1.0 and 5.0 → 1.0,
+JSC3 1.0 → 0.0 and 2.0 → 1.0, JSC6 4.0 → 1.0, JSC1 and JSC5 4.0 → 2.0
+(their rigidity does not move — 60 lpm, and not yet understood).
+
+**Himawari's band: eight rows that nothing could place.** The recording's
+phase moves ~1270 samples mid-picture and the eight lines straddling the
+move carry no lock, so the ±8-line window placed them where the lines
+BEFORE the move are — ~75 px from the rest of the chart. The audio through
+those lines is continuous at full amplitude, so the signal is there to be
+drawn. They are now placed by matching the row above, which is fldigi's
+per-line correlation kept per line instead of collapsed to a histogram mode
+(docs/00, session 11b).
+
+**Two mechanisms were built, measured, and NOT taken — and one of them was
+mine to want.** (a) *Soft locks.* HDSDR drops ~163 samples at a time and
+the ~8 lines bracketing each drop score 0.40-0.50, just under the lock
+threshold, while agreeing with each other to a sample: exactly session 10's
+"score seeds, position carries" rule, in the image domain. Following those
+measurements fixes the broken right-hand strip Sara reported — and tears
+the text apart ("JMH", "WARNING" split mid-word). The strip and the text
+disagree, and the text is the deliverable. Reverted. (b) *Let the picture
+place every unlocked row.* Fails two screamers: the warp fixture's head
+drifts 41 px off its body, and on a white-only station, where every row
+qualifies, the page wanders off the phasing anchor (`roundtrip [7]` and
+`fixture_phasing_anchor`). Narrowed to rows inside a run that the phase
+moved across, which is the only case where nothing else can answer.
+**The lesson for the next agent: the same evidence can be right on one
+recording and wrong on another, and the tie-break is the picture, not the
+principle.**
+
+**Also measured and not taken.** Pruning change points that the noise
+cannot pay for (merge the cheapest boundary, re-measure, repeat) cut JSC1
+from 783 segments to 326 and changed the drawn picture by nothing at all —
+p90 unchanged, p99 slightly worse. The remaining JSC zig-zag was never
+false steps; it was the intra-line stretch above.
+
+**Contradictions found.** Four. (a) Session 11's implicit claim that
+line-start placement is the whole of the problem — false, and the
+measurement that shows it (left end vs right end of one row) is one nobody
+had made. (b) My own reading of HDSDR: I told Sara the bands were lines
+"drawn at the OLD position while the rest moved", and the fix that follows
+from that reading makes the picture worse. (c) I expected mid-line
+insertions to be permanently harder than boundary ones (session 11 measured
+0.66 vs 0.28 px); with the intra-line pass the mid-line case is 0.66 → 0.00
+px of bar scatter, so the gap was the missing mechanism, not a limit. (d)
+The dead-sector edge cannot judge rows around a dropout — it reads 8 rows
+out of place whether they are well placed or badly — which is why the new
+check asks what each row MATCHES instead.
+
+**Tests: 22 suites green, zero warnings (was 21).** New fixture
+`himawari-kiwisdr-dropout-120s.wav` (JMH KiwiSDR Himawari 340-460 s), which
+holds the ~1270-sample move and the eight stranded rows. Two new
+picture-domain checks: `--expect-rigid-rows` (do the two ends of a row move
+together — JSC2 10.0 px without the intra-line pass, 1.0 with) and
+`--expect-rows-in-place` (does any row match the row above best at a large
+shift — 2 without picture placement, 1 with, and the one that remains is
+the seam itself). The second check runs on the dropout fixture ONLY: it
+asks what a row matches, and a resolution grating matches its neighbour at
+several shifts by construction (the JMH test chart reads 23 on a picture
+with nothing wrong with it).
+
+**Revert checks run; both new mechanisms scream.** Intra-line pass disabled
+→ `fixture_timebase_steps` fails (rigidity 10.0 against a bound of 3.0).
+Picture placement disabled → `fixture_dropout` fails (2 rows out of place
+against a bound of 1). The two mechanisms that failed to earn a screamer
+are the two that were removed.
+
+**What did NOT happen.** VMW 2215Z's staircase, GYA, NMC, VMW 2230Z: still
+untouched, still the open half of M2b, and now with a measured reason why
+the obvious mechanism cannot simply be pointed at them. HDSDR's right-hand
+strip is still banded — its text is right and its strip is not, and the two
+evidently want different answers; that is registered rather than fixed.
+`test chart`'s bottom still carries a real dropout at drawn line 633 whose
+743 px seam is followed correctly, and the lines around it are as good as
+this session's rules make them.
+
+**Next step:** the white-only half of M2b, with session 11b's warning
+attached. VMW 2215Z has no sync pulse, so the only per-line evidence
+available is the picture matching its own previous row — the mechanism this
+session had to restrict to eight rows because, run on every row, it walks a
+page off its anchor. What is missing is a way to bound the walk: the
+phasing anchor is an absolute reference at ONE point in the recording, and
+a per-row correlation is a relative measurement everywhere, so the honest
+form is probably "correlate, then re-anchor to the fitted clock every N
+lines" with N measured rather than chosen. VMW 2215Z 0-120 s is the
+fixture-in-waiting and Sara's "stair like shape" is the acceptance test.
+Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 11: Sara looked at the pictures, and every complaint was the same axis
 
 Agent: Claude Opus 5.

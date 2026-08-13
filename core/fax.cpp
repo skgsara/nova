@@ -67,6 +67,13 @@ constexpr int kMedRad = 8;
 // match cannot open a seam (the median of four rejects it), few enough that
 // JSC's steps every ~11 lines are still resolved as separate moves.
 constexpr int kSegHalf = 4;
+// Smallest mid-line timebase move worth looking for a break point for, in
+// samples. Below this the displacement is under a pixel of 1810 either way
+// and the search has nothing to find.
+constexpr double kIntraMin = 4.0;
+// How far either way the picture may place a row that a dropout left with
+// nothing to place it, in pixels of the drawn width.
+constexpr int kCoastSearchPx = 120;
 // Timebase linearity [§4d]. A step is a persistent move of the smoothed
 // sync residual bigger than kStepSec; a recording is called non-linear
 // above kStepRateLimit such steps per 1000 drawn lines, or when the
@@ -1183,6 +1190,8 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     img.height = out_lines;
     img.px.resize(static_cast<size_t>(width) * out_lines);
 
+    std::vector<double> starts(static_cast<size_t>(out_lines), 0.0);
+    std::vector<char> unlocked(static_cast<size_t>(out_lines), 1);
     const double corr_clamp = 0.03 * b;
     double prev_corr = 0.0;
     bool have_corr = false;
@@ -1312,15 +1321,182 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             }
         }
 
-        // the whole line, sync pulse to sync pulse — no cropping
-        const double pic_start = line_start;
-        const double pic_len = b;
-        for (int j = 0; j < width; j++) {
-            const double pos = pic_start + pic_len * j / width;
-            const float v = lerp_at(video, pos);
-            img.px[static_cast<size_t>(l - line_lo) * width + j] =
-                static_cast<uint8_t>(std::lround(v * 255.0f));
+        starts[l - line_lo] = line_start;
+        unlocked[l - line_lo] = sstr[l] >= lock ? 0 : 1;
+    }
+
+    // --- 5b. inside the line: where the samples actually went --------------
+    // A line start is one number per line, and a capture chain that inserts
+    // samples does not wait for a line boundary to do it. When it lands
+    // mid-line, everything after that point in THAT line is displaced while
+    // everything before it is not, so no per-line offset can place the row:
+    // the row is stretched, not moved.
+    //
+    // Measured in the session-11 decodes, which is how this was found: on
+    // JSC1 the left end and the right end of the same drawn row move
+    // independently (correlation +0.12, and they disagree by 5 px of 1810 at
+    // the 90th percentile; 10 px on JSC2). On XSG FYCI, a recording with a
+    // linear timebase, the same measurement reads 1 px. Sara's verdict on
+    // the session-11 decodes was "for JSCs, small zigzag are still zigzags,
+    // still cause difficulties of reading", and this is what is left.
+    //
+    // The size of the move is already known — it is how much this line's
+    // correction differs from the next line's. Only its POSITION in the line
+    // is unknown, and the picture itself says where: a weather fax moves
+    // 1/1810 of a page between one line and the next, so the break is where
+    // splitting the row there makes it agree best with the row above. The
+    // candidates include "at the very start" and "not in this line at all",
+    // so the search can only choose a row that matches its neighbour better
+    // than the un-split one did.
+    // Which unlocked rows nothing can place but the picture.
+    //
+    // A row with no template match of its own is drawn where the locked
+    // lines within ±kMedRad put it, and that is right while nothing moves.
+    // It is wrong in one specific place: a run of unlocked rows with a
+    // dropout inside it, where the lines before and after disagree about
+    // the phase and the rows between belong to neither. JMH KiwiSDR
+    // Himawari loses ~1270 samples that way and its eight unlocked rows sit
+    // ~75 px from the rest of the chart — the band Sara found still there
+    // after session 11, and the audio through it is continuous at full
+    // amplitude, so the signal IS there to be drawn.
+    //
+    // Only those rows qualify. Rows that merely fail to lock — the warp
+    // fixture's first nine, which the window places correctly — are left
+    // alone, because letting the picture move them drags the head 41 px off
+    // the body (measured; it is why the unrestricted version of this was
+    // abandoned).
+    std::vector<char> adrift(static_cast<size_t>(out_lines), 0);
+    if (opt.autolock && res.per_line_sync) {
+        int i = 0;
+        while (i < out_lines) {
+            if (!unlocked[i]) { i++; continue; }
+            int j = i;
+            while (j + 1 < out_lines && unlocked[j + 1]) j++;
+            if (i > 0 && j + 1 < out_lines && j - i + 1 >= kSegHalf) {
+                const double moved =
+                    std::fabs((starts[j + 1] - starts[i - 1]) -
+                              b * (j + 1 - (i - 1)));
+                if (std::getenv("NOVA_DEBUG_SEAMS"))
+                    std::fprintf(stderr,
+                                 "dbg: unlocked run rows %d-%d (%d), phase "
+                                 "moved %.1f smp across it\n",
+                                 i, j, j - i + 1, moved);
+                if (moved > kNonlinSec * fs)
+                    for (int m = i; m <= j; m++) adrift[m] = 1;
+            }
+            i = j + 1;
         }
+    }
+
+    const int rough = width / 4;
+    std::vector<uint8_t> cand(width), best(width);
+    for (int l = line_lo; l < line_hi; l++) {
+        const int row = l - line_lo;
+        const double s0 = starts[row];
+        const double k =
+            (row + 1 < out_lines) ? (starts[row + 1] - s0 - b) : 0.0;
+        auto fill = [&](std::vector<uint8_t>& dst, double brk, int step) {
+            for (int j = 0; j < width; j += step) {
+                const double off = b * j / width;
+                const double pos = s0 + off + (off > brk ? k : 0.0);
+                dst[j] = static_cast<uint8_t>(
+                    std::lround(lerp_at(video, pos) * 255.0f));
+            }
+        };
+        double brk = b;  // no break: the pre-session-11b behaviour
+        if (opt.autolock && row > 0 && std::fabs(k) >= kIntraMin &&
+            std::fabs(k) < 0.25 * b) {
+            const uint8_t* above =
+                &img.px[static_cast<size_t>(row - 1) * width];
+            auto cost = [&](double p) {
+                fill(cand, p, 4);
+                long acc = 0;
+                for (int j = 0; j < rough * 4; j += 4)
+                    acc += std::abs(static_cast<int>(cand[j]) -
+                                    static_cast<int>(above[j]));
+                return acc;
+            };
+            const int kSteps = 32;
+            long bestc = -1;
+            for (int t = 0; t <= kSteps; t++) {
+                const double p = b * t / kSteps;
+                const long c = cost(p);
+                if (bestc < 0 || c < bestc) { bestc = c; brk = p; }
+            }
+            // ...then refine within the coarse cell it won.
+            const double cell = b / kSteps;
+            double fine = brk;
+            for (int t = -3; t <= 3; t++) {
+                const double p = brk + cell * t / 3.0;
+                if (p < 0.0 || p > b) continue;
+                const long c = cost(p);
+                if (c < bestc) { bestc = c; fine = p; }
+            }
+            brk = fine;
+            res.intra_line_breaks++;
+        }
+        // NOT DONE, and the measurement is why. A row with no sync of its
+        // own is drawn where its neighbours are, which is right while
+        // nothing moves and wrong at exactly the place where something did:
+        // the eight lines bracketing JMH KiwiSDR Himawari's 1270-sample loss
+        // carry no lock and sit ~75 px from the rest of the chart. The
+        // obvious answer — let the PICTURE place them, by the offset that
+        // best matches the row above (fldigi's per-line correlation, kept
+        // per line instead of collapsed to a histogram mode) — was built and
+        // measured, and it fails a screamer it should not: on the warp
+        // fixture, whose first nine rows carry no lock but ARE placed
+        // correctly by the ±8-line window, the search drags the head 41 px
+        // off the body, and a 3% significance guard does not stop it. On a
+        // white-only station, where every row coasts, it is worse still:
+        // the page wanders off the phasing anchor and `roundtrip [7]` and
+        // `fixture_phasing_anchor` both fail. The idea is right for rows
+        // that nothing else can place; telling those apart from rows the
+        // window already placed is the unsolved part, and it is the same
+        // problem the white-only half of M2b has to solve.
+        double draw0 = starts[row];
+        if (adrift[row] && row > 0) {
+            // fldigi computes this correlation per line and keeps only the
+            // mode of a histogram of them (docs/00, session 11); here it is
+            // kept per line, and asked only where nothing else can answer.
+            const uint8_t* above =
+                &img.px[static_cast<size_t>(row - 1) * width];
+            const double px_smp = b / width;
+            auto sad = [&](double off) {
+                long acc = 0;
+                for (int j = 0; j < rough * 4; j += 4) {
+                    const double o = b * j / width;
+                    const double pos = draw0 + off + o + (o > brk ? k : 0.0);
+                    const int v = static_cast<int>(
+                        std::lround(lerp_at(video, pos) * 255.0f));
+                    acc += std::abs(v - static_cast<int>(above[j]));
+                }
+                return acc;
+            };
+            const long stay = sad(0.0);
+            long bestc = stay;
+            double bestoff = 0.0;
+            for (int t = -kCoastSearchPx; t <= kCoastSearchPx; t += 2) {
+                const long acc = sad(t * px_smp);
+                if (acc < bestc) { bestc = acc; bestoff = t * px_smp; }
+            }
+            // These rows are already known to have nothing else placing
+            // them — the phase moved across the run they sit in — so any
+            // improvement is better evidence than the stale level they
+            // would otherwise keep.
+            if (bestc < stay) {
+                draw0 += bestoff;
+                starts[row] = draw0;  // the next adrift row follows this one
+                res.picture_placed++;
+            }
+        }
+        for (int j = 0; j < width; j++) {
+            const double o = b * j / width;
+            const double pos = draw0 + o + (o > brk ? k : 0.0);
+            best[j] = static_cast<uint8_t>(
+                std::lround(lerp_at(video, pos) * 255.0f));
+        }
+        std::copy(best.begin(), best.end(),
+                  img.px.begin() + static_cast<size_t>(row) * width);
     }
 
     if (place_n > 0)
@@ -1328,9 +1504,11 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     if (std::getenv("NOVA_DEBUG"))
         std::fprintf(stderr,
                      "dbg: place rms=%.2f px max=%.1f px over %d locked "
-                     "drawn lines; %d seam(s), largest %.1f px\n",
+                     "drawn lines; %d seam(s), largest %.1f px; %d intra-line "
+                     "break(s); %d row(s) placed by the picture\n",
                      res.place_rms_px, res.place_max_px, place_n, res.seams,
-                     res.max_seam_px);
+                     res.max_seam_px, res.intra_line_breaks,
+                     res.picture_placed);
 
     res.img = std::move(img);
     res.lines = out_lines;

@@ -103,6 +103,15 @@ struct DecodeResult {
     // how far a NON-seam correction wandered in one line.
     int seams = 0;
     double max_seam_px = 0.0;
+    // Rows whose timebase moved INSIDE the line, so the row was drawn in two
+    // pieces with the break placed where the picture agrees best with the
+    // row above (session 11b). A per-line offset cannot place such a row at
+    // all: it is stretched, not moved.
+    int intra_line_breaks = 0;
+    // Rows that a dropout left with no line-start evidence at all, placed
+    // by matching the row above them (session 11b). Not the same as an
+    // unlocked row: most of those are placed correctly by their neighbours.
+    int picture_placed = 0;
     DeadSector dead_sector = DeadSector::kBlackPulse;
     double dead_consistency = 0.0;  // fraction of lines agreeing at anchor
     // False when the recording carries no per-line sync feature at all —

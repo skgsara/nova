@@ -285,12 +285,21 @@ flat but RAMPS, because the period fit absorbs the mean insertion rate —
 across an 11-line segment, twice the step it sits between. A median
 through a slope is wrong at both ends by half of it; Theil-Sen is not.
 
-fldigi's discarded per-line correlation is the idea to take for the case
-this session does NOT solve — a white-only station, which has no sync
-pulse to track and therefore no residual to segment (VMW 2215Z's
-staircase). Kept per line rather than collapsed to a mode, it is a
-line-start measurement for a station that has none. Recorded as the live
-option for that work, not taken here.
+fldigi's discarded per-line correlation is the idea to take where no sync
+residual exists to segment. **Session 11b takes it, in the narrowest form
+the evidence supports**: a row that a dropout left with no line-start
+evidence — no template match of its own, inside a run of such rows that
+the phase moved across — is placed at the offset where it matches the row
+above best. Kept per line, never collapsed to a histogram mode, and asked
+only where nothing else can answer. The unrestricted form was built first
+and is a measured failure: applied to every unlocked row it drags the warp
+fixture's head 41 px off its body, and on a white-only station, where
+every row qualifies, the page wanders off the phasing anchor and two
+screamers fail. Nothing copied; ledger unchanged.
+
+The white-only case (VMW 2215Z's staircase) is still open, and that
+failure is why: the mechanism that would serve it is exactly the one that
+cannot be trusted to run on every row of a page.
 
 ## Reuse ledger
 

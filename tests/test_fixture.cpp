@@ -89,6 +89,8 @@
 //                        [--expect-anchor-delta <lo_smp> <hi_smp>]
 //                        [--expect-timebase linear|steps]
 //                        [--expect-straight-strip <max_px>]
+//                        [--expect-rigid-rows <max_px>]
+//                        [--expect-rows-in-place <max_rows>]
 //        nova-test-fixture --expect-reject <path>
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
@@ -157,6 +159,85 @@ double strip_edge_jitter(const nova::Image& im, int* used) {
     return d[static_cast<size_t>(0.90 * (d.size() - 1))];
 }
 
+// Is a drawn row RIGID — does it move as one piece?
+//
+// The dead sector straddles the line boundary [WMO §5.1.3.3], so a drawn
+// row carries a black band at both ends, and in a correctly assembled
+// picture the two move together: whatever displaces the row displaces all
+// of it. When the capture chain inserts samples in the MIDDLE of a line,
+// they do not: everything after the insertion point moves and everything
+// before it stays. Measured in the session-11 decodes, the two ends of a
+// JSC row moved with correlation +0.12 and disagreed by 5-10 px of 1810,
+// against 1 px on a recording with a linear timebase.
+//
+// Statistic: 90th percentile of |move of the left edge − move of the right
+// edge|, row to row. A rigid picture reads ~1 px whatever else is wrong
+// with it; a stretched one cannot.
+double row_rigidity(const nova::Image& im, int* used) {
+    const int run = 12, thr = 110;
+    std::vector<double> l, r;
+    std::vector<int> rows;
+    for (int y = 0; y < im.height; y++) {
+        int light = 0, le = -1, re = -1;
+        const int span = im.width < 250 ? im.width : 250;
+        for (int x = 0; x < span; x++) {
+            const uint8_t v = im.px[static_cast<size_t>(y) * im.width + x];
+            light = (v > thr) ? light + 1 : 0;
+            if (light >= run) { le = x - run + 1; break; }
+        }
+        light = 0;
+        for (int x = im.width - 1; x > im.width - 1 - span; x--) {
+            const uint8_t v = im.px[static_cast<size_t>(y) * im.width + x];
+            light = (v > thr) ? light + 1 : 0;
+            if (light >= run) { re = x + run - 1; break; }
+        }
+        if (le >= 0 && re >= 0) {
+            l.push_back(le);
+            r.push_back(re);
+            rows.push_back(y);
+        }
+    }
+    *used = static_cast<int>(l.size());
+    if (l.size() < 40) return -1.0;
+    std::vector<double> d;
+    for (size_t i = 1; i < l.size(); i++)
+        if (rows[i] == rows[i - 1] + 1)
+            d.push_back(std::fabs((l[i] - l[i - 1]) - (r[i] - r[i - 1])));
+    if (d.size() < 40) return -1.0;
+    std::sort(d.begin(), d.end());
+    return d[static_cast<size_t>(0.90 * (d.size() - 1))];
+}
+
+// How many rows are drawn somewhere else than the picture they belong to.
+//
+// The dead-sector edge cannot answer this: where a recording drops samples
+// the rows around the drop carry no clean edge to measure, so the strip
+// test reads the same whether they are placed well or badly (measured: 8
+// either way on the fixture below). The picture can. A weather fax moves
+// 1/1810 of a page between one line and the next, so a row that matches the
+// row above it best at a large horizontal shift is a row in the wrong
+// place. Counted over the whole image; a legitimate seam contributes one.
+int content_jumps(const nova::Image& im, int limit_px) {
+    const int step = 4;
+    const int span = 60;  // px either way
+    int n = 0;
+    for (int y = 1; y < im.height; y++) {
+        const uint8_t* above = &im.px[static_cast<size_t>(y - 1) * im.width];
+        const uint8_t* here = &im.px[static_cast<size_t>(y) * im.width];
+        long best = -1;
+        int bestoff = 0;
+        for (int off = -span; off <= span; off += 2) {
+            long acc = 0;
+            for (int x = span; x < im.width - span; x += step)
+                acc += std::abs(static_cast<int>(here[x + off]) -
+                                static_cast<int>(above[x]));
+            if (best < 0 || acc < best) { best = acc; bestoff = off; }
+        }
+        if (std::abs(bestoff) > limit_px) n++;
+    }
+    return n;
+}
+
 double median_of(std::vector<double> v) {
     std::sort(v.begin(), v.end());
     return v.empty() ? 0.0 : v[v.size() / 2];
@@ -217,6 +298,10 @@ int main(int argc, char** argv) {
     const char* want_timebase = nullptr;
     bool want_strip = false;
     double strip_max = 0.0;
+    bool want_rigid = false;
+    double rigid_max = 0.0;
+    bool want_in_place = false;
+    int in_place_max = 0;
     int want_phasing_lines = 0;
     bool want_window = false;
     double win_t0 = 0.0, win_t1 = 0.0;
@@ -245,6 +330,14 @@ int main(int argc, char** argv) {
                    i + 1 < argc) {
             want_strip = true;
             strip_max = std::atof(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--expect-rigid-rows") &&
+                   i + 1 < argc) {
+            want_rigid = true;
+            rigid_max = std::atof(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--expect-rows-in-place") &&
+                   i + 1 < argc) {
+            want_in_place = true;
+            in_place_max = std::atoi(argv[++i]);
         } else if (!std::strcmp(argv[i], "--expect-phasing-lines") &&
                    i + 1 < argc) {
             want_phasing_lines = std::atoi(argv[++i]);
@@ -361,6 +454,25 @@ int main(int argc, char** argv) {
             // measuring something else and the picture is the authority.
             check(r.place_rms_px <= strip_max,
                   "...and the decoder's own account of it agrees");
+        }
+
+        if (want_in_place) {
+            const int out = content_jumps(r.img, 8);
+            std::printf("  %d row(s) match the row above best at more than "
+                        "8 px away; %d were placed by the picture\n",
+                        out, r.picture_placed);
+            check(out <= in_place_max,
+                  "no band of rows is drawn somewhere else");
+        }
+
+        if (want_rigid) {
+            int used = 0;
+            const double rg = row_rigidity(r.img, &used);
+            std::printf("  row rigidity: the two ends of a row disagree by "
+                        "%.1f px (p90) over %d rows; %d intra-line break(s)\n",
+                        rg, used, r.intra_line_breaks);
+            check(rg >= 0.0 && rg <= rigid_max,
+                  "a drawn row moves as one piece");
         }
 
         if (want_window) {

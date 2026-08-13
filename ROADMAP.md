@@ -117,6 +117,33 @@ Measured, whole library: 6 recordings better, 14 unchanged, 0 worse.
 Ground truth (roundtrip [10]): bar scatter 2.19 px → 0.00 with the same
 insertions, and 0.28 px of place error when they land on the line boundary.
 
+Session 11b, after Sara reviewed the session-11 decodes and found three
+things still wrong ("for JSCs, small zigzag are still zigzags, still cause
+difficulties of reading"):
+- **The rows were stretched, not moved.** A capture chain does not wait
+  for a line boundary to insert samples, and when it lands mid-line
+  everything after that point moves while everything before it stays. No
+  per-line offset can place such a row. Measured in the session-11
+  decodes: the two ends of a JSC row moved with correlation +0.12 and
+  disagreed by 5-10 px of 1810, against 1 px on a linear recording. The
+  size of the move is already known (it is the difference between this
+  line's correction and the next line's); only its POSITION was missing,
+  and the picture supplies it — the break goes where splitting the row
+  makes it agree best with the row above. JSC2 fixture: the two ends
+  disagree by 10.0 px without this pass and 1.0 px with it.
+- **Rows a dropout stranded are placed by the picture.** Eight lines
+  straddling JMH KiwiSDR Himawari's ~1270-sample move carry no lock, so
+  the window placed them where the lines before the move are — ~75 px from
+  the rest of the chart, the band Sara found still there. Their own sync
+  template is not the answer (following HDSDR's equivalent bands tears the
+  text apart, measured), and neither is a general "let the picture place
+  every unlocked row" rule, which fails two screamers. Only rows inside a
+  run that the phase moved across qualify.
+- New fixture `himawari-kiwisdr-dropout-120s.wav` and two new picture-
+  domain checks: `--expect-rigid-rows` (do the two ends of a row move
+  together) and `--expect-rows-in-place` (does any row match the row above
+  best at a large shift). 22 suites.
+
 OPEN — the white-only half:
 - A station with no sync pulse has no residual to segment, so VMW 2215Z's
   staircase is untouched. fldigi's discarded per-line correlation shift
