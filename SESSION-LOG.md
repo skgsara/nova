@@ -10,9 +10,15 @@ anything as our develop history").
 ## 2026-08-13 — Session 17: the shell drawn on paper, and the survey's one-to-one claim does not survive it
 
 Agent: Claude Opus 5. Code changed: none. Files changed:
-`docs/05-m4-shell-design.md` (new), `ROADMAP.md` (M4 shell design block,
-the dependency qualifier, new M4.5 milestone), `START-HERE.md` (docs/05
-in the index), `SESSION-LOG.md`.
+`docs/05-m4-shell-design.md` (new), `docs/04-receiver-ui-survey.md`
+(session-17 corrections appended), `docs/03-pre-m4-audit.md`
+(session-17 status: the audit's last item is closed), `ROADMAP.md` (M4
+shell design block, the dependency qualifier, new M4.5 milestone),
+`START-HERE.md` (docs/05 in the index), `SESSION-LOG.md`.
+
+**Merged to `main` at Sara's request at the end of the session** — five
+commits, fast-forward from `e77cd35`. There is no remote configured, so
+nothing is left unpushed.
 
 **Task as accepted:** Sara asked to keep UI design and UI coding in
 separate sessions, and to do the design first — and asked how the layout

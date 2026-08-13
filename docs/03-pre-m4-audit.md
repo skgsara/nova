@@ -266,3 +266,28 @@ overrides seeding the batch re-decode). `docs/04` was independently
 re-verified against all sixteen manuals this session. **No design
 question remains open; the gate for GUI code is fully clear.** What
 remains is the shell design itself.
+
+**Status, session 17. This audit's remaining item is closed.** The shell
+design is done: `docs/05-m4-shell-design.md`. It answers the "design the
+FLTK/RtAudio shell around those seams" instruction above with a
+three-layer split (`nova-core` untouched → `nova-live`, which depends on
+no toolkit and no real clock → a thin `nova-gui`), a four-thread model,
+six planned screamers that need neither an audio device nor a window,
+and exactly two new `DecodeOptions` fields as the only change M4 asks of
+`core/`.
+
+On the two references this audit named: ACFax's retained-raw
+non-destructive model is adopted and is now load-bearing, since the
+saved image *is* a decode of the retained stream. Isobar's
+`LiveScan` single-state-machine architecture was **not** adopted — the
+two-path decision (`docs/04` answer 1) keeps `decode_fax` batch and
+confines incremental code to a provisional renderer whose output is
+never kept. Its chunking-invariance property *was* adopted, as the
+`live_preview` screamer: the preview must be bit-identical whatever the
+block size.
+
+Six further design questions were raised and decided during that work
+(`docs/05` §12), two of them corrections rather than choices. **No
+design question remains open anywhere in `docs/03`, `docs/04` or
+`docs/05`. The next step is code** — the walking skeleton, per the
+session-17 entry in `SESSION-LOG.md`.

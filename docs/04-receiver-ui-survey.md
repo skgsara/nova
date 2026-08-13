@@ -528,3 +528,45 @@ principles booklet, not an operator's manual (it cites a separate
 "Operating Instructions" the corpus does not have). The Nagra's
 cropped column is unrecoverable from this copy. Screen layouts remain
 unmeasured, by the same deliberate choice as the first pass.
+
+---
+
+## Corrections from session 17 (the shell design)
+
+`docs/05-m4-shell-design.md` worked this survey into an implementable
+shell and, in doing so, found two findings that do not transfer to Nova
+as written. Recorded here so nobody reads them at face value; neither is
+retracted as a *survey* result, and both remain accurate about the
+receivers.
+
+**Finding 3's "one-to-one match" is wrong for Nova.** The finding says
+the receivers' protocol narration matches Nova's nine decode stages
+one-to-one. Under the two-path decision taken in this same document
+(answer 1), all nine stages run *after* the transmission ends, so they
+cannot be the live narration: taken literally, `change-points` would
+appear on screen as a protocol state while the operator waits for a
+picture. `docs/05` §4 defines eight live states for the narration and
+makes the nine stages sub-progress inside `DECODING`. The finding's real
+content survives — the state *names* belong on screen rather than a
+percentage, and the session-14 progress callback is the seam — only the
+claimed identity does not.
+
+**Finding 4's field list assumes a receiver that contains a radio.**
+The table lists frequency, channel number and station call sign as
+present on all sixteen sets. They are — because each of those sets
+tuned the signal itself. **Nova is fed audio from a sound card and never
+sees the radio**, so it cannot know any of the three (Sara, session 17,
+correcting a status panel that had already inherited the mistake and
+displayed an invented frequency). `docs/05` §8.1 re-sorts the field list
+by what an audio-only decoder can source; station becomes an
+operator-typed label, blank by default.
+
+**The general filter, which matters more than either fix.** Every
+receiver in this corpus is a *whole receiver*; Nova is one component of
+one. Any finding about what appears on screen has to be filtered through
+what an audio-only decoder can actually source. Findings 1, 2, 3, 5, 6
+and 7 pass that filter unchanged (Finding 3 with the qualification
+above). Finding 4 did not. **Finding 8 will not either** — its timer
+programs are keyed by channel and frequency, neither of which Nova has —
+so whenever scheduling is picked up, it must be re-derived rather than
+adopted.
