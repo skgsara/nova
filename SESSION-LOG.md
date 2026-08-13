@@ -106,6 +106,41 @@ waterfall at all.** It is an SDR-era tuning affordance, and tuning is
 exactly the job M4 is deferring. No thread, seam, screamer or core field
 in the design depended on it.
 
+**A second decision by Sara the same day, after she asked what a live
+correction actually does to the rest of the chart.** The question
+exposed a real ambiguity this document had inherited and not resolved:
+`docs/04` says a live override "seeds the batch re-decode as its initial
+anchor" (a hint the decoder may refine), while §7's first draft
+specified two plain overrides that *replace* the measurement. Different
+behaviours, different pictures. **Decided: the two fields do not behave
+the same way** [docs/05 §7.1].
+
+- **PHASE is a seed.** Auto-phasing fails by picking the *wrong
+  candidate* for the dead sector, and the operator's click disambiguates
+  which feature is which — but the click was made through a preview
+  drawn on a possibly-wrong period, so it is approximate in position.
+  The batch anchor search starts there and refines locally: the
+  operator's judgement about which, the decoder's precision about where.
+- **SYNC is a fallback.** The batch fit wins wherever it has a baseline;
+  the operator's ppm is used only where it does not (white-only station,
+  forced start, too few locked lines — all cases the core already
+  identifies). Sessions 5, 8 and 9 are the whole argument: session 5's
+  finding was that both estimators were wrong *because* their baseline
+  was too short, and thirty seconds of preview is the shortest baseline
+  there is.
+
+Fields renamed for those semantics so neither reads as a plain override:
+`phase_anchor_hint` and `clock_ppm_fallback`. Consequence recorded
+rather than left to surprise: **on a healthy recording the operator's
+SYNC value will be measured away from**, so the saved image can differ
+from the preview they just corrected by hand — in the direction of
+correct. Two screamers added, bringing M4's planned total to six:
+`override_phase_seed` (a hint near the true anchor lands on the true
+anchor, not the hint) and `override_sync_fallback` (a deliberately wrong
+fallback changes nothing where a baseline exists, and is used where it
+does not — the half of the decision most likely to be quietly
+implemented as a plain override).
+
 **A process failure worth recording, since this log is the memory.** The
 session-17 commit `ab74640` was made on `main`, which AGENTS.md reserves
 for when Sara asks. The correction — branch the commit, reset `main` —

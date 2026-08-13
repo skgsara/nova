@@ -326,15 +326,27 @@ Pending:
     stages are sub-progress inside DECODING only — see the contradiction
     in docs/05 §10 against docs/04 Finding 3.
   - **The only core change M4 asks for**: two `DecodeOptions` fields,
-    `phase_anchor_frac` (negative = measure) and `clock_ppm_override`
-    (NaN = measure; zero cannot mean auto, because a perfect clock is
+    `phase_anchor_hint` (negative = none) and `clock_ppm_fallback`
+    (NaN = none; zero cannot mean auto, because a perfect clock is
     zero ppm). Both follow the existing `lpm = 0` / `ioc = 0` idiom.
+  - **The two do NOT behave the same way** [DECIDED 2026-08-13, Sara,
+    session 17; docs/05 §7.1]. PHASE is a **seed**: the anchor search
+    starts at the operator's click and refines locally — their judgement
+    about *which* feature is the dead sector, the decoder's precision
+    about *where* it is. SYNC is a **fallback**: the batch fit wins
+    wherever it has a baseline (sessions 5/8/9 — long baselines beat
+    short ones), and the operator's ppm is used only where it does not
+    (white-only station, forced start, too few locked lines). Named for
+    those semantics so neither reads as a plain override. Consequence
+    accepted: on a healthy recording the operator's SYNC value is
+    measured away from, in the direction of correct.
   - Retention: current image only, no raw sidecar — so an image from
     three hours ago cannot be re-phased. Matches the SR-97's "stored
     images cannot be modified".
-  - Four screamers planned, none needing an audio device or a window:
+  - Six screamers planned, none needing an audio device or a window:
     `live_demod_equiv`, `live_tones`, `live_preview` (bit-identical
-    whatever the block size), `png_roundtrip`.
+    whatever the block size), `png_roundtrip`, `override_phase_seed`,
+    `override_sync_fallback`.
   - Four questions still open for Sara: docs/05 §12 (the waterfall
     question is closed — see M4.5).
 - **Dependency qualifier.** "Nova has no external dependencies" stays

@@ -268,19 +268,58 @@ Behaviour differs by moment, as decided:
 - *After the stop tone*: a re-render from the retained snapshot,
   non-destructive and repeatable. This is the home of the remaining
   ISO §4.2.6 / §5.4.3 compliance item [docs/02].
-- A live override **seeds the batch re-decode as its initial anchor**,
-  and both values persist per station.
+- A live override carries into the batch re-decode, and both values
+  persist per station.
+
+### 7.1 How the live values reach the batch decode — and they do NOT behave the same way
+
+**DECIDED 2026-08-13 (Sara, session 17).** `docs/04` said the live
+override "seeds the batch re-decode as its initial anchor", which reads
+as a hint the decoder may refine; the first draft of this section
+specified two plain overrides that *replace* the measurement. Those are
+different behaviours producing different pictures, and the ambiguity was
+inherited rather than resolved. Resolved now, and the two fields differ:
+
+**PHASE — seed, then refine locally.** When auto-phasing fails it is
+usually because it picked the *wrong candidate* for the dead sector, and
+the operator's click is what disambiguates which feature is which. But
+that click was made through a preview drawn on a possibly-wrong period,
+so it is approximate *in position*. The batch decode therefore starts
+its anchor search at the operator's value and settles precisely nearby:
+the operator's judgement about **which** feature, the decoder's
+precision about **where**.
+
+**SYNC — the operator's value is the fallback, not the winner.** A ppm
+trim eyeballed off thirty seconds of preview will almost always be worse
+than a fit over the whole transmission; sessions 5, 8 and 9 are entirely
+about long baselines beating short ones, and session 5's lesson was that
+both estimators were wrong precisely because their baseline was too
+short. So the batch measurement wins **when it has a baseline to measure
+over**, and the operator's value is used when it does not — a white-only
+station, a forced start, too few locked lines. The core already knows
+which case it is in: `per_line_sync == false`, or `timebase_lines == 0`,
+or too few locked lines to fit.
+
+The consequence, stated so it is not a surprise: **on a healthy
+recording the operator's SYNC value will be measured away from.** That
+is intended — the fit is better than the eyeball — but it means the
+saved image can differ from the preview the operator just corrected by
+hand, in the direction of correct.
 
 **This requires exactly two new `DecodeOptions` fields** — the only
-change M4 asks of `core/`:
+change M4 asks of `core/`. Named for the semantics above, so neither
+reads as a plain override:
 
 ```cpp
-// Where the dead sector sits, as a fraction of the line width. Negative
-// = measure it (the default). Set from the operator's PHASE report.
-double phase_anchor_frac = -1.0;
-// Line-rate trim in ppm, replacing the measured clock error. NaN =
-// measure it (the default). Set from the operator's SYNC report.
-double clock_ppm_override = std::numeric_limits<double>::quiet_NaN();
+// Where the operator says the dead sector is, as a fraction of the line
+// width. The anchor search STARTS here and refines locally; it is a
+// disambiguator, not a fixed answer. Negative = no hint (the default).
+double phase_anchor_hint = -1.0;
+// Line-rate trim in ppm, used ONLY when the period fit has no baseline
+// to measure over (white-only station, forced start, too few locked
+// lines). Where a baseline exists, the measurement wins. NaN = none
+// (the default).
+double clock_ppm_fallback = std::numeric_limits<double>::quiet_NaN();
 ```
 
 Both follow the existing AUTO-as-a-value idiom — `lpm = 0`, `ioc = 0`
@@ -290,6 +329,13 @@ directly in the type system rather than in a mode toggle.
 **One place the idiom breaks, and it is worth naming.** Zero cannot mean
 auto for ppm: a perfect clock *is* 0 ppm. Hence NaN. Any other sentinel
 (−1, a magic large value) would make a legal measurement unrepresentable.
+
+**Two screamers this decision owes** (added to §9's list): a phase hint
+placed near-but-not-exactly on the true anchor must still land on the
+true anchor, not on the hint; and a deliberately wrong
+`clock_ppm_fallback` must change nothing on a fixture whose baseline
+exists, while being the value used on a white-only fixture where it does
+not.
 
 ---
 
@@ -339,7 +385,7 @@ which is exactly the job M4 is deferring.
 
 ## 9. How M4 gets screamers
 
-Four, all runnable with no audio device and no window, all reusing the
+Six, all runnable with no audio device and no window, all reusing the
 existing 20 fixtures:
 
 1. **`live_demod_equiv`** — block-with-overlap streaming
@@ -357,6 +403,15 @@ existing 20 fixtures:
 4. **`png_roundtrip`** — the hand-rolled writer's output decodes back to
    the source pixels (checked against an independent decoder, e.g.
    Python/`sips`, in the test), and the file is a valid PNG.
+5. **`override_phase_seed`** — a `phase_anchor_hint` set near but not
+   exactly on the true anchor lands the picture on the *true* anchor,
+   not on the hint; and a hint pointing at the wrong candidate feature
+   moves the picture to that feature. Pins §7.1's "seed, then refine".
+6. **`override_sync_fallback`** — a deliberately wrong
+   `clock_ppm_fallback` changes nothing on a fixture whose baseline
+   exists, and *is* the value used on a white-only fixture where it does
+   not. Pins §7.1's "fallback, not winner", which is the half of the
+   decision most likely to be quietly implemented as a plain override.
 
 Registered as a gap up front: **nothing here tests RtAudio or FLTK.**
 Device enumeration, callback behaviour under xrun, and widget wiring are
