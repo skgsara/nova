@@ -13,8 +13,9 @@ Agent: Kimi Code CLI (Kimi k2). Code changed: `core/hooks.hpp`,
 `core/hooks.cpp`, `core/fax.cpp`, `core/fax.hpp`, `core/tones.cpp`,
 `core/tones.hpp`, `core/phasing.cpp`, `core/phasing.hpp`,
 `cli/env_hooks.hpp`, `cli/nova-decode.cpp`, `cli/nova-tones.cpp`,
-`tests/test_hooks.cpp`, `CMakeLists.txt`, `ROADMAP.md`. Work is on the
-`m4-seams` scratch branch; `main` moves only when Sara asks.
+`tests/test_hooks.cpp`, `CMakeLists.txt`, `ROADMAP.md`, `START-HERE.md`,
+`docs/03-pre-m4-audit.md`. Developed on the `m4-seams` scratch branch and
+merged to `main` at Sara's request at the end of the session.
 
 **Task as accepted:** the M4 seam work named in `docs/03-pre-m4-audit.md`
 ("Small core changes worth doing at the start of M4"), before any GUI
