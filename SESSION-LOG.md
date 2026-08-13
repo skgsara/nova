@@ -7,6 +7,140 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 20: the §8.3 + §8.4 surfaces in code, and five questions about the life of one chart
+
+Agent: Kimi. Code changed: `gui/nova-gui.cpp` (the surfaces — menu bar,
+preference file, Zoom, `Fl_Scroll`, the live ruler, the transport rules,
+four new inspection flags), `live/ruler.{hpp,cpp}` (`rezoomed`),
+`tests/test_ruler_mapping.cpp` (the zoom cases), `tests/gui_shell.cmake`
+(new), `tests/gui_metrics.cmake` (new — the shared `--metrics` parser),
+`tests/gui_layout.cmake` (minimum window, scrollbar-aware width),
+`CMakeLists.txt` (nova-live linked into the GUI, the `gui_shell` target).
+Files changed: `docs/05-m4-shell-design.md` (new §8.5, §9 screamer 9 and
+the count, §12 items 20–24, status line), `ROADMAP.md`, `START-HERE.md`,
+`SESSION-LOG.md`. Branch `m4-gui-surfaces`, cut from `main` at 9d84e06.
+
+**Task as accepted:** the next step exactly as session 19 left it — the
+§8.3 and §8.4 surfaces in code, the design being complete on paper.
+
+**Built, and all of it inert behind the glass on purpose.** The menu bar
+(File / Settings / Help) with the folder chooser and the About window
+carrying session 19's verbatim text; the preference file next to the
+executable; Zoom (Fit / 25 / 50 / 100 / 200) keeping the left edge;
+`Fl_Scroll` around the pane; the ruler drawing ticks from
+`live/ruler.hpp`; and the transport — one button relabelled by state,
+insensitive during DECODING, Force Start gated on explicit IOC and rate.
+**The buttons are dead on a plain run and that is the honest answer**:
+there is no capture behind them yet, and this file's own rule is that a
+window must not claim to do what it cannot. `--state NAME` drives the
+shell as `nova-live` will, which is what makes the rules testable now
+rather than after the audio path exists.
+
+**No column arithmetic went into a widget** [session 19's instruction].
+The zoom control's left-edge retention became `nova::rezoomed` in
+`live/ruler.*` — the column at x=0 read before the scale changes and put
+back after, clamped — so the widget calls the same function the screamer
+tests. 4366 checks in `ruler_mapping` now, including the half worth
+having: when the requested left column is unreachable (zooming out at the
+far right of the image), the view stops at the image's **right edge**,
+never at the start. 587 cases take the preserving branch, 163 the clamp.
+
+**Five design questions, asked by Sara mid-session, all DECIDED
+2026-08-13 and written up in `docs/05` §8.5.** They were not about the
+window; they were about the whole life of one chart, which is a dimension
+neither the mockup nor the skeleton can act out:
+
+1. **Saved automatically when the batch decode completes**, before any
+   editing is possible — already implied by §4 and §8.3 item 6, but
+   spread across four sections and unreadable in one place.
+2. **An edited re-render overwrites the same file** — one transmission,
+   one file. The pre-edit image is reproducible through Auto only while
+   §3 still holds the raw snapshot; losing it after that is accepted.
+3. **No Save button**: Apply re-renders *and* writes, so the file always
+   matches the screen. 2 and 3 have one joint answer — a new file per
+   Apply would have justified a Save button, and overwriting does not.
+4. **An edit in progress is dirty controls, not a mode**: it begins at
+   the first PHASE/SYNC change or the first click on the image, ends at
+   Apply, Auto, or switching to the live view. This is the boundary
+   §8.2's "the edit holds the pane" was missing — without it the hold
+   protected only the instant while Apply runs.
+5. **Filename**: `20260813T220417Z.png`, or `20260813T220417Z-JMH.png`
+   with a label. UTC to seconds, timestamp first so chronological order
+   is alphabetical order, no colons because Windows forbids them. A blank
+   label gives the timestamp alone — no placeholder, no prompt. The label
+   is sanitized and capped at 32 characters for the filename and stored
+   in full in the PNG text chunks, and **Nova never renames a saved
+   file**: renaming is a file operation like deleting, because the image
+   list is a view of a folder.
+
+None of §8.5 is coded. All five need a decode behind them to be
+reachable, and the shell has none — they land with `nova-live`.
+
+**Contradictions found: three, all in this session's own work, all fixed
+before the commit.**
+
+1. **The preference file wrote itself by being looked at.** The
+   writability probe opened `nova.conf` for append, which *creates* it —
+   so `nova-gui --metrics`, an inspection command, left a file behind in
+   the build directory. A read that writes. The probe now removes the
+   file if it was the thing that created it, and `gui_shell` pins that a
+   `--metrics` run with no preference file leaves none.
+2. **`gui_layout`'s size list started at 740x420, which no longer
+   exists** — session 19 predicted this exactly ("the test moves when
+   `kMinW` does") and it came true the moment the Zoom control raised the
+   minimum window to 880. The list starts at 880x420 now. While there,
+   the ruler-width assertion learned to subtract the vertical scrollbar,
+   so it stays exact rather than becoming approximately true on the day
+   images arrive.
+3. **The scrollbar predicates were stubbed to `false`, and that was
+   already wrong.** An IOC 576 chart at 50% is 905 px in a 768 px pane —
+   a scrollbar Fl_Scroll would draw and the shell's own metrics denied.
+   Computed honestly now (Fit cannot scroll by construction; the fixed
+   zooms compare content against the pane), vertical still `false` with
+   the reason written down, and eight cases pinned.
+
+**Three things Sara should look at, because they are my judgement, not
+her decision.**
+
+- **The suite count wording moves again, to "24 (+2 with the GUI)".**
+  `gui_shell` is a second guarded ctest target. Session 19's reasoning is
+  untouched — `ruler_mapping` tests dependency-free code and runs
+  everywhere, so the base stays 24 — but the GUI conditional is now +2.
+  Say if you would rather the two GUI scripts were one target to keep
+  "+1".
+- **The ruler lights up on an operator-set IOC, not only on a measured
+  one.** §8.3 item 1 says blank while the width is *unknown*, and §8.4
+  item 5 describes the AUTO path; I read a dropdown set to 576 as a
+  declaration rather than a guess, so the ruler comes up with 1810
+  columns before anything has been received. If you meant "blank until
+  *measured*, full stop", it is one line.
+- **The per-station PHASE/SYNC memory is not in the preference file
+  yet.** The folder is, and round-trips. The memory has nothing to store
+  while PHASE and SYNC are deactivated for want of a decode, and writing
+  a reader for entries nothing writes would be dead code. It lands with
+  the overrides.
+
+**Validation.** 26/26 pass with the GUI (92 s), zero warnings.
+`NOVA_BUILD_GUI=OFF`: 24/24, no `nova-gui` produced. `gui_shell` passed
+on its first run, which in this project is a reason for suspicion rather
+than confidence, so it was checked by mutation: making Start sensitive
+during DECODING fails it (`start_active is "1", want "0"`), and lighting
+the ruler with the width unknown fails it (`ruler_active is "1", want
+"0"`). Both reverted. **Not verified: any pixel.** The ticks, the About
+window and the folder chooser have been driven headlessly and never
+looked at — `./build/nova-gui` is the eyeball check, and §9's registered
+gap now says so explicitly.
+
+**Next step: `nova-live` proper — streaming resample/demod by
+block-with-overlap, with `live_demod_equiv` as its screamer** (the same
+next step session 18 wrote, unchanged and now actually next). It is what
+puts a picture behind every surface built today, and only then do §8.5's
+five answers become reachable code: the automatic save at the end of the
+batch decode, Apply re-rendering and overwriting, the edit-in-progress
+boundary that holds the pane, and the timestamp-plus-label filename.
+
+---
+
 ## 2026-08-13 — Session 19, continued (2): the About text, and the day's work committed and merged
 
 Agent: Kimi. Code changed: none. Files changed:

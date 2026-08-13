@@ -321,10 +321,13 @@ if(NOVA_BUILD_GUI)
       "${NOVA_FLTK_CXXFLAGS}")
 
     add_executable(nova-gui gui/nova-gui.cpp)
-    # nova-core is linked but not yet called: the three-layer shape of
-    # docs/05 §1 is core -> live -> gui, and the skeleton is proving the
-    # wiring of the outermost layer before nova-live exists.
-    target_link_libraries(nova-gui PRIVATE nova-core ${NOVA_RTAUDIO_LIBRARIES})
+    # docs/05 §1 is core -> live -> gui. nova-live is now consumed for
+    # real: the ruler's column mapping is called by the ruler's draw code
+    # and by the zoom control, so no column arithmetic lives in a widget.
+    # nova-core is linked but not yet called — the batch decode arrives
+    # with the streaming path.
+    target_link_libraries(nova-gui PRIVATE nova-core nova-live
+      ${NOVA_RTAUDIO_LIBRARIES})
     target_include_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_INCLUDE_DIRS})
     target_link_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_LIBRARY_DIRS})
     target_compile_options(nova-gui PRIVATE
@@ -345,6 +348,16 @@ if(NOVA_BUILD_GUI)
     add_test(NAME gui_layout COMMAND ${CMAKE_COMMAND}
       -DNOVA_GUI=$<TARGET_FILE:nova-gui>
       -P ${CMAKE_SOURCE_DIR}/tests/gui_layout.cmake)
+    # §9 screamer 9 [docs/05]: what the shell DOES rather than where its
+    # regions are — the transport relabelling and sensitivity, Force
+    # Start's gating on explicit IOC + rate, the ruler staying blank
+    # until the image width is known, and the preference file beside the
+    # program. Driven through --state/--metrics, so it needs no window
+    # and no audio device; guarded with nova-gui, the second of the two
+    # in "24 (+2 with the GUI)".
+    add_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
+      -DNOVA_GUI=$<TARGET_FILE:nova-gui>
+      -P ${CMAKE_SOURCE_DIR}/tests/gui_shell.cmake)
     message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
                    "${NOVA_RTAUDIO_VERSION})")
   endif()

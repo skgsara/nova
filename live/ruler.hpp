@@ -71,6 +71,15 @@ double column_at(const RulerView& v, double x);
 // draws the tick and label for column col.
 double x_at(const RulerView& v, double col);
 
+// v re-scaled to zoom z, keeping the image column at the pane's LEFT
+// EDGE where it was [docs/05 §8.4 item 2]: the operator's frame of
+// reference does not move on a zoom change — no re-centering, no jump to
+// the start. The new scroll is clamped like any other, so zooming out
+// far enough that the image fits lands at 0 by the same rule the
+// scrollbar uses. v.pane_px must already be the interior width the new
+// zoom will have, because a scrollbar appearing or leaving changes it.
+RulerView rezoomed(RulerView v, Zoom z);
+
 // The tick step in image columns: the smallest of {10, 20, 50, 100, 200,
 // 500} that leaves >= 40 px between labels on screen [docs/05 §8.3
 // item 1]. At 200% that is 20 columns; at Fit it depends on the window —

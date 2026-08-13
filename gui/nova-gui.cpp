@@ -1,5 +1,5 @@
-// nova-gui — the M4 walking skeleton: the window of docs/05 §8 built from
-// real FLTK widgets, with nothing behind them.
+// nova-gui — the M4 shell: the window of docs/05 §8 built from real FLTK
+// widgets, carrying the §8.3 and §8.4 surfaces, with no decode behind them yet.
 //
 // Why this binary exists. The §8 layout was drawn in HTML at FLTK's
 // documented metrics, which makes it a prediction. This is the measurement.
@@ -8,16 +8,32 @@
 //
 // What it deliberately does NOT do: no decode, no threads, no DSP, no audio
 // stream, none of §2's concurrency. The one live wire is RtAudio device
-// enumeration, because the other thing a skeleton proves is that the
+// enumeration, because the other thing a shell proves is that the
 // dependency wiring works. Every control that would need a decode behind it
 // is created deactivated, so the window does not claim to do what it cannot
 // [docs/05 §3: an image with no raw behind it shows PHASE/SYNC visibly
-// disabled rather than silently inert].
+// disabled rather than silently inert]. That is why the transport buttons
+// are inert on a plain run: there is nothing to capture yet, and a Start
+// that greys itself is honest where a Start that does nothing is not.
 //
-// Two flags make the skeleton inspectable without a window, which is also
-// how it gets checked on a machine with no audio device:
-//   --devices   list the input devices RtAudio reports, then exit
-//   --metrics   print every region's real FLTK geometry, then exit
+// No column arithmetic is written inside a widget. The ruler's mapping —
+// zoom, scroll, tick step, and the left-edge retention of §8.4 item 2 —
+// lives in `live/ruler.hpp` as pure functions, so the ruler's draw code and
+// the (future) click handler call the same numbers the `ruler_mapping`
+// screamer tests without a window.
+//
+// Flags make the shell inspectable without a window, which is also how it
+// gets checked on a machine with no audio device:
+//   --devices     list the input devices RtAudio reports, then exit
+//   --metrics     print every region's real geometry and the shell state
+//   --size WxH    build at a window size
+//   --resize WxH  put the window through FLTK's own resize path
+//   --state NAME  put the shell in a live state as nova-live will drive it,
+//                 so the §8.3/§8.4 transport rules are inspectable before
+//                 there is a capture behind them
+//   --zoom V      Fit | 25 | 50 | 100 | 200
+//   --ioc N       Auto | 576 | 288        (Force Start needs both explicit)
+//   --rate N      Auto | 60 | 90 | 120
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -26,16 +42,29 @@
 #include <FL/Fl_Float_Input.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Int_Input.H>
+#include <FL/Fl_Menu_Bar.H>
+#include <FL/Fl_Native_File_Chooser.H>
 #include <FL/Fl_Progress.H>
+#include <FL/Fl_Scroll.H>
 #include <FL/fl_draw.H>
 
 #include <RtAudio.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "ruler.hpp"
+
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -46,11 +75,14 @@ namespace {
 // §8 never fixed one, so this is a choice made here and recorded.
 constexpr int kWinW = 980;
 constexpr int kWinH = 700;
-// The control row is the widest fixed thing in the window: captions and
-// controls out to the Rate menu (548 px), then Start and Force Start against
-// the right edge (168 px), plus a gap. Narrower than this and they collide.
-constexpr int kMinW = 740;
+// The control row is the widest fixed thing in the window, and the Zoom
+// control [§8.3 item 2] made it wider: captions and controls out to the Zoom
+// menu now reach 678 px, then Start and Force Start against the right edge
+// (168 px), plus a gap. §8.3 predicted "roughly 880" for this; 678 + 168 + 4
+// is 850, and 880 keeps a 26 px gap between the two halves.
+constexpr int kMinW = 880;
 constexpr int kMinH = 420;
+constexpr int kMenuH = 25;        // §8.3: the File / Settings / Help bar
 constexpr int kControlRowH = 25;  // §8: "25 px control rows"
 constexpr int kRulerH = 18;
 constexpr int kMeterH = 18;  // §8
@@ -61,64 +93,243 @@ constexpr int kPanelRowH = 20;
 constexpr int kFontSize = 12;  // §8: "12 px Helvetica"
 constexpr int kFrame = 2;      // §8: "two-pixel FL_UP_BOX / FL_DOWN_BOX"
 
-// Ruler ticks are in image columns, so with no image loaded they are pane
-// columns — the only coordinate a skeleton has.
-constexpr int kMajorTick = 100;
-constexpr int kMinorTick = 20;
+// Image width is round(IOC * pi) [docs/05 §8.3]: 1810 columns at IOC 576,
+// 905 at IOC 288, both measured from the real decoder.
+constexpr double kPi = 3.14159265358979323846;
 
 // ---------------------------------------------------------------------------
-// The ruler above the image pane. It is the phase-entry affordance
-// [docs/04: the ruler/coordinate pattern, re-confirmed session 16], and in
-// the skeleton it draws its scale and nothing else.
-class Ruler : public Fl_Widget {
-public:
-    Ruler(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+// The live session state [docs/05 §4]. Nothing here drives a decode: the
+// shell holds a state so that the transport rules of §8.3 item 4 and §8.4
+// items 3-4 exist as code and can be inspected, and so that wiring
+// nova-live to them later is an assignment rather than a rewrite.
+enum class LiveState {
+    kIdle,
+    kReady,
+    kStartTone,
+    kPhasing,
+    kDrawing,
+    kStopTone,
+    kDecoding,
+    kSaved,
+};
 
-    void draw() override {
-        fl_color(FL_BACKGROUND_COLOR);
-        fl_rectf(x(), y(), w(), h());
-        fl_color(FL_FOREGROUND_COLOR);
-        const int base = y() + h() - 1;
-        fl_line(x(), base, x() + w() - 1, base);
-        fl_font(FL_HELVETICA, 10);
-        for (int c = 0; c < w(); c += kMinorTick) {
-            const int px = x() + c;
-            const bool major = (c % kMajorTick) == 0;
-            fl_line(px, base, px, base - (major ? 7 : 4));
-            if (!major) continue;
-            char buf[16];
-            std::snprintf(buf, sizeof buf, "%d", c);
-            const int tw = static_cast<int>(fl_width(buf));
-            // The HTML mockup's last label ran off the end of the ruler and
-            // into the status panel. A label that would overflow is pulled
-            // back inside instead of being drawn where its tick is.
-            int tx = px + 2;
-            if (tx + tw > x() + w()) tx = x() + w() - tw;
-            fl_draw(buf, tx, base - 9);
+// The state name for the status line. It is the state's own name and never
+// a percentage [docs/04 Finding 3], and the button never carries it
+// [§8.4 item 4].
+const char* state_text(LiveState s) {
+    switch (s) {
+        case LiveState::kIdle: return "IDLE";
+        case LiveState::kReady: return "READY";
+        case LiveState::kStartTone: return "START TONE";
+        case LiveState::kPhasing: return "PHASING";
+        case LiveState::kDrawing: return "DRAWING \xe2\x80\x94 PREVIEW";
+        case LiveState::kStopTone: return "STOP TONE";
+        case LiveState::kDecoding: return "DECODING";
+        case LiveState::kSaved: return "SAVED";
+    }
+    return "IDLE";
+}
+
+// The short token --metrics prints, so a test script matches on a word
+// rather than on a UTF-8 em dash.
+const char* state_token(LiveState s) {
+    switch (s) {
+        case LiveState::kIdle: return "IDLE";
+        case LiveState::kReady: return "READY";
+        case LiveState::kStartTone: return "START-TONE";
+        case LiveState::kPhasing: return "PHASING";
+        case LiveState::kDrawing: return "DRAWING";
+        case LiveState::kStopTone: return "STOP-TONE";
+        case LiveState::kDecoding: return "DECODING";
+        case LiveState::kSaved: return "SAVED";
+    }
+    return "IDLE";
+}
+
+bool parse_state(const char* s, LiveState* out) {
+    const struct {
+        const char* name;
+        LiveState state;
+    } kNames[] = {
+        {"idle", LiveState::kIdle},           {"ready", LiveState::kReady},
+        {"start-tone", LiveState::kStartTone}, {"phasing", LiveState::kPhasing},
+        {"drawing", LiveState::kDrawing},     {"stop-tone", LiveState::kStopTone},
+        {"decoding", LiveState::kDecoding},   {"saved", LiveState::kSaved},
+    };
+    for (const auto& n : kNames)
+        if (!std::strcmp(s, n.name)) {
+            *out = n.state;
+            return true;
+        }
+    return false;
+}
+
+// The transport, as one rule rather than as scattered widget calls
+// [docs/05 §8.3 item 4, §8.4 items 3-4]. Everything the two buttons do is
+// decided here, so the screamer and the window cannot disagree about it.
+//
+//   - one button, relabelled by state: it reads "Stop" from READY through
+//     STOP TONE, and "Start" everywhere else. It never reads a state name;
+//     states live in the status line;
+//   - during DECODING it is insensitive and still reads "Start" — the first
+//     shell is serialized, one thing at a time, active again at SAVED;
+//   - Force Start is insensitive unless BOTH IOC and rate are explicit
+//     numbers, and insensitive during reception. Deactivate, never prompt.
+//
+// `capture` is whether there is anything behind the buttons at all. It is
+// false on a plain run today, which is why they are grey.
+struct Transport {
+    const char* label;
+    bool start_active;
+    bool force_active;
+};
+
+Transport transport_for(LiveState s, bool ioc_explicit, bool rate_explicit,
+                        bool capture) {
+    const bool receiving =
+        s == LiveState::kReady || s == LiveState::kStartTone ||
+        s == LiveState::kPhasing || s == LiveState::kDrawing ||
+        s == LiveState::kStopTone;
+    Transport t;
+    t.label = receiving ? "Stop" : "Start";
+    // Stop is always available while receiving: it is the first of the
+    // three ways a transmission ends [docs/04 Finding 6], and it holds the
+    // image rather than discarding it. DECODING is the one state where the
+    // button is dead.
+    t.start_active = capture && s != LiveState::kDecoding;
+    t.force_active = capture && !receiving && s != LiveState::kDecoding &&
+                     ioc_explicit && rate_explicit;
+    return t;
+}
+
+// ---------------------------------------------------------------------------
+// The preference file [docs/05 §8.4 item 1]: plain text, next to the
+// executable — visible, inspectable, movable with the program, and no
+// hidden platform store. If the directory is not writable (a system-wide
+// install) Nova runs without persistence for the session and never fails:
+// settings are a convenience, never a precondition.
+std::string executable_dir(const char* argv0) {
+    std::string path;
+#if defined(__APPLE__)
+    uint32_t n = 0;
+    _NSGetExecutablePath(nullptr, &n);
+    std::string buf(n, '\0');
+    if (_NSGetExecutablePath(&buf[0], &n) == 0) path = buf.c_str();
+#elif defined(__linux__)
+    char buf[4096];
+    const ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        path = buf;
+    }
+#endif
+    if (path.empty() && argv0) path = argv0;
+    const size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos) return ".";
+    return path.substr(0, slash);
+}
+
+class Prefs {
+public:
+    void open(const std::string& dir) {
+        path_ = dir + "/nova.conf";
+        const bool existed = std::ifstream(path_).good();
+        load();
+        // Writability is discovered by trying, not by inspecting mode bits:
+        // a read-only directory, a read-only file and a full disk are the
+        // same answer here, and each of them is "no persistence", not an
+        // error the operator has to dismiss. Appending nothing cannot
+        // damage an existing file — but it would CREATE one that was not
+        // there, and merely inspecting the shell must not leave a file
+        // behind, so a probe that created it removes it again.
+        {
+            std::ofstream probe(path_, std::ios::app);
+            writable_ = probe.good();
+        }
+        if (!existed) std::remove(path_.c_str());
+    }
+
+    const std::string& path() const { return path_; }
+    bool writable() const { return writable_; }
+
+    std::string get(const std::string& key) const {
+        for (const auto& kv : entries_)
+            if (kv.first == key) return kv.second;
+        return std::string();
+    }
+
+    void set(const std::string& key, const std::string& value) {
+        for (auto& kv : entries_)
+            if (kv.first == key) {
+                kv.second = value;
+                save();
+                return;
+            }
+        entries_.emplace_back(key, value);
+        save();
+    }
+
+private:
+    void load() {
+        std::ifstream in(path_);
+        if (!in) return;
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            const size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            entries_.emplace_back(line.substr(0, eq), line.substr(eq + 1));
         }
     }
+
+    void save() {
+        if (!writable_) return;
+        std::ofstream out(path_, std::ios::trunc);
+        if (!out) {
+            writable_ = false;
+            return;
+        }
+        out << "# nova preferences [docs/05 8.4 item 1]. Plain text, next to\n"
+               "# the program, safe to edit or delete.\n";
+        for (const auto& kv : entries_) out << kv.first << "=" << kv.second
+                                            << "\n";
+        if (!out.good()) writable_ = false;
+    }
+
+    std::string path_;
+    std::vector<std::pair<std::string, std::string>> entries_;
+    bool writable_ = false;
 };
 
 // ---------------------------------------------------------------------------
-// The input level meter that stays in M4 while the waterfall goes to M4.5
-// [docs/05 §8, decided session 17]: without a level readout, a muted or
-// clipping input has no diagnosis and every failure looks like "no signal".
-// With no capture running there is no level, and it says so rather than
-// drawing an empty bar that could be read as silence.
-class LevelMeter : public Fl_Widget {
-public:
-    LevelMeter(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
-
-    void draw() override {
-        fl_draw_box(FL_DOWN_BOX, x(), y(), w(), h(), FL_BACKGROUND_COLOR);
-        fl_font(FL_HELVETICA, kFontSize);
-        fl_color(FL_INACTIVE_COLOR);
-        fl_draw("input level", x() + kPad, y(), w(), h(),
-                FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-        fl_draw("-- dBFS", x(), y(), w() - kPad, h(),
-                FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
-    }
-};
+// About [docs/05 §8.3 item 8], and it is not decoration: Nova is GPLv3+, so
+// this is where the licence and no-warranty notice live, with the pointer to
+// NOTICE the provenance rule requires reachable from the program itself.
+// The text is copied verbatim from docs/05 §8.3 — it is not this file's to
+// reword.
+const char* kAboutText =
+    "Nova \xe2\x80\x94 an HF weather facsimile (WEFAX) decoder\n"
+    "\n"
+    "Copyright \xc2\xa9 2026 Nova contributors\n"
+    "\n"
+    "Nova is free software: you can redistribute it and/or modify it under "
+    "the terms of the GNU General Public License as published by the Free "
+    "Software Foundation, either version 3 of the License, or (at your "
+    "option) any later version.\n"
+    "\n"
+    "Nova is distributed in the hope that it will be useful, but WITHOUT ANY "
+    "WARRANTY; without even the implied warranty of MERCHANTABILITY or "
+    "FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License "
+    "for more details \xe2\x80\x94 the full text is in the LICENSE file "
+    "distributed with this program.\n"
+    "\n"
+    "Built from public standards: WMO-No. 386 Vol. I Part III \xc2\xa7"
+    "5 (the signal) and ISO 9876:2015 \xc2\xa7"
+    "4.2 (receiver behaviour as a design target \xe2\x80\x94 no "
+    "certified-compliance claim).\n"
+    "\n"
+    "DSP reuse attributions and linked-library licences (FLTK, RtAudio): "
+    "see the NOTICE file.";
 
 // ---------------------------------------------------------------------------
 // Fl_Menu_ parses '&', '/', '\' and '_' out of the labels it is given, and
@@ -142,7 +353,7 @@ struct InputDevice {
     bool is_default = false;
 };
 
-// Enumeration is the whole of the skeleton's RtAudio use: no stream is
+// Enumeration is the whole of the shell's RtAudio use: no stream is
 // opened, so nothing here can touch the microphone. Capture rate is not
 // filtered on [docs/05 §12 item 1, decided: accept whatever the device
 // offers and resample to 8 kHz], so a device is listed if it has an input
@@ -219,20 +430,97 @@ public:
     Shell* shell = nullptr;
 };
 
+// The ruler above the image pane. It is the phase-entry affordance
+// [docs/04: the ruler/coordinate pattern, re-confirmed session 16] and it
+// reads IMAGE COLUMNS, tracking zoom and horizontal scroll [docs/05 §8.3
+// items 1-3]. Every number it draws comes from live/ruler.hpp; there is no
+// column arithmetic in this class.
+//
+// While the image width is unknown it is blank and disabled [§8.3 item 1]:
+// in AUTO, before a start tone, Nova does not know whether the chart is
+// 1810 or 905 columns wide, and a ruler drawn on a guess would be a lie in
+// the one place a lie is most expensive.
+class Ruler : public Fl_Widget {
+public:
+    Ruler(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+    Shell* shell = nullptr;
+    void draw() override;
+};
+
+// The image pane's scrolling viewport [§8.3 item 3: scrollbars appear only
+// when the image exceeds the pane, in both axes]. The subclass exists for
+// one reason: the ruler tracks horizontal scroll, and FLTK has no "the user
+// scrolled" callback — so a scroll position that changed under the drawing
+// code redraws the ruler.
+class ImageScroll : public Fl_Scroll {
+public:
+    ImageScroll(int x, int y, int w, int h) : Fl_Scroll(x, y, w, h) {}
+    Ruler* ruler = nullptr;
+    void draw() override {
+        Fl_Scroll::draw();
+        if (ruler && xposition() != last_x_) {
+            last_x_ = xposition();
+            ruler->redraw();
+        }
+    }
+
+private:
+    int last_x_ = 0;
+};
+
+// What lives inside the scroll: the picture. It has no picture yet — the
+// provisional renderer arrives with nova-live — so it draws the empty pane
+// colour, and its SIZE is the whole of its current job, because that size
+// is what makes the scrollbars and the ruler agree about how wide the image
+// is.
+class ImageView : public Fl_Widget {
+public:
+    ImageView(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+    void draw() override {
+        fl_color(FL_BACKGROUND2_COLOR);
+        fl_rectf(x(), y(), w(), h());
+    }
+};
+
+// ---------------------------------------------------------------------------
+// The input level meter that stays in M4 while the waterfall goes to M4.5
+// [docs/05 §8, decided session 17]: without a level readout, a muted or
+// clipping input has no diagnosis and every failure looks like "no signal".
+// With no capture running there is no level, and it says so rather than
+// drawing an empty bar that could be read as silence.
+class LevelMeter : public Fl_Widget {
+public:
+    LevelMeter(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+
+    void draw() override {
+        fl_draw_box(FL_DOWN_BOX, x(), y(), w(), h(), FL_BACKGROUND_COLOR);
+        fl_font(FL_HELVETICA, kFontSize);
+        fl_color(FL_INACTIVE_COLOR);
+        fl_draw("input level", x() + kPad, y(), w(), h(),
+                FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+        fl_draw("-- dBFS", x(), y(), w() - kPad, h(),
+                FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
+    }
+};
+
 constexpr int kFields = 6;  // Mode, IOC, Rate, State, Quality, Started
 
 struct Shell {
     ShellWindow* win = nullptr;
+    Fl_Menu_Bar* menu = nullptr;
     Fl_Box* cap_device = nullptr;
     Fl_Choice* device = nullptr;
     Fl_Box* cap_ioc = nullptr;
     Fl_Choice* ioc = nullptr;
     Fl_Box* cap_rate = nullptr;
     Fl_Choice* rate = nullptr;
+    Fl_Box* cap_zoom = nullptr;
+    Fl_Choice* zoom = nullptr;
     Fl_Button* start = nullptr;
     Fl_Button* force = nullptr;
     Ruler* ruler = nullptr;
-    Fl_Box* pane = nullptr;
+    ImageScroll* pane = nullptr;
+    ImageView* view = nullptr;
     Fl_Box* panel = nullptr;
     Fl_Box* title = nullptr;
     Fl_Box* field_cap[kFields] = {};
@@ -251,10 +539,23 @@ struct Shell {
     Fl_Box* status_state = nullptr;
     Fl_Box* status_lines = nullptr;
     Fl_Progress* progress = nullptr;
+    Fl_Window* about = nullptr;
 
     std::vector<InputDevice> devices;
     std::string device_error;
     std::vector<std::pair<const char*, Fl_Widget*>> named;
+
+    Prefs prefs;
+    std::string image_folder;
+
+    LiveState state = LiveState::kIdle;
+    // Whether anything is behind the transport. False until nova-live can
+    // capture; --state sets it, so the §8.3/§8.4 rules are inspectable
+    // without the shell pretending on a plain run.
+    bool capture = false;
+    // The measured image width, once a decode has produced one. Zero means
+    // "not measured", and then only an explicit IOC gives the ruler a width.
+    int measured_cols = 0;
 
     void note(const char* name, Fl_Widget* w) { named.emplace_back(name, w); }
 
@@ -280,8 +581,10 @@ struct Shell {
         return b;
     }
 
-    void build(int win_w, int win_h) {
+    void build(int win_w, int win_h, const char* argv0) {
         FL_NORMAL_SIZE = kFontSize;
+        prefs.open(executable_dir(argv0));
+        image_folder = prefs.get("image_folder");
         win = new ShellWindow(win_w, win_h, "Nova");
         win->shell = this;
         note("window", win);
@@ -292,9 +595,101 @@ struct Shell {
         win->size_range(kMinW, kMinH);
         layout(win_w, win_h);
         populate_devices();
+        apply_state();
+    }
+
+    // --- the two dropdowns the transport reads ------------------------------
+    // "Auto" is index 0 in both, and it is a value in the same list as the
+    // numbers, never a separate mode toggle [docs/04 Finding 2].
+    bool ioc_explicit() const { return ioc->value() > 0; }
+    bool rate_explicit() const { return rate->value() > 0; }
+    int ioc_value() const {
+        switch (ioc->value()) {
+            case 1: return 576;
+            case 2: return 288;
+            default: return 0;
+        }
+    }
+
+    // The image width in columns, or 0 while it is unknown. A measured
+    // width wins; an operator-set IOC is a declaration, not a guess, so it
+    // counts too; AUTO before a start tone is the unknown case that keeps
+    // the ruler blank [§8.3 item 1].
+    int image_cols() const {
+        if (measured_cols > 0) return measured_cols;
+        const int v = ioc_value();
+        return v > 0 ? static_cast<int>(std::lround(v * kPi)) : 0;
+    }
+
+    nova::Zoom zoom_value() const {
+        switch (zoom->value()) {
+            case 1: return nova::Zoom::k25;
+            case 2: return nova::Zoom::k50;
+            case 3: return nova::Zoom::k100;
+            case 4: return nova::Zoom::k200;
+            default: return nova::Zoom::kFit;
+        }
+    }
+
+    // The pane's interior width: the FL_DOWN_BOX bevel off both edges, less
+    // the vertical scrollbar when one is showing. This is the width the
+    // ruler spans and the width Fit scales into, so the two cannot drift.
+    int pane_interior_w() const {
+        return pane->w() - 2 * kFrame - (vscroll_visible() ? Fl::scrollbar_size()
+                                                           : 0);
+    }
+    int pane_interior_h() const {
+        return pane->h() - 2 * kFrame - (hscroll_visible() ? Fl::scrollbar_size()
+                                                           : 0);
+    }
+
+    // Scrollbar visibility is computed here rather than read off Fl_Scroll,
+    // because --metrics runs without ever showing a window and Fl_Scroll
+    // decides its scrollbars while drawing. The rule is the same one it
+    // uses: a bar appears exactly when the image exceeds the pane [§8.3
+    // item 3].
+    //
+    // Vertically, never yet: with no rows to draw, the scrolled child is
+    // sized to the pane, so there is nothing below the fold. That changes
+    // when the provisional renderer arrives and a ten-minute chart is
+    // ~1200 rows against a 613 px pane.
+    bool vscroll_visible() const { return false; }
+    // Horizontally, whenever a known image width at a FIXED zoom exceeds
+    // the pane. Fit cannot scroll by construction — its scale is defined
+    // as pane / cols — which is also why this cannot recurse through
+    // pane_interior_w(): only the fixed zooms reach the comparison, and
+    // their scale does not depend on the pane at all.
+    bool hscroll_visible() const {
+        const int cols = image_cols();
+        if (cols <= 0 || zoom_value() == nova::Zoom::kFit) return false;
+        const double scale = nova::zoom_scale(zoom_value(), cols, 0);
+        return cols * scale > pane->w() - 2 * kFrame;
+    }
+
+    // The view the ruler draws from and the click handler will read. Built
+    // fresh from the widgets each time, so no copy of the geometry can go
+    // stale.
+    nova::RulerView view_state() const {
+        nova::RulerView v;
+        v.image_cols = image_cols();
+        v.pane_px = pane_interior_w();
+        v.scale = nova::zoom_scale(zoom_value(), v.image_cols, v.pane_px);
+        return nova::scrolled(v, pane->xposition());
     }
 
     void create() {
+        // --- menu bar [§8.3 items 7-8] --------------------------------------
+        // No receiver in the corpus has one, and that is not an objection:
+        // the survey constrains the picture-correction surface, not whether
+        // a desktop application has desktop chrome. Buttons were rejected
+        // because the control row is already the window's width constraint.
+        menu = new Fl_Menu_Bar(0, 0, 0, 0);
+        menu->textsize(kFontSize);
+        menu->add("File/Quit", FL_COMMAND + 'q', cb_quit, this);
+        menu->add("Settings/Image folder...", 0, cb_folder, this);
+        menu->add("Help/About Nova", 0, cb_about, this);
+        note("menu_bar", menu);
+
         // --- control row [§8 row 1] -----------------------------------------
         cap_device = caption("Device");
         device = new Fl_Choice(0, 0, 0, 0);
@@ -311,6 +706,7 @@ struct Shell {
         ioc->add("576");
         ioc->add("288");
         ioc->value(0);
+        ioc->callback(cb_geometry, this);
         note("ioc_choice", ioc);
 
         cap_rate = caption("Rate");
@@ -321,7 +717,25 @@ struct Shell {
         rate->add("90 lpm");
         rate->add("120 lpm");
         rate->value(0);
+        rate->callback(cb_geometry, this);
         note("rate_choice", rate);
+
+        // Zoom [§8.3 item 2]. Fit is a value in the same dropdown, never a
+        // separate checkbox. The range extends below Fit because a
+        // 1810-column chart at 100% shows 43% of itself in the default
+        // window, and above 100% because at Fit one screen pixel is 2.3
+        // image columns and PHASE placement is a per-column judgement.
+        cap_zoom = caption("Zoom");
+        zoom = new Fl_Choice(0, 0, 0, 0);
+        zoom->textsize(kFontSize);
+        zoom->add("Fit");
+        zoom->add("25%");
+        zoom->add("50%");
+        zoom->add("100%");
+        zoom->add("200%");
+        zoom->value(0);
+        zoom->callback(cb_zoom, this);
+        note("zoom_choice", zoom);
 
         // Forced start is on every one of the sixteen receivers without
         // exception [docs/04 Finding 2], so it is a peer of Start here, not
@@ -335,13 +749,20 @@ struct Shell {
         force->deactivate();
         note("force_start_button", force);
 
-        // --- image pane and its ruler ----------------------------------------
+        // --- image pane, its scroll and its ruler -----------------------------
         ruler = new Ruler(0, 0, 0, 0);
+        ruler->shell = this;
+        ruler->deactivate();  // blank until the image width is known
         note("ruler", ruler);
-        pane = new Fl_Box(0, 0, 0, 0);
+        pane = new ImageScroll(0, 0, 0, 0);
         pane->box(FL_DOWN_BOX);
         pane->color(FL_BACKGROUND2_COLOR);
+        pane->ruler = ruler;
         note("image_pane", pane);
+        pane->begin();
+        view = new ImageView(0, 0, 0, 0);
+        note("image_view", view);
+        pane->end();
 
         // --- status panel [§8 right, fields per §8.1] -------------------------
         // §8.1 is why there is no frequency, channel or call sign here: every
@@ -383,8 +804,10 @@ struct Shell {
         // the corpus that has controls [docs/04, confirmed twice]. They are
         // asymmetric behind the glass — PHASE seeds the batch anchor search,
         // SYNC is only a fallback where the batch fit has no baseline
-        // [docs/05 §7.1] — but that asymmetry is not in the skeleton, which
-        // has no batch decode to hand them to.
+        // [docs/05 §7.1] — but that asymmetry is not in this shell, which
+        // has no batch decode to hand them to. They stay deactivated for the
+        // same reason: an image with no raw behind it shows them visibly
+        // disabled rather than silently inert [§3].
         cap_phase = caption("PHASE");
         phase_input = new Fl_Int_Input(0, 0, 0, 0);
         phase_input->textsize(kFontSize);
@@ -419,8 +842,7 @@ struct Shell {
         status_lines = value("line --");
         note("status_lines", status_lines);
         // Populated only during DECODING, from the nine decode stages
-        // [docs/05 §8]. Drawn here empty and deactivated, because the point
-        // of a skeleton is to measure the region it will occupy.
+        // [docs/05 §8].
         progress = new Fl_Progress(0, 0, 0, 0);
         progress->minimum(0.0f);
         progress->maximum(1.0f);
@@ -433,32 +855,41 @@ struct Shell {
     // window size and the metric constants; nothing reads a widget's current
     // position, so calling it twice is the same as calling it once.
     void layout(int W, int H) {
-        int x = kPad;
-        cap_device->resize(x, 0, 44, kControlRowH);
-        x += 46;
-        device->resize(x, 2, 240, kControlRowH - 4);
-        x += 250;
-        cap_ioc->resize(x, 0, 26, kControlRowH);
-        x += 28;
-        ioc->resize(x, 2, 84, kControlRowH - 4);
-        x += 94;
-        cap_rate->resize(x, 0, 32, kControlRowH);
-        x += 34;
-        rate->resize(x, 2, 92, kControlRowH - 4);
-        force->resize(W - kPad - 96, 2, 96, kControlRowH - 4);
-        start->resize(W - kPad - 164, 2, 64, kControlRowH - 4);
+        menu->resize(0, 0, W, kMenuH);
 
-        const int main_y = kControlRowH;
-        const int main_h = H - kControlRowH - kMeterH - kStatusH;
+        int x = kPad;
+        const int row_y = kMenuH;
+        cap_device->resize(x, row_y, 44, kControlRowH);
+        x += 46;
+        device->resize(x, row_y + 2, 240, kControlRowH - 4);
+        x += 250;
+        cap_ioc->resize(x, row_y, 26, kControlRowH);
+        x += 28;
+        ioc->resize(x, row_y + 2, 84, kControlRowH - 4);
+        x += 94;
+        cap_rate->resize(x, row_y, 32, kControlRowH);
+        x += 34;
+        rate->resize(x, row_y + 2, 92, kControlRowH - 4);
+        x += 102;
+        cap_zoom->resize(x, row_y, 34, kControlRowH);
+        x += 36;
+        zoom->resize(x, row_y + 2, 84, kControlRowH - 4);
+        force->resize(W - kPad - 96, row_y + 2, 96, kControlRowH - 4);
+        start->resize(W - kPad - 164, row_y + 2, 64, kControlRowH - 4);
+
+        const int main_y = kMenuH + kControlRowH;
+        const int main_h = H - main_y - kMeterH - kStatusH;
         const int pane_w = W - kPanelW - 2 * kPad;
 
-        // The ruler is aligned to the pane's INTERIOR, not to the window or
-        // to the pane's outer box. It is the phase-entry affordance [docs/04,
-        // the ruler/coordinate pattern], so a tick that does not name the
-        // image column beneath it is the one thing it must never do. kFrame
-        // is the FL_DOWN_BOX bevel the pane draws inside its own edge.
-        ruler->resize(kPad + kFrame, main_y, pane_w - 2 * kFrame, kRulerH);
         pane->resize(kPad, main_y + kRulerH, pane_w, main_h - kRulerH - kPad);
+        // The ruler is aligned to the pane's INTERIOR, not to the window or
+        // to the pane's outer box, and it stops where the image area stops —
+        // a vertical scrollbar takes width off both together. It is the
+        // phase-entry affordance [docs/04, the ruler/coordinate pattern], so
+        // a tick that does not name the image column beneath it is the one
+        // thing it must never do.
+        ruler->resize(kPad + kFrame, main_y, pane_interior_w(), kRulerH);
+        layout_view();
 
         const int px = W - kPanelW;
         const int fw = kPanelW - 2 * kPad;
@@ -493,6 +924,49 @@ struct Shell {
         progress->resize(W - kPad - 160, sy + 3, 160, kStatusH - 6);
     }
 
+    // The scrolled child's size is the image's size on screen, which is what
+    // makes the scrollbars appear exactly when the image exceeds the pane
+    // [§8.3 item 3]. With no width known the child is the pane, so nothing
+    // scrolls and no bar appears over an empty pane.
+    void layout_view() {
+        const nova::RulerView v = view_state();
+        const int iw = v.image_cols > 0
+                           ? static_cast<int>(std::lround(v.image_cols * v.scale))
+                           : pane_interior_w();
+        view->resize(pane->x() + kFrame, pane->y() + kFrame, iw,
+                     pane_interior_h());
+        const double keep = std::min(static_cast<double>(pane->xposition()),
+                                     nova::max_scroll_px(v));
+        pane->scroll_to(static_cast<int>(std::lround(keep)), pane->yposition());
+    }
+
+    // Everything the state decides, in one place, so a state change cannot
+    // update the button and forget the status line.
+    void apply_state() {
+        const Transport t = transport_for(state, ioc_explicit(), rate_explicit(),
+                                          capture);
+        start->label(t.label);
+        if (t.start_active) start->activate(); else start->deactivate();
+        if (t.force_active) force->activate(); else force->deactivate();
+
+        status_state->label(state_text(state));
+        field_val[3]->label(state_text(state));
+        // The progress bar is populated ONLY during DECODING, from the nine
+        // decode stages [docs/05 §8, §4]. Elsewhere it is empty and dead.
+        if (state == LiveState::kDecoding) progress->activate();
+        else progress->deactivate();
+
+        // The ruler is blank and disabled until the image width is known,
+        // and lights up with no transition when it is [§8.3 item 1, §8.4
+        // item 5].
+        if (image_cols() > 0) ruler->activate(); else ruler->deactivate();
+        field_val[1]->label(image_cols() > 0 ? ioc->text() : "--");
+        field_val[2]->label(rate_explicit() ? rate->text() : "--");
+        field_val[0]->label(ioc_explicit() && rate_explicit() ? "FORCED"
+                                                             : "AUTO");
+        if (win) win->redraw();
+    }
+
     void populate_devices() {
         devices = list_input_devices(&device_error);
         if (devices.empty()) {
@@ -508,7 +982,114 @@ struct Shell {
         }
         device->value(def);
     }
+
+    // --- callbacks ----------------------------------------------------------
+    static void cb_quit(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->win->hide();
+    }
+
+    // Settings sets the folder; the file type is not a choice [§8.3 item 7 —
+    // greyscale PNG only, decided session 16]. The chosen folder persists in
+    // the preference file beside the program [§8.4 item 1].
+    static void cb_folder(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        Fl_Native_File_Chooser chooser;
+        chooser.title("Nova \xe2\x80\x94 image folder");
+        chooser.type(Fl_Native_File_Chooser::BROWSE_DIRECTORY);
+        if (!s->image_folder.empty())
+            chooser.directory(s->image_folder.c_str());
+        if (chooser.show() != 0) return;  // cancelled or failed: change nothing
+        const char* picked = chooser.filename();
+        if (!picked || !*picked) return;
+        s->image_folder = picked;
+        s->prefs.set("image_folder", s->image_folder);
+    }
+
+    static void cb_about(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->about) {
+            // Built outside any open group: the main window is ended by now,
+            // and a stray current group would adopt this one.
+            Fl_Group* const prev = Fl_Group::current();
+            Fl_Group::current(nullptr);
+            s->about = new Fl_Window(560, 430, "About Nova");
+            Fl_Box* text = new Fl_Box(kPad * 3, kPad * 3, 560 - kPad * 6,
+                                      430 - kPad * 6 - 30, kAboutText);
+            text->labelsize(kFontSize);
+            text->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE |
+                        FL_ALIGN_WRAP);
+            Fl_Button* close = new Fl_Button(560 - kPad * 3 - 70,
+                                             430 - kPad * 3 - 24, 70, 24,
+                                             "Close");
+            close->labelsize(kFontSize);
+            close->callback(cb_about_close, s);
+            s->about->end();
+            s->about->set_non_modal();
+            Fl_Group::current(prev);
+        }
+        s->about->show();
+    }
+
+    static void cb_about_close(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->about->hide();
+    }
+
+    // IOC or Rate changed: the transport gating and the ruler's width both
+    // depend on them [§8.4 item 3, §8.3 item 1].
+    static void cb_geometry(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        s->layout_view();
+        s->apply_state();
+        s->ruler->redraw();
+    }
+
+    // Zoom keeps the left edge [§8.4 item 2]: the column at the pane's left
+    // edge stays put, no re-centering and no jump to the start. The
+    // arithmetic is nova::rezoomed, the same function ruler_mapping tests.
+    static void cb_zoom(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        const nova::RulerView after =
+            nova::rezoomed(s->view_state(), s->zoom_value());
+        s->layout_view();
+        s->pane->scroll_to(static_cast<int>(std::lround(after.scroll_px)),
+                           s->pane->yposition());
+        s->pane->redraw();
+        s->ruler->redraw();
+    }
 };
+
+void Ruler::draw() {
+    fl_color(FL_BACKGROUND_COLOR);
+    fl_rectf(x(), y(), w(), h());
+    const int base = y() + h() - 1;
+    fl_color(active() ? FL_FOREGROUND_COLOR : FL_INACTIVE_COLOR);
+    fl_line(x(), base, x() + w() - 1, base);
+    // Blank while the image width is unknown: a ruler drawn on a guess
+    // would be a lie in the one place a lie is most expensive [§8.3 item 1].
+    if (!active() || !shell) return;
+
+    const nova::RulerView v = shell->view_state();
+    if (v.image_cols <= 0) return;
+    fl_font(FL_HELVETICA, 10);
+    const int step = nova::tick_step(v.scale);
+    for (int c = 0; c < v.image_cols; c += step) {
+        const double sx = nova::x_at(v, c);
+        if (sx < 0.0 || sx >= w()) continue;
+        const int px = x() + static_cast<int>(std::lround(sx));
+        const bool major = (c % (step * 5)) == 0;
+        fl_line(px, base, px, base - (major ? 7 : 4));
+        if (!major) continue;
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "%d", c);
+        const int tw = static_cast<int>(fl_width(buf));
+        // The HTML mockup's last label ran off the end of the ruler and
+        // into the status panel. A label that would overflow is pulled
+        // back inside instead of being drawn where its tick is.
+        int tx = px + 2;
+        if (tx + tw > x() + w()) tx = x() + w() - tw;
+        fl_draw(buf, tx, base - 9);
+    }
+}
 
 // Fl_Double_Window::resize is still called, because it is what actually
 // moves the platform window; layout() then overwrites whatever the group
@@ -546,6 +1127,34 @@ int print_metrics(const Shell& s) {
     for (const auto& n : s.named)
         std::printf("  %-20s %5d %5d %5d %5d\n", n.first, n.second->x(),
                     n.second->y(), n.second->w(), n.second->h());
+
+    // The shell's state, so the §8.3/§8.4 behaviour rules are checkable
+    // without a window. Values are quoted, and no line here carries four
+    // integers, so the region table above stays unambiguous to parse.
+    const nova::RulerView v = s.view_state();
+    std::printf("# shell state [docs/05 8.3, 8.4]\n");
+    std::printf("  state                \"%s\"\n", state_token(s.state));
+    std::printf("  status_text          \"%s\"\n", state_text(s.state));
+    std::printf("  start_label          \"%s\"\n", s.start->label());
+    std::printf("  start_active         \"%d\"\n", s.start->active() ? 1 : 0);
+    std::printf("  force_active         \"%d\"\n", s.force->active() ? 1 : 0);
+    std::printf("  progress_active      \"%d\"\n", s.progress->active() ? 1 : 0);
+    std::printf("  ruler_active         \"%d\"\n", s.ruler->active() ? 1 : 0);
+    std::printf("  zoom                 \"%s\"\n", s.zoom->text());
+    std::printf("  image_cols           \"%d\"\n", v.image_cols);
+    std::printf("  tick_step            \"%d\"\n",
+                v.image_cols > 0 ? nova::tick_step(v.scale) : 0);
+    std::printf("  pane_interior_w      \"%d\"\n", s.pane_interior_w());
+    // In pixels rather than as a flag, because the ruler's width is the
+    // pane interior LESS the vertical scrollbar: the check in gui_layout
+    // subtracts this and so stays exact once images arrive.
+    std::printf("  vscroll_px           \"%d\"\n",
+                s.vscroll_visible() ? Fl::scrollbar_size() : 0);
+    std::printf("  hscroll_px           \"%d\"\n",
+                s.hscroll_visible() ? Fl::scrollbar_size() : 0);
+    std::printf("  prefs_writable       \"%d\"\n", s.prefs.writable() ? 1 : 0);
+    std::printf("  image_folder         \"%s\"\n",
+                s.image_folder.empty() ? "(unset)" : s.image_folder.c_str());
     return 0;
 }
 
@@ -558,7 +1167,27 @@ int main(int argc, char** argv) {
     int win_h = kWinH;
     int resize_w = 0;
     int resize_h = 0;
-    for (int i = 1; i < argc; i++) {
+    LiveState state = LiveState::kIdle;
+    bool state_given = false;
+    int zoom_index = 0;
+    int ioc_index = 0;
+    int rate_index = 0;
+
+    const auto index_of = [](const char* text, const char* const* names,
+                             int count, int* out) {
+        for (int i = 0; i < count; i++)
+            if (!std::strcmp(text, names[i])) {
+                *out = i;
+                return true;
+            }
+        return false;
+    };
+    static const char* const kZoomArgs[] = {"fit", "25", "50", "100", "200"};
+    static const char* const kIocArgs[] = {"auto", "576", "288"};
+    static const char* const kRateArgs[] = {"auto", "60", "90", "120"};
+
+    bool bad = false;
+    for (int i = 1; i < argc && !bad; i++) {
         if (!std::strcmp(argv[i], "--devices"))
             devices_only = true;
         else if (!std::strcmp(argv[i], "--metrics"))
@@ -571,18 +1200,47 @@ int main(int argc, char** argv) {
                  std::sscanf(argv[++i], "%dx%d", &resize_w, &resize_h) == 2 &&
                  resize_w >= kMinW && resize_h >= kMinH)
             ;
-        else {
-            std::fprintf(stderr,
-                         "usage: nova-gui [--devices] [--metrics] "
-                         "[--size WxH] [--resize WxH]  (min %dx%d)\n",
-                         kMinW, kMinH);
-            return 2;
-        }
+        else if (!std::strcmp(argv[i], "--state") && i + 1 < argc &&
+                 parse_state(argv[++i], &state))
+            state_given = true;
+        else if (!std::strcmp(argv[i], "--zoom") && i + 1 < argc &&
+                 index_of(argv[++i], kZoomArgs, 5, &zoom_index))
+            ;
+        else if (!std::strcmp(argv[i], "--ioc") && i + 1 < argc &&
+                 index_of(argv[++i], kIocArgs, 3, &ioc_index))
+            ;
+        else if (!std::strcmp(argv[i], "--rate") && i + 1 < argc &&
+                 index_of(argv[++i], kRateArgs, 4, &rate_index))
+            ;
+        else
+            bad = true;
+    }
+    if (bad) {
+        std::fprintf(stderr,
+                     "usage: nova-gui [--devices] [--metrics] [--size WxH] "
+                     "[--resize WxH]\n"
+                     "                [--state NAME] [--zoom fit|25|50|100|200]"
+                     "\n                [--ioc auto|576|288] "
+                     "[--rate auto|60|90|120]\n"
+                     "  window minimum %dx%d; states: idle ready start-tone "
+                     "phasing\n  drawing stop-tone decoding saved\n",
+                     kMinW, kMinH);
+        return 2;
     }
     if (devices_only) return print_devices();
 
     Shell shell;
-    shell.build(win_w, win_h);
+    shell.build(win_w, win_h, argv[0]);
+    shell.ioc->value(ioc_index);
+    shell.rate->value(rate_index);
+    shell.zoom->value(zoom_index);
+    shell.state = state;
+    // --state means "as nova-live will drive it": the transport rules are
+    // only inspectable once something is behind them, and on a plain run
+    // nothing is [see the file header].
+    shell.capture = state_given;
+    shell.layout_view();
+    shell.apply_state();
     // A window built at a size and a window dragged to it went through two
     // different code paths until this file stopped using resizable(); the
     // flag stays so that the equivalence keeps being checkable.

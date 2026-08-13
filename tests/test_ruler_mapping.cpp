@@ -18,6 +18,10 @@
 //   - scroll clamps into [0, max_scroll_px], and max_scroll_px is 0
 //     exactly when the image fits the pane (no scrollbar then [§8.3
 //     item 3]);
+//   - a zoom change keeps the image column at the pane's LEFT EDGE
+//     [§8.4 item 2]: rezoomed() preserves it exactly whenever the new
+//     scroll is reachable, and otherwise stops at the image's right
+//     edge — never at the start;
 //   - the tick step is the smallest of {10,20,50,100,200,500} leaving
 //     >= 40 px between labels: 20 columns at 200%, and at Fit 200 near
 //     the ~880 px minimum window but 100 at the 980 px default — the
@@ -144,6 +148,61 @@ void check_view(const Case& tc, double scroll_request) {
     check(ticks_ok, what);
 }
 
+const char* zoom_name(nova::Zoom z) {
+    switch (z) {
+        case nova::Zoom::kFit: return "Fit";
+        case nova::Zoom::k25: return "25%";
+        case nova::Zoom::k50: return "50%";
+        case nova::Zoom::k100: return "100%";
+        case nova::Zoom::k200: return "200%";
+    }
+    return "?";
+}
+
+// §8.4 item 2: on a zoom change the image column at the pane's left edge
+// stays where it was. It cannot always be honoured — zooming out at the
+// far right of the image would need to scroll past the right edge — and
+// what happens then is the half worth pinning: the view stops at the
+// right edge, never at the start.
+void check_rezoom(int cols, int pane, nova::Zoom from, nova::Zoom to,
+                  double scroll_frac) {
+    nova::RulerView v{cols, nova::zoom_scale(from, cols, pane), pane, 0.0};
+    v = nova::scrolled(v, nova::max_scroll_px(v) * scroll_frac);
+    const double left_before = nova::column_at(v, 0.0);
+
+    const nova::RulerView w = nova::rezoomed(v, to);
+    const double left_after = nova::column_at(w, 0.0);
+    const double smax = nova::max_scroll_px(w);
+    const double wanted = left_before * w.scale;
+
+    char what[220];
+    std::snprintf(what, sizeof what,
+                  "cols=%d pane=%d %s -> %s at %.0f%%: scale is the new "
+                  "zoom's",
+                  cols, pane, zoom_name(from), zoom_name(to),
+                  scroll_frac * 100.0);
+    check(w.scale == nova::zoom_scale(to, cols, pane), what);
+
+    if (wanted <= smax + kEps) {
+        std::snprintf(what, sizeof what,
+                      "cols=%d pane=%d %s -> %s at %.0f%%: left edge stays "
+                      "column %.3f",
+                      cols, pane, zoom_name(from), zoom_name(to),
+                      scroll_frac * 100.0, left_before);
+        check(std::fabs(left_after - left_before) < 1e-6, what);
+    } else {
+        // Unreachable: the requested left column would put the image's
+        // right edge inside the pane. Stopping at max is the same clamp
+        // the scrollbar obeys — and it is emphatically not 0.
+        std::snprintf(what, sizeof what,
+                      "cols=%d pane=%d %s -> %s at %.0f%%: unreachable left "
+                      "column stops at the right edge (%.3f), not the start",
+                      cols, pane, zoom_name(from), zoom_name(to),
+                      scroll_frac * 100.0, smax);
+        check(std::fabs(w.scroll_px - smax) < kEps, what);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -208,6 +267,45 @@ int main() {
         check(std::fabs(nova::scrolled(w, smax + 50.0).scroll_px - smax) <
                   kEps,
               "overscroll clamps to max");
+    }
+
+    // Zoom keeps the left edge [docs/05 §8.4 item 2], stated as two
+    // concrete cases before the matrix runs it in every direction.
+    {
+        // An IOC 576 chart in the 980 px default window, scrolled so that
+        // column 500 sits at the pane's left edge at 100%. At 200% the
+        // same column must still be there — the operator is looking at a
+        // dead-sector edge and the zoom is how they get closer to it.
+        nova::RulerView v{1810, 1.0, 768, 0.0};
+        v = nova::scrolled(v, 500.0);
+        const nova::RulerView w = nova::rezoomed(v, nova::Zoom::k200);
+        check(std::fabs(nova::column_at(w, 0.0) - 500.0) < 1e-6,
+              "100% -> 200% at column 500 keeps column 500 at the left edge");
+        check(std::fabs(w.scroll_px - 1000.0) < kEps,
+              "... which is 1000 px of scroll at 2 px per column");
+        // Zooming out to Fit shows the whole image, so there is nowhere
+        // to scroll and the left edge is necessarily column 0.
+        const nova::RulerView f = nova::rezoomed(v, nova::Zoom::kFit);
+        check(f.scroll_px == 0.0 && nova::max_scroll_px(f) == 0.0,
+              "-> Fit fits the image, so the left edge is column 0");
+    }
+
+    // Every zoom transition, both widths, four panes, five scroll
+    // positions each — including the far right, where the request is
+    // unreachable and the clamp is the behaviour under test.
+    {
+        const int widths[] = {1810, 905};
+        const int panes[] = {668, 768, 1708};
+        const nova::Zoom zooms[] = {nova::Zoom::kFit, nova::Zoom::k25,
+                                    nova::Zoom::k50, nova::Zoom::k100,
+                                    nova::Zoom::k200};
+        const double fracs[] = {0.0, 0.25, 0.5, 0.83, 1.0};
+        for (const int cols : widths)
+            for (const int pane : panes)
+                for (const nova::Zoom from : zooms)
+                    for (const nova::Zoom to : zooms)
+                        for (const double f : fracs)
+                            check_rezoom(cols, pane, from, to, f);
     }
 
     // The mapping invariant across the whole matrix: both IOC widths,

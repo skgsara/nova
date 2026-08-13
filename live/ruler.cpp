@@ -42,6 +42,17 @@ double x_at(const RulerView& v, double col) {
     return col * v.scale - v.scroll_px;
 }
 
+RulerView rezoomed(RulerView v, Zoom z) {
+    // The column at the pane's left edge is read BEFORE the scale
+    // changes and put back at the left edge afterwards. Reading it
+    // through column_at() rather than dividing here is the point of
+    // these being functions: the widget, the click handler and this all
+    // use one definition of where a column is.
+    const double left_col = column_at(v, 0.0);
+    v.scale = zoom_scale(z, v.image_cols, v.pane_px);
+    return scrolled(v, left_col * v.scale);
+}
+
 int tick_step(double scale) {
     // docs/05 §8.3 item 1: the smallest step in {10, 20, 50, 100, 200,
     // 500} leaving >= 40 px between labels on screen.

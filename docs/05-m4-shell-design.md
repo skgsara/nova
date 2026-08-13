@@ -1,9 +1,12 @@
 # 05 — M4 shell design: FLTK + RtAudio
 
 Status: **complete — every design question in this document is decided**
-(Sara, 2026-08-13, sessions 17–19: the original five plus the retention
-follow-up, the eight from the skeleton, and the five from preparing to
-code it). **The next step is code, not paper.**
+(Sara, 2026-08-13, sessions 17–20: the original five plus the retention
+follow-up, the eight from the skeleton, the five from preparing to code
+it, and the three about the save/edit lifecycle asked while the surfaces
+were being written). **The next step is code, not paper** — see §8.5's
+closing note on why that sentence keeps being true and keeps needing a
+new paragraph above it.
 
 This document is the design that `docs/04`'s answers imply. `docs/04`
 settled *what the operator sees and what the machine promises*; this one
@@ -725,6 +728,134 @@ as designed. It is blank and disabled until the start tone, then lights
 up with no transition and no announcement, the same blank-until-measured
 rule the clock and timebase readouts already follow [§4].
 
+### 8.5 The save/edit lifecycle: when the file is written, and what an edit owns
+
+**Five questions raised by Sara while the §8.3 surfaces were being coded
+(session 20).** Two of them turned out to be already answered elsewhere
+in this document and are restated here rather than pointed at, because
+the answers were spread across §3, §4, §8.2 and §8.3 item 6 and nobody
+could see them in one place. The other three were open, and are
+**DECIDED 2026-08-13 (Sara)**.
+
+**1. When is the picture saved automatically? At the end of the batch
+decode — before any editing is possible.** `DECODING` completing writes
+the image to the folder and the status line reads `SAVED` [§4]. There is
+no prompt and no autosave toggle: every completed transmission is saved,
+because an unsaved chart is the one failure an operator cannot undo
+[§8.3 item 6]. The file is named from the system clock timestamp [§12
+item 5]. By the time a corrected image is on screen, the automatic
+version is already on disk.
+
+**2. What does a re-render after an edit do to that file? It overwrites
+it — one transmission, one file.** [DECIDED 2026-08-13, Sara.] The
+corrected image is the same transmission, and the image folder *is* the
+image list — no ring, no slot table, no LOCK [docs/04 answer 7] — so a
+second file per correction would turn one chart into four or five
+near-identical files the operator then has to weed. Rejected
+alternatives: a new timestamped file per Apply, and writing nothing until
+asked.
+
+**Recorded consequence, stated because it is the real cost.** The
+automatic version is reproducible only while the raw snapshot is still
+retained: Auto restores the measured values and re-renders it. Once the
+operator moves on and §3 releases that snapshot, the pre-edit image is
+genuinely gone. That is accepted — by then the operator has decided the
+edit is the version they want — and it is the same trade §3 already made
+when it refused to write a raw sidecar.
+
+**3. Is there a Save button after editing? No — Apply re-renders AND
+writes.** [DECIDED 2026-08-13, Sara.] The file on disk always matches
+what is on the screen. A Save button would restore precisely the failure
+mode item 6 removed: a chart corrected, approved, and then closed with
+the good version only ever in memory. The corpus's `SAVE?` prompts
+protect a 12-to-200-image ring that Nova does not have. The panel's
+controls therefore stay `[Apply] [Auto]`, as drawn in §8.
+
+This composes with decision 2 rather than fighting it: hunting for the
+right PHASE across five Applies writes the same path five times, which
+costs nothing. Had the answer been a new file per Apply, a Save button
+would have started to make sense, because each write would then be a
+deliberate act — the two questions have one joint answer, not two
+independent ones.
+
+**Recorded consequence for the saved metadata.** A re-render's PNG text
+chunks must record PHASE/SYNC as **operator-supplied** rather than
+measured [§8.3 item 7 puts the decode QA there]. Overwriting otherwise
+leaves a file whose metadata claims a provenance the pixels no longer
+have, and the Furunos printing `Phase OK` / `Phase NG` on every chart are
+the precedent for the header telling the truth about how the picture was
+obtained [docs/04 Finding 4 additions].
+
+**4. What counts as "an edit in progress"? Dirty controls, not a mode.**
+[DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
+PHASE or SYNC, or the first click on the image, and **ends** at Apply, at
+Auto, or when the operator switches to the live view. This is the
+boundary §8.2's "the edit holds the pane" was missing: without it, the
+hold would protect only the instant while Apply runs, which protects
+nothing. A typed-but-not-applied PHASE value holds the pane.
+
+Two behaviours follow, and both were asked directly:
+
+- **A new transmission arriving mid-edit does not take the pane** [§8.2,
+  session 17]. It draws into its background buffer behind the compact
+  receiving indicator — state, line count, thumbnail — which switches the
+  pane when clicked. Nothing is lost, because §3 retains two raw
+  snapshots by role: the transmission being received, and the image being
+  displayed. When the edit ends by the rule above, the buffered picture
+  comes forward under the announced-swap rule.
+- **With no edit in progress, the next transmission is received
+  automatically** [§4]. After `SAVED` Nova is still capturing and
+  monitoring; the next start tone runs the normal path and the new
+  preview takes the pane. Only operator Stop returns it to `IDLE`. The
+  §8.2 protection is for an edit, not for an idle picture on screen.
+
+**5. What names the file when the operator label is blank? The timestamp
+alone.** [DECIDED 2026-08-13, Sara.] Blank is a legitimate value for the
+label [§8.1], so it produces no placeholder, no `unlabelled`, and no
+prompt — it produces a shorter filename:
+
+| Label | File |
+|---|---|
+| blank | `20260813T220417Z.png` |
+| `JMH` | `20260813T220417Z-JMH.png` |
+
+The timestamp comes first and always, in UTC, to seconds. Chronological
+order is then alphabetical order, which is what an unbounded folder with
+no slot table needs; seconds make a collision impossible between two
+charts in one minute; and there are no colons in it, because Nova is
+cross-platform and `:` cannot appear in a Windows filename.
+
+**The label is sanitized before it reaches a filename.** It is free text
+— it can hold `/`, `:`, quotes, newlines, or two hundred characters.
+Rule: anything in `\ / : * ? " < > |` and every run of whitespace becomes
+a single `-`, the result is trimmed and capped at 32 characters, and if
+nothing survives it is treated as blank. The full label goes into the PNG
+text chunks regardless, so a conservative filename loses nothing.
+
+**Nova never renames a saved file.** The name is fixed at the automatic
+save. A label typed or changed afterwards reaches the PNG metadata on the
+next Apply, and the file keeps the name it was written with. This is the
+idiom §8.3 item 6 already established — *deleting is a file operation,
+because the image list is a view of a folder* — and renaming is the same
+category: the operator does it in their file manager. The alternative,
+Apply renaming the file to match a changed label, was rejected for adding
+a second way a file can move and a failure path (a rename that fails)
+in exchange for tidiness in the minority case. The label identifies the
+station being received and is typed before or during reception, not
+after it.
+
+**The closing note this section owes the document.** "No design question
+remains open" has now been written four times — sessions 17, 18, 19 and
+here — and each time it was true of the questions then visible. Session
+19's paragraph said paper closes the questions it can see, and code and
+windows find the rest. Session 20 sharpens that: the four questions above
+were not found by *looking* at a window, they were found by Sara asking
+what happens over the whole life of one chart — arriving, being saved,
+being corrected, being replaced. That is a dimension neither a static
+mockup nor a running skeleton exhibits, and it is worth expecting the
+next set to come from the same place: the parts of the story the current
+artefact cannot act out.
+
 ---
 
 ## 9. How M4 gets screamers
@@ -775,18 +906,42 @@ skeleton found the same layout bug twice by two different mechanisms:
    audio device — which is also the argument for that mapping being a
    pure function in `nova-live` rather than arithmetic inside a widget.
    **[BUILT session 19: `live/ruler.{hpp,cpp}` + `tests/
-   test_ruler_mapping.cpp`, running unguarded in every build.]**
+   test_ruler_mapping.cpp`, running unguarded in every build. Extended
+   session 20 with §8.4 item 2's left-edge retention, `rezoomed()`.]**
 
-The suite count with both built is **"24 (+1 with the GUI)"** — session
-18's decided wording said "23 (+1 with the GUI)", which assumed item 8
-would be guarded too; but item 8 tests a dependency-free `nova-live`
-function, and a test that can run everywhere should run everywhere, so
-the base count moved to 24 and the GUI conditional stayed at +1.
+One more, added session 20 while the §8.3 surfaces were being written,
+because `gui_layout` pins where the regions *are* and nothing pinned what
+the shell *does* — and the behaviour rules are precisely the ones a
+widget edit can break without moving a pixel:
+
+9. **`gui_shell`** — from `nova-gui --metrics --state NAME`: the button
+   relabelled by state and never reading a state name, insensitive during
+   DECODING and active again at SAVED; Force Start gated on IOC *and*
+   rate being explicit; the ruler blank and disabled until the image
+   width is known, and lit with the right width and tick step when it is;
+   the transport inert on a plain run, because nothing can capture yet;
+   and the preference file beside the program read at startup without an
+   inspection run creating one. Guarded by `NOVA_BUILD_GUI`.
+   **[BUILT session 20: `tests/gui_shell.cmake`, sharing its `--metrics`
+   parser with `gui_layout` via `tests/gui_metrics.cmake`. Verified by
+   mutation: making Start sensitive during DECODING, and lighting the
+   ruler with the width unknown, each fail it.]**
+
+The suite count is now **"24 (+2 with the GUI)"**. Session 19 decided
+"24 (+1 with the GUI)" — correcting session 18's "23 (+1)" — on the
+argument that item 8 tests a dependency-free `nova-live` function and a
+test that can run everywhere should run everywhere. That argument is
+unchanged; item 9 is simply a second guarded test, so the base stays 24
+and the GUI conditional moves to +2. Sara should say if she would rather
+the two GUI scripts were one ctest target to keep the "+1".
 
 Registered as a gap up front: **nothing here tests RtAudio, and with
-screamers 7 and 8 built (session 19) the FLTK gap is narrowed rather
-than closed.** Device enumeration, callback behaviour under xrun, and
-widget wiring are still verified by running the app, not by a suite. That is the boundary the
+screamers 7, 8 and 9 built (sessions 19–20) the FLTK gap is narrower
+again but not closed.** Device enumeration and callback behaviour under
+xrun are still verified by running the app, not by a suite; so is
+anything that only exists once it is *drawn* — the ruler's ticks are
+pinned as numbers by `ruler_mapping` and as sensitivity by `gui_shell`,
+but no test looks at a pixel of them. That is the boundary the
 three-layer split in §1 is drawn to make small.
 
 ---
@@ -981,6 +1136,39 @@ had never specified — persistence, zoom-scroll interaction, the
 transport cycle — and they surfaced the moment someone prepared to *code*
 the surfaces rather than to look at them. Paper closes the questions it
 can see; code and windows find the rest.
+
+### Raised by Sara during the §8.3 coding session (session 20)
+
+Five asked, two of them already answered elsewhere in this document and
+restated rather than pointed at, three open and decided the same day.
+All written up in §8.5.
+
+20. ~~**When is the picture saved automatically?**~~ At the end of the
+    batch decode, before any editing is possible — no prompt, no toggle,
+    filename from the system clock. Already decided across §4 and §8.3
+    item 6; the question was that it could not be read in one place.
+21. ~~**What does an edited re-render do to the saved file?**~~ It
+    overwrites it: one transmission, one file. The pre-edit image is
+    reproducible via Auto only while §3 still retains the raw snapshot,
+    and losing it after that is accepted.
+22. ~~**Is there a Save button after editing?**~~ No — Apply re-renders
+    and writes, so the file always matches the screen. This and item 21
+    have one joint answer: a new file per Apply would have justified a
+    Save button, and overwriting does not.
+23. ~~**What counts as an edit in progress?**~~ Dirty controls, not a
+    mode: it begins at the first PHASE/SYNC change or the first click on
+    the image, and ends at Apply, Auto, or switching to the live view.
+    This is the boundary §8.2's pane-hold was missing.
+24. ~~**What names the file when the label is blank?**~~ The timestamp
+    alone — `20260813T220417Z.png`, and `20260813T220417Z-JMH.png` with
+    a label. UTC to seconds, timestamp first, label sanitized and capped,
+    and Nova never renames a saved file.
+
+**No design question remains open, a fourth time.** The count of times
+that sentence has been written is now the evidence for what §8.5's
+closing note says about where the next questions will come from: not from
+looking at the window, but from asking what happens across the whole life
+of one chart.
 
 ---
 

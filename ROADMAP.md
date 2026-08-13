@@ -445,6 +445,34 @@ Pending:
     the GUI)"** — session 18's wording said "23 (+1)", but `ruler_mapping`
     tests dependency-free code and runs in every build, so the base count
     moved to 24 and the GUI conditional stayed +1.
+- **The §8.3 + §8.4 surfaces, in code [built session 20]** — the menu bar
+  (File / Settings / Help) with the folder chooser and the verbatim About
+  text; the preference file beside the executable; Zoom with left-edge
+  retention through `nova::rezoomed`; `Fl_Scroll` around the pane; the
+  ruler consuming `live/ruler.hpp` and blank until the image width is
+  known; and the transport rules — one button relabelled by state,
+  insensitive during DECODING, Force Start gated on explicit IOC + rate.
+  Still no decode behind any of it: the buttons are inert on a plain run,
+  and `--state NAME` drives the shell as nova-live will so the rules are
+  inspectable. Third GUI screamer built with it — `gui_shell` — which
+  moves the count to **"24 (+2 with the GUI)"**.
+- **The save/edit lifecycle [DECIDED 2026-08-13, Sara, session 20;
+  docs/05 §8.5]** — five questions asked while those surfaces were being
+  written, about the whole life of one chart rather than about the
+  window. The picture is saved automatically when the batch decode
+  completes, before any editing is possible. An edited re-render
+  **overwrites the same file** — one transmission, one file — and there
+  is **no Save button**: Apply re-renders and writes, so the file always
+  matches the screen. An **edit in progress** is dirty controls, not a
+  mode: it begins at the first PHASE/SYNC change or the first click on
+  the image and ends at Apply, Auto, or switching to the live view, which
+  is the boundary §8.2's pane-hold was missing. The file is named
+  `20260813T220417Z.png`, or `20260813T220417Z-JMH.png` with an operator
+  label — UTC to seconds, timestamp first, label sanitized and capped at
+  32 characters, blank label giving the timestamp alone. **Nova never
+  renames a saved file**: a label changed after the save reaches the PNG
+  metadata, and renaming is a file operation like deleting, because the
+  image list is a view of a folder.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind
