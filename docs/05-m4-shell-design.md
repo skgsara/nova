@@ -126,6 +126,49 @@ cheap one first:
 The same applies to `resample`. Recommend block-with-overlap for both,
 and let the screamer prove the overlap is long enough.
 
+**BUILT session 20 (`live/stream.{hpp,cpp}`), and the measurement is
+better than this section predicted.** `core/` is unchanged, as designed.
+Numbers from `live_demod_equiv`, over a real recording and over
+generated signals at 44100 and 48000 Hz, at eleven block sizes from one
+sample to 44100:
+
+- **The demodulator is bit-identical** — 0.0 difference on every sample.
+  "Agree sample-for-sample" turned out to be literally true, though not
+  for a reason worth relying on: the mixing oscillator restarts at phase
+  zero on each segment, which is a constant rotation that cancels in the
+  phase-difference discriminator, and the residue in the last bits of the
+  doubles disappears when the result is rounded to `float`. Observed, not
+  guaranteed by construction, so the screamer asserts a tolerance.
+- **The resampler agrees to 5e-13**, its output positions being formed
+  from segment-local indices. Ten orders of magnitude below one 8-bit
+  grey level, and gone entirely by the time the video is demodulated.
+- **Output counts are identical**, which is the claim that actually
+  protects the picture: a sample-count drift between the two paths would
+  slant it.
+
+**The overlap, measured: 62 samples, and the arithmetic argument for 63
+was wrong by one.** The I/Q lowpass is 63 taps, so from the tap count the
+requirement looks like 62 samples to fill the FIR plus one fully-fed
+sample for the discriminator. The sweep says the error reaches zero at
+62 and is still 8e-6 at 61. The reason is the *window*, not the length:
+the Blackman window is exactly zero at both endpoints, so `h[0]` and
+`h[62]` carry no weight and the filter's effective support is two taps
+shorter than its length. `kDemodOverlap` ships at 64, keeping two
+samples of margin over a number that depends on those endpoints being
+exactly zero.
+
+**One constraint this section did not anticipate, and it is load-bearing
+for the resampler.** A streaming resampler cannot consume arbitrary
+block sizes and stay aligned with the batch call: output sample *i* sits
+at input position *i / ratio*, so a segment starting at input *S*
+reproduces those positions only when *S · ratio* is an integer. The
+implementation therefore consumes input in whole blocks of *q* samples,
+where *p/q* is the reduced ratio — 441 input samples per 80 output at
+44100 Hz, 6 per 1 at 48000 — and holds a context window of history and
+lookahead around each one, because the kernel is centred. This is
+invisible from outside (`push()` takes any block size and buffers), but
+it is why the streaming path has latency and the demodulator does not.
+
 **2.3 GUI queue.** Thread 2 and thread 3 never touch widgets. They push
 typed messages (`RowsDrawn`, `StateChanged`, `StatsUpdated`,
 `BatchProgress`, `BatchDone`, `BatchFailed{DecodeErrorKind}`) onto an
@@ -954,6 +997,14 @@ existing 20 fixtures:
 1. **`live_demod_equiv`** — block-with-overlap streaming
    resample+demod over a fixture equals the whole-file result, sample for
    sample, at every block size in a set. Pins §2.2.
+   **[BUILT session 20: `live/stream.{hpp,cpp}` +
+   `tests/test_live_equiv.cpp`, running unguarded in every build. Eleven
+   block sizes from 1 sample to 44100, over a real recording at 8 kHz
+   and generated signals at 44100 and 48000 — the fixtures are all at
+   8 kHz and cannot exercise a resampler at all. Measured: the demod is
+   bit-identical, the resampler agrees to 5e-13, counts match everywhere,
+   and the overlap requirement is 62 rather than the 63 the tap count
+   predicts. See §2.2.]**
 2. **`live_tones`** — the streaming detector finds the same tone *kinds*
    in the same order, with start times within one hop, as `detect_tones`
    on every tone fixture. Pins §5, with the medians explicitly excluded
@@ -1015,13 +1066,13 @@ widget edit can break without moving a pixel:
    mutation: making Start sensitive during DECODING, and lighting the
    ruler with the width unknown, each fail it.]**
 
-The suite count is now **"24 (+2 with the GUI)"**. Session 19 decided
+The suite count is now **"25 (+2 with the GUI)"**. Session 19 decided
 "24 (+1 with the GUI)" — correcting session 18's "23 (+1)" — on the
-argument that item 8 tests a dependency-free `nova-live` function and a
-test that can run everywhere should run everywhere. That argument is
-unchanged; item 9 is simply a second guarded test, so the base stays 24
-and the GUI conditional moves to +2. Sara should say if she would rather
-the two GUI scripts were one ctest target to keep the "+1".
+argument that a test of dependency-free `nova-live` code should run
+everywhere. That argument is unchanged and now applies twice: item 9 is
+a second guarded GUI test (+1 → +2), and item 1 is a second unguarded
+`nova-live` test (24 → 25). Sara should say if she would rather the two
+GUI scripts were one ctest target to keep the "+1".
 
 Registered as a gap up front: **nothing here tests RtAudio, and with
 screamers 7, 8 and 9 built (sessions 19–20) the FLTK gap is narrower
@@ -1284,6 +1335,14 @@ It is worth expecting a third instance somewhere in this document.
   to +320 ppm. The preview's forward EMA (§6) will be wrong there, and
   the saved image is the answer — but the preview may look bad enough
   that an operator stops a good transmission. Unmeasured.
+- **No recording in the library exercises the capture-rate path**
+  (session 20). All 20 fixtures are already at 8 kHz, so `resample` is a
+  passthrough over the whole library and a streaming bug in it would be
+  invisible there. `live_demod_equiv` covers 44100 and 48000 with
+  generated signals, which is the right tool — but a generated signal
+  cannot surprise the resampler the way a real capture chain might, and
+  no fixture can close this, because every recording in the library
+  reached us through someone else's resampler already.
 - The preview's row-placement quality has no target number yet.
   `place_rms_px` exists for the batch path; the equivalent for the
   preview is not defined, so §9's screamer 3 pins determinism and

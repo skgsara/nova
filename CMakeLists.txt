@@ -27,12 +27,17 @@ target_include_directories(nova-core PUBLIC core)
 # nova-live: everything M4 adds that can be wrong about a signal, with no
 # FLTK, no RtAudio and no real clock [docs/05 §1], so a test can drive it
 # with a fixture instead of a sound card. Dependency-free and built
-# unconditionally, like nova-core. Starts with the ruler's column mapping
-# (live/ruler.cpp), which the GUI session consumes but does not own.
+# unconditionally, like nova-core. The ruler's column mapping
+# (live/ruler.cpp), which the GUI consumes but does not own, and the
+# streaming front end (live/stream.cpp), which wraps core's batch
+# resample/demod in block-with-overlap so the live path and the saved
+# image cannot disagree [docs/05 §2.2] — hence the link to nova-core.
 add_library(nova-live STATIC
   live/ruler.cpp
+  live/stream.cpp
 )
 target_include_directories(nova-live PUBLIC live)
+target_link_libraries(nova-live PUBLIC nova-core)
 
 add_executable(nova-decode cli/nova-decode.cpp)
 target_link_libraries(nova-decode PRIVATE nova-core)
@@ -289,6 +294,17 @@ add_executable(nova-test-ruler tests/test_ruler_mapping.cpp)
 target_link_libraries(nova-test-ruler PRIVATE nova-live)
 add_test(NAME ruler_mapping COMMAND nova-test-ruler)
 
+# §9 screamer 1 [docs/05]: the streaming front end equals the whole-file
+# path. Block-with-overlap over core's batch resample/demod, at every
+# block size a capture can produce, on a real recording and on generated
+# signals at 44100 and 48000 — the rates a sound card actually offers,
+# which the 8 kHz fixtures cannot exercise. Also measures the demod
+# overlap rather than assuming it. Unguarded: no window, no audio device.
+add_executable(nova-test-live-equiv tests/test_live_equiv.cpp)
+target_link_libraries(nova-test-live-equiv PRIVATE nova-live)
+add_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav)
+
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an
 # external dependency [docs/05 §11]. The rule that shapes this block: a
@@ -321,13 +337,14 @@ if(NOVA_BUILD_GUI)
       "${NOVA_FLTK_CXXFLAGS}")
 
     add_executable(nova-gui gui/nova-gui.cpp)
-    # docs/05 §1 is core -> live -> gui. nova-live is now consumed for
-    # real: the ruler's column mapping is called by the ruler's draw code
-    # and by the zoom control, so no column arithmetic lives in a widget.
-    # nova-core is linked but not yet called — the batch decode arrives
-    # with the streaming path.
-    target_link_libraries(nova-gui PRIVATE nova-core nova-live
-      ${NOVA_RTAUDIO_LIBRARIES})
+    # docs/05 §1 is core -> live -> gui, and the link line now says so
+    # literally: the GUI links nova-live, which carries nova-core
+    # transitively (naming both made the linker warn about a duplicate
+    # library). The ruler's column mapping is called by the ruler's draw
+    # code and by the zoom control, so no column arithmetic lives in a
+    # widget; the streaming front end is there for the capture thread
+    # that has not been written yet.
+    target_link_libraries(nova-gui PRIVATE nova-live ${NOVA_RTAUDIO_LIBRARIES})
     target_include_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_INCLUDE_DIRS})
     target_link_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_LIBRARY_DIRS})
     target_compile_options(nova-gui PRIVATE

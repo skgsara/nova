@@ -7,6 +7,106 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 20, continued (2): the streaming front end, and the filter is one sample shorter than it looks
+
+Agent: Kimi. Code changed: `live/stream.hpp`, `live/stream.cpp` (new —
+`StreamResampler` and `StreamDemod`), `tests/test_live_equiv.cpp` (new),
+`CMakeLists.txt` (`nova-live` gains the source and links `nova-core`; the
+`live_demod_equiv` target; `nova-gui`'s link line loses a duplicate).
+`core/` unchanged, which was the point. Files changed:
+`docs/05-m4-shell-design.md` (§2.2 gains the measurement, §9 item 1
+marked built, the suite count), `ROADMAP.md`, `START-HERE.md`,
+`SESSION-LOG.md`.
+
+**Task as accepted:** the next step as written three times — `nova-live`
+proper, streaming resample/demod by block-with-overlap, with
+`live_demod_equiv` as its screamer.
+
+**Built, and the design's central worry is answered better than it
+asked.** §2.2 wanted the live path and the whole-file path to agree
+"sample for sample or the preview and the saved image would differ for a
+reason that has nothing to do with the design". Measured over eleven
+block sizes from one sample to 44100, on a real recording at 8 kHz and on
+generated signals at 44100 and 48000 Hz:
+
+- **the demodulator is bit-identical** — 0.0 on every sample;
+- **the resampler agrees to 5e-13**, ten orders of magnitude below one
+  8-bit grey level (3.9e-3);
+- **output counts match everywhere**, which is the claim that actually
+  protects the picture — a count drift between the two paths would slant
+  it.
+
+The bit-exactness is worth stating carefully rather than banking:
+the mixing oscillator restarts at phase zero on each segment, which is a
+constant rotation that cancels in the phase-difference discriminator, and
+the residue in the last bits of the doubles vanishes when the result is
+rounded to `float`. Observed, not guaranteed by construction — a value
+landing exactly on a float rounding boundary could still differ by one
+ulp — so the screamer asserts a tolerance and prints the number.
+
+**The measurement that earned its keep: the overlap is 62, not 63.** The
+arithmetic argument from the tap count says 63 — the 63-tap I/Q lowpass
+needs 62 samples of history to be fully fed, plus one fully-fed sample
+for the phase-difference discriminator. The sweep says the error reaches
+exactly zero at 62 and is still 8e-6 at 61. **The reason is the window,
+not the length:** the Blackman window is exactly zero at both endpoints
+(`u = ±1` gives `0.42 − 0.5 + 0.08`), so `h[0]` and `h[62]` carry no
+weight and the filter's effective support is two taps shorter than its
+length. `kDemodOverlap` ships at 64 for margin over a number that depends
+on those endpoints being exactly zero. **The lesson for the next agent:
+a filter's length is not its support, and the difference is the window.**
+
+**One constraint §2.2 did not anticipate, and it shapes the resampler.**
+A streaming resampler cannot take arbitrary block boundaries and stay
+aligned with the batch call: output *i* sits at input position
+*i / ratio*, so a segment starting at input *S* reproduces the batch's
+positions only when *S · ratio* is an integer. `StreamResampler`
+therefore consumes input in whole blocks of *q*, the denominator of the
+reduced ratio — 441 input samples per 80 output at 44100 Hz, 6 per 1 at
+48000 — with a context window either side, the kernel being centred.
+`push()` still accepts any block size and buffers; the constraint is
+internal. It is also why the resampler has latency (one context plus one
+step) and the demodulator has none: the FIR is causal, so every arriving
+sample can be demodulated at once.
+
+**Contradictions found: two.**
+
+1. **`docs/05` §2.2's overlap reasoning, above** — the document said the
+   overlap is "a measured property of the filter" and then nobody
+   measured it; when measured it disagreed with the obvious derivation by
+   one sample. §2.2 now carries the number and the reason.
+2. **The fixtures cannot test a resampler at all.** Every one of the 20
+   is already 8 kHz, so `resample` is a passthrough over the whole
+   library and a streaming bug in it would have been invisible. The test
+   generates on-spec signals at 44100 and 48000 — the rates a sound card
+   actually offers — with `core/gen.hpp`, which is what that generator is
+   for. Registered as a gap in its own right: **no recording in the
+   library exercises the capture-rate path**, and none can, because they
+   were all captured through a resampler already.
+
+**Validation.** 27/27 pass (97 s), clean configure-and-build with zero
+warnings — `nova-gui` also lost a duplicate-library linker warning that
+appeared when `nova-live` began carrying `nova-core`. `live_demod_equiv`
+runs in 3.7 s and is unguarded, so it runs in the `NOVA_BUILD_GUI=OFF`
+build too; suite count is now **25 (+2 with the GUI)**. Nothing was
+looked at by eye this session — there is no new picture to look at, only
+the claim that two paths produce the same one.
+
+**Next step: the streaming tone detector [docs/05 §5], with `live_tones`
+as its screamer.** `detect_tones` scans a whole recording (~9 s on the
+61-minute JSC4); the live path needs the same verdicts as they arrive.
+The per-frame purity computation is kept identical and only the run
+assembly becomes incremental, emitting at the earliest qualifying moment.
+The screamer must compare **event kinds and start times within a
+tolerance, not medians** — a streaming detector emits when
+`min_start_sec` of hot frames have accumulated, a batch one after seeing
+the whole run, so their measured `freq_hz` and `purity` medians differ by
+construction [§5]. After that: the provisional renderer (§6) and
+`live_preview`, which is where a picture appears in the pane for the
+first time.
+
+---
+
 ## 2026-08-13 — Session 20, continued: the per-station PHASE/SYNC memory is removed, and it was inherited from a machine that owns its radio
 
 Agent: Kimi. Code changed: none — the memory was never built, which is

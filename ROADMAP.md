@@ -461,6 +461,20 @@ Pending:
   and `--state NAME` drives the shell as nova-live will so the rules are
   inspectable. Third GUI screamer built with it — `gui_shell` — which
   moves the count to **"24 (+2 with the GUI)"**.
+- **The streaming front end [built session 20]** — `live/stream.{hpp,cpp}`:
+  `StreamResampler` and `StreamDemod`, block-with-overlap wrappers over
+  core's batch `resample`/`fm_demod`, so the live preview and the saved
+  image cannot differ from the call pattern. `core/` unchanged, as §2.2
+  required. `live_demod_equiv` measures it at eleven block sizes from one
+  sample to 44100, on a real recording and on generated signals at 44100
+  and 48000 Hz: **the demod is bit-identical, the resampler agrees to
+  5e-13, and output counts match everywhere.** The demod overlap is
+  measured rather than assumed at **62 samples** — one less than the
+  63-tap filter predicts, because the Blackman window's endpoint taps are
+  exactly zero — and ships at 64. The resampler consumes input in whole
+  blocks of the reduced ratio's denominator (441 samples at 44100, 6 at
+  48000), because a segment boundary that is not a whole number of output
+  periods would shift the rest of the stream. Suite count 25 (+2 GUI).
 - **The save/edit lifecycle [DECIDED 2026-08-13, Sara, session 20;
   docs/05 §8.5]** — five questions asked while those surfaces were being
   written, about the whole life of one chart rather than about the

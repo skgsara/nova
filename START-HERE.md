@@ -14,9 +14,9 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(24 test suites (+2 with the GUI): three synthetic matrices + 20
-real-fixture screamers + the ruler mapping; `gui_layout` and `gui_shell`
-join when FLTK and RtAudio are installed.)
+(25 test suites (+2 with the GUI): three synthetic matrices + 20
+real-fixture screamers + the ruler mapping + the live/batch equivalence;
+`gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 See the M4 shell, if FLTK and RtAudio are installed — the full window
 with no decode behind it yet: `./build/nova-gui`
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
