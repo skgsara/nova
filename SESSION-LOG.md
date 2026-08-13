@@ -7,6 +7,28 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 20, closing note: the two GUI screamers stay two targets
+
+Agent: Claude. Code changed: none. Files changed:
+`docs/05-m4-shell-design.md` (§9's closing paragraph), `SESSION-LOG.md`.
+
+**DECIDED 2026-08-13 (Sara): `gui_layout` and `gui_shell` are NOT merged
+into one ctest target.** The question had been asked twice — session 19
+raised it and session 20 restated it — on the grounds that folding them
+would keep the GUI conditional at "+1". Sara declined. The suite count is
+a description of the tests, not a target to hold steady, and the two
+scripts pin different things: `gui_layout` pins where the regions are,
+`gui_shell` pins what the shell does. Kept apart, a failure names which
+of the two broke without anyone reading the output.
+
+The count therefore stands at **26 (+2 with the GUI)** and this question
+is closed rather than open.
+
+**Next step: unchanged from the entry below — the provisional renderer
+[docs/05 §6], with `live_preview` as its screamer.**
+
+---
+
 ## 2026-08-13 — Session 20, continued (3): the streaming tone detector, and the screamer that passed on its first run was not yet a screamer
 
 Agent: Claude. Code changed: `live/tone_stream.hpp`, `live/tone_stream.cpp`

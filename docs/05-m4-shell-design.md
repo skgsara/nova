@@ -1131,8 +1131,14 @@ knowingly rather than discover it. Session 19 decided
 argument that a test of dependency-free `nova-live` code should run
 everywhere. That argument is unchanged and now applies twice: item 9 is
 a second guarded GUI test (+1 → +2), and item 1 is a second unguarded
-`nova-live` test (24 → 25). Sara should say if she would rather the two
-GUI scripts were one ctest target to keep the "+1".
+`nova-live` test (24 → 25).
+
+**DECIDED 2026-08-13 (Sara): the two GUI scripts stay two ctest targets.**
+The "+1" is not worth preserving by merging them — `gui_layout` and
+`gui_shell` pin different things (where the regions are, versus what the
+shell does), and two targets name which of those broke without reading
+the output. The count follows the tests; the tests do not follow the
+count.
 
 Registered as a gap up front: **nothing here tests RtAudio, and with
 screamers 7, 8 and 9 built (sessions 19–20) the FLTK gap is narrower
