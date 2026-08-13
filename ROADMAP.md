@@ -75,7 +75,7 @@ register are milestone entries, not intentions (SOP P1.5).
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
-## M2b — timebase CORRECTION, not just detection  [session 11; white-only half open]
+## M2b — timebase CORRECTION, not just detection  [DONE 2026-08-12, sessions 11 + 11b]
 
 Sara reviewed all 20 decoded charts by eye and every complaint she made was
 the same axis — where each line starts, horizontally. Six recordings "zig
@@ -144,13 +144,27 @@ difficulties of reading"):
   together) and `--expect-rows-in-place` (does any row match the row above
   best at a large shift). 22 suites.
 
-OPEN — the white-only half:
-- A station with no sync pulse has no residual to segment, so VMW 2215Z's
-  staircase is untouched. fldigi's discarded per-line correlation shift
-  (docs/00, session 11) is the idea to take: correlate each line against
-  the previous one, keep the per-line value instead of the histogram mode,
-  accept only persistent moves. Fixture-in-waiting: VMW 2215Z 0–120 s.
-- No screamer yet for a faded pulse station whose steps are below its own
+NOT A DEFECT — the white-only staircase, by operator decision. Sara,
+session 11b, having reviewed the decodes: "VMW 2215Z's staircase is
+understandable, don't worry about it, others has huge improvement." A
+station that sends no sync pulse gives the decoder no per-line evidence
+except the picture matching its own previous row, and session 11b measured
+what happens when that mechanism runs on a whole page: it walks off the
+phasing anchor and fails two screamers. The staircase is therefore
+ACCEPTED, not deferred — it is what a white-only recording with a stepping
+capture chain looks like, and the decoder reports the condition
+(`timebase`, `per_line_sync`) rather than inventing a correction for it.
+Reopen only if a bounded form is found — the shape it would have to take is
+in SESSION-LOG session 11b's next-step note.
+
+STILL OPEN, and small:
+- JSC1 and JSC5 rigidity did not improve (5.0 px, unchanged) while JSC2,
+  JSC3, JSC4 and JSC6 went to 1.0-4.0. Both are 60 lpm, which is the
+  obvious suspect and is not yet a measurement.
+- HDSDR's right-hand strip is banded where the recording drops samples and
+  its text is not. The two want different answers from the same lines
+  (session 11b measured both); nothing is claimed to be right there.
+- No screamer for a faded pulse station whose steps are below its own
   measurement noise.
 
 ## M3 — full auto sequencing  [done except manual override, which needs M4]

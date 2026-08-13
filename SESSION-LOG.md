@@ -7,6 +7,54 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 11c: M2b closes on the operator's judgement, not on a number
+
+Agent: Claude Opus 5. Bookkeeping entry; no code changed.
+
+**Sara, having reviewed the session-11b decodes:** "VMW 2215Z's staircase
+is understandable, don't worry about it, others has huge improvement."
+
+**What that settles.** Session 11b left the white-only half of M2b open and
+named it the next step. It is not open: it is ACCEPTED. A station that
+sends no sync pulse gives the decoder no per-line evidence except the
+picture matching its own previous row, and session 11b measured what that
+mechanism does when it runs on a whole page — it walks off the phasing
+anchor and fails `roundtrip [7]` and `fixture_phasing_anchor`. The
+staircase is what a white-only recording with a stepping capture chain
+looks like; the decoder reports the condition (`timebase`,
+`per_line_sync`) and does not invent a correction for it. M2b is DONE.
+Reopen only if a BOUNDED form of the correlation is found — correlate,
+then re-anchor to the fitted clock every N lines, with N measured.
+
+**Worth recording as a rule, because it decided a milestone.** The
+acceptance test for this milestone was never a threshold; it was the
+operator looking at twenty pictures, twice. Session 11 was started by her
+review and session 11c closes on her review. Numbers ranked the work and
+caught two mechanisms that made things worse, but nothing in the suite
+could have told us that a staircase on one white-only recording is
+tolerable while a 2 px zig-zag on six newspaper faxes is not.
+
+**Still open and small, carried into whatever comes next:** JSC1 and JSC5
+rigidity did not move (5.0 px) while the other four JSC files went to
+1.0-4.0 — both are 60 lpm, which is a suspect and not yet a measurement;
+HDSDR's right-hand strip is banded where its text is right, and the two
+want different answers from the same lines; no screamer exists for a faded
+pulse station whose steps sit under its own measurement noise.
+
+**Next step:** M4 — GUI plus live audio — which is where session 10 pointed
+before the picture review displaced it, and where the manual override ISO
+§4.2.6 asks for lives. The costs it inherits are unchanged and now larger:
+session 7's incremental `detect_tones`, session 9's offline timebase test,
+and now session 11's assembly, which needs the whole segment before it can
+place a line and the NEXT line's correction before it can split a row
+(§5b). A live decoder will have to draw provisionally and redraw, which is
+ACFax's retained-raw-stream architecture and is already the plan (M4,
+non-destructive). If a smaller piece is wanted first, the 60 lpm rigidity
+question above is one session's work and would close the last measured gap
+in M2b.
+
+---
+
 ## 2026-08-12 — Session 11b: Sara looked again, and the rows were stretched, not moved
 
 Agent: Claude Opus 5. Continuation of session 11, same day, same milestone.
