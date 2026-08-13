@@ -141,6 +141,57 @@ fallback changes nothing where a baseline exists, and is used where it
 does not — the half of the decision most likely to be quietly
 implemented as a plain override).
 
+**All five open questions decided the same day, and two of the answers
+corrected the design rather than choosing from it.**
+
+- **Capture rate:** accept whatever the device offers, resample to
+  8 kHz — proven code, not new code.
+- **Page cap:** 1 page. Stop at the first stop tone; the cap is purely
+  the guard for when that tone is missed.
+- **Retention — corrected.** Sara accepted no-sidecar-on-disk, then
+  asked what happens if the operator is adjusting the chart that just
+  arrived when the next transmission starts. The proposed "current image
+  only" would have released the raw stream out from under a live edit,
+  killing the PHASE/SYNC controls on the one image being worked on.
+  §3 now retains **two** snapshots stated by role — the transmission
+  being received, and the image being displayed — which is bounded at
+  two however long the edit lasts, because "displayed" is one image by
+  definition. This document's own cost analysis had already assumed two
+  (~76 MB) while the policy sentence said one; the contradiction was
+  mine and she found it. Added with it: an older image opened from the
+  folder must show PHASE/SYNC **visibly disabled with the reason**, not
+  silently inert.
+- **Station identity — the question was retired, not answered.** Sara:
+  Nova is fed audio from a sound card and cannot know the frequency at
+  all. The proposed key did not exist. Resolved as an **operator-typed
+  label**, blank by default and legitimately blank, with the timestamp
+  from the system clock naming the file.
+
+**Contradiction found, by Sara, and the more embarrassing of the two in
+this session.** The status panel drawn in §8 showed `Freq 13920.0` and
+`Station VMW`, copied straight from `docs/04` Finding 4 — whose table
+lists frequency, channel and call sign as present on all sixteen
+receivers. It was never asked whether Nova *can* know them. It cannot:
+**every receiver in the corpus contains its own radio**, and Nova is a
+decoder on the end of a cable from someone else's. §8.1 now re-sorts
+Finding 4's fields by what an audio-only decoder can source, drops
+frequency and channel, and replaces station with the typed label. The
+general lesson is worth more than the fix — Findings 1, 2, 3, 5, 6 and 7
+survive that filter unchanged; Finding 4 did not, and Finding 8
+(scheduling by channel and frequency) will not either when it is picked
+up. The mockup page carried the same invented frequency and was
+corrected with the document.
+
+**One new question this opened**, registered as §12 item 6 rather than
+left to surface later: with two raw streams retained, nothing is lost
+when a transmission arrives mid-edit — but the single image pane still
+cannot show the edit and the incoming live preview at once, and §8's
+"one pane, announced swap" did not anticipate a third participant.
+Recommended: the edit holds the pane, the incoming transmission draws
+into its background buffer behind a compact receiving indicator that
+switches on click. Parking an edit is cheap here in a way it would not
+be elsewhere — the entire edit state is two numbers.
+
 **A process failure worth recording, since this log is the memory.** The
 session-17 commit `ab74640` was made on `main`, which AGENTS.md reserves
 for when Sara asks. The correction — branch the commit, reset `main` —

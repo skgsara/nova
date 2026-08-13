@@ -1,10 +1,11 @@
 # 05 — M4 shell design: FLTK + RtAudio
 
-Status: **proposal, session 17.** One item has since been decided by
-Sara (§12 item 4, the waterfall); the rest is not decided yet. Items
-still needing her ruling are collected in "Open questions" at the end;
-everything else follows from decisions already taken in `docs/04` and is
-marked with the finding or decision it follows from.
+Status: **proposal, session 17; all five original open questions decided
+by Sara the same day** (§12). One new question is open — §12 item 6,
+which picture owns the image pane while an edit is in progress. Two of
+her answers corrected the design rather than merely choosing from it:
+the retention rule (§3) and the status panel (§8.1), the latter because
+Nova cannot know the frequency at all.
 
 This document is the design that `docs/04`'s answers imply. `docs/04`
 settled *what the operator sees and what the machine promises*; this one
@@ -150,18 +151,41 @@ decode of it [docs/04 answer 6]. Design:
   ~38 MB. Two live at once (previous still open for adjustment, next
   already receiving) is the worst case.
 
-**Retention policy (proposed).** Keep the frozen snapshot for the
-*currently displayed* image only, so PHASE/SYNC re-render works on it
-[docs/04, session 16]; release it when the next transmission's snapshot
-replaces it. Do **not** write a raw sidecar next to the PNG: at ~100×
-the size of the image it would quietly turn an unbounded image folder
-into an unbounded disk problem, and the precedent agrees — the SR-97
-states outright that stored images cannot be modified.
+**Retention policy** [DECIDED 2026-08-13, Sara, session 17]. Do **not**
+write a raw sidecar next to the PNG: at ~100× the size of the image it
+would quietly turn an unbounded image folder into an unbounded disk
+problem, and the precedent agrees — the SR-97 states outright that
+stored images cannot be modified.
 
-The honest consequence, registered rather than discovered: **an image
-from three hours ago cannot be re-phased.** Manual adjustment
-[ISO §4.2.6, §5.4.3] is satisfied for the transmission you are looking
-at, which is when an operator actually does it.
+**Two snapshots are retained, not one**, and the rule is stated by role
+rather than by recency:
+
+1. the transmission **currently being received**, and
+2. the image **currently displayed** — the one the operator may be
+   adjusting.
+
+Usually these are the same object and only one exists. They diverge in
+exactly the case Sara raised: *the operator is adjusting the chart that
+just arrived when the next transmission starts.* The first draft said
+"release it when the next transmission's snapshot replaces it", which
+would have pulled the raw stream out from under a live edit — the
+operator's PHASE/SYNC controls would go dead mid-correction, on the one
+image they were actually working on.
+
+Holding two is bounded and cheap, and this document's own cost analysis
+already assumed it: 38 MB for a 20-minute chart, ~76 MB for two, which
+is nothing on a modern machine. It is bounded at two **however long the
+operator keeps editing**, because "currently displayed" is one image by
+definition — a third can never accumulate. When the operator moves on,
+the older snapshot is released.
+
+**The consequence for older images.** Opening a PNG from the folder that
+is no longer one of the two retained gives an image with no raw stream
+behind it. The PHASE/SYNC controls must then be **visibly disabled with
+the reason shown** — "raw stream no longer retained" — not silently
+inert. Manual adjustment [ISO §4.2.6, §5.4.3] is satisfied for the
+transmission you are looking at, which is when an operator actually does
+it; it is not offered and then found not to work.
 
 ---
 
@@ -351,9 +375,9 @@ boxy `FL_UP_BOX` / `FL_DOWN_FRAME` edges — in the mockup page. Regions:
 │ 0    100   200   300   400   500   600 ▲ruler                │
 │ ┌───────────────────────────────────────┐ │  STATUS          │
 │ │                                       │ │  mode  IOC  rate │
-│ │        image pane                     │ │  state  freq     │
-│ │        (preview, or saved)            │ │  station  time   │
-│ │                                       │ │  quality         │
+│ │        image pane                     │ │  state  quality  │
+│ │        (preview, or saved)            │ │  started (clock) │
+│ │                                       │ │  label [______]  │
 │ │                                       │ ├──────────────────┤
 │ │                                       │ │  PHASE [ 412 ]   │
 │ │                                       │ │  SYNC  [ +0.0 ]  │
@@ -369,6 +393,45 @@ The status line carries the state name [Finding 3, Finding 4]; the
 progress bar is populated **only** during `DECODING`, from the nine
 stages. Saved images are a view of the user's folder — no slot table, no
 LOCK, no ring [docs/04 answer 7].
+
+### 8.1 What Nova cannot know, and why the survey's status line was wrong for it
+
+**Corrected 2026-08-13 (Sara, session 17).** The first draft of this
+layout showed `Freq 13920.0` and `Station VMW` in the status panel,
+copied from `docs/04` Finding 4, whose table lists frequency, channel
+number and station call sign as present on *all* sixteen receivers.
+
+Sara's correction: **Nova is fed audio from a sound card. It cannot know
+the frequency.** Nor the channel, nor the call sign. The whole Finding 4
+field list has to be re-read in that light, because every receiver in
+the corpus *contains its own radio* — the SFX-100 knows the frequency
+because the SFX-100 tuned it. Nova is a decoder on the end of a cable
+from someone else's receiver, and anything describing the radio is
+outside its knowledge.
+
+Sorting Finding 4's fields by what Nova can actually source:
+
+| Field | Nova can | Source |
+|---|---|---|
+| Receive mode (AUTO / forced) | yes | its own state |
+| IOC, line rate | yes | measured, or operator-set |
+| Operating state | yes | §4 |
+| Date and time of reception | yes | system clock |
+| Signal quality (lock %, level) | yes | measured |
+| Normal / reverse | yes | operator-set |
+| **Frequency** | **no** | the radio, which Nova does not have |
+| **Channel number, call sign** | **no** | same |
+
+So the panel drops frequency entirely and replaces "station" with an
+**operator-typed label** — free text, blank by default, and blank is a
+legitimate value. This is not a workaround; it is Finding 7's pattern
+("the operator declares the content type … nobody tries to detect it")
+applied to identity instead of content.
+
+This is why an audio-only decoder cannot inherit a whole receiver's
+status line uncritically, and it is worth carrying into M4.5: a
+frequency readout only becomes possible if Nova ever gains CAT control
+of a receiver, which is not on the roadmap.
 
 **The spectrum/waterfall is not in M4** [DECIDED 2026-08-13, Sara,
 session 17]. It ships in M4.5. What stays in its place is a slim input
@@ -442,6 +505,22 @@ enough to deserve a bar. Both halves of Finding 3 survive — the state
 *names* belong on screen, and the session-14 progress callback is the
 seam that feeds them — only the claimed identity does not.
 
+**A second one, found by Sara, and it is the more embarrassing of the
+two.** `docs/04` Finding 4 pools the status-line fields of sixteen
+receivers and lists frequency, channel and call sign as present on all
+of them. This document copied that into §8 without asking whether Nova
+*can* know them. It cannot: every receiver in the corpus contains its
+own radio, and Nova is a decoder fed line audio from someone else's.
+Corrected in §8.1 — frequency and channel are dropped, station becomes
+an operator-typed label.
+
+The general lesson, worth more than the specific fix: **the survey
+corpus were whole receivers, and Nova is one component of one.** Any
+finding about what appears on screen has to be filtered through what an
+audio-only decoder can source. Findings 1, 2, 3, 5, 6 and 7 survive that
+filter unchanged; Finding 4 did not, and Finding 8 (scheduling by
+channel and frequency) will not either, whenever it is picked up.
+
 No other contradiction found between `docs/03`, `docs/04`, `ROADMAP.md`
 and the code as it stands.
 
@@ -472,24 +551,61 @@ and false of the GUI — that sentence needs the qualifier.
 
 ## 12. Open questions for Sara
 
-1. **Capture device sample rate.** Accept whatever the device offers and
-   resample to 8 kHz (robust, what the file path already does), or
-   request a fixed rate and fail loudly if refused? Recommend the former.
-2. **Retention policy (§3).** Confirm: current image only, no raw
-   sidecar, and the "cannot re-phase an image from three hours ago"
-   consequence is accepted.
-3. **Page cap default.** Finding 6's failsafe needs a number. Recommend
-   1 page, i.e. stop at the first stop tone, with the cap as the guard
-   for when it is missed.
+All five original questions are now answered. One new question, raised by
+Sara's answer to item 2, is open at the end.
+
+1. ~~**Capture device sample rate.**~~ **DECIDED 2026-08-13 (Sara):
+   accept whatever the device offers and resample to 8 kHz.** It is what
+   the file path already does, so this is proven code rather than new
+   code; a device that will not give exactly 8 kHz has no reason to be
+   refused.
+2. ~~**Retention policy (§3).**~~ **DECIDED 2026-08-13 (Sara): no raw
+   sidecar, and the "cannot re-phase a three-hour-old image"
+   consequence is accepted** — *with a correction from Sara that changed
+   the rule.* She asked what happens if the operator is adjusting the
+   image that just arrived when the next transmission starts. The
+   original "current image only" would have released the raw stream out
+   from under a live edit. §3 now retains **two** snapshots, by role —
+   the transmission being received, and the image being displayed —
+   bounded at two however long the edit lasts. See §3.
+3. ~~**Page cap default.**~~ **DECIDED 2026-08-13 (Sara): 1 page.** Stop
+   at the first stop tone; the cap exists purely as the guard for when
+   that tone is missed. Matches Nova's existing offline behaviour of
+   taking the first transmission and dropping the rest.
 4. ~~**Does M4 ship the waterfall?**~~ **DECIDED 2026-08-13 (Sara,
    session 17): it ships in M4.5.** A slim input level meter stays in
    M4 — see §8 for why that is a different thing and not a partial
    reversal of the cut. Nothing else in this document changes: the
    waterfall was the one region that served tuning rather than decoding,
    and no thread, seam, screamer or core field depended on it.
-5. **Station identity.** Per-station persistence [Finding 1] needs a key.
-   Frequency alone? Operator-named channel? A channel list is Finding 8's
-   scheduling feature, which M4 does not otherwise need.
+5. ~~**Station identity.**~~ **DECIDED 2026-08-13 (Sara): frequency is
+   not available at all**, because Nova is fed audio from a sound card
+   and never sees the radio. This retired the question as posed — the
+   proposed key did not exist. Resolved as an **operator-typed label**,
+   blank by default and legitimately blank, which keys the per-station
+   PHASE/SYNC memory; the timestamp comes from the system clock and
+   names the file. See §8.1, which corrects the status panel this
+   mistake had already reached.
+
+### Still open — raised by the answer to item 2
+
+6. **Which picture owns the pane while an edit is in progress?** The
+   retention rule now keeps both raw streams, so nothing is lost — but
+   the single image pane cannot show the operator's edit and the
+   incoming live preview at the same time, and §8's "one pane, announced
+   swap" did not anticipate a third participant.
+
+   Recommend: **the edit holds the pane.** The incoming transmission
+   draws into its background buffer, and the status area carries a
+   compact receiving indicator (state, line count, small thumbnail) that
+   switches to the live view when clicked. Nothing interrupts a human
+   mid-correction, and nothing is lost by waiting, because the raw is
+   retained either way. Parking an edit is cheap here in a way it would
+   not be in most applications: the entire edit state is two numbers.
+
+   The alternative — the new transmission takes the pane and the edit is
+   parked automatically — is what a receiver with one sheet of paper
+   would have to do, and Nova is not that.
 
 ---
 

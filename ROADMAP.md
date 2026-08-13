@@ -340,15 +340,34 @@ Pending:
     those semantics so neither reads as a plain override. Consequence
     accepted: on a healthy recording the operator's SYNC value is
     measured away from, in the direction of correct.
-  - Retention: current image only, no raw sidecar — so an image from
-    three hours ago cannot be re-phased. Matches the SR-97's "stored
-    images cannot be modified".
+  - Retention [DECIDED 2026-08-13, Sara]: no raw sidecar on disk, and an
+    image from three hours ago cannot be re-phased (matches the SR-97's
+    "stored images cannot be modified"). **Two** snapshots are held, by
+    role — the transmission being received, and the image being
+    displayed — so a live edit is never cut off by the next
+    transmission starting. Bounded at two however long the edit lasts;
+    ~76 MB worst case. Older images open with PHASE/SYNC visibly
+    disabled and the reason shown, never silently inert.
+  - Capture rate [DECIDED 2026-08-13, Sara]: accept whatever the device
+    offers, resample to 8 kHz, as the file path already does.
+  - Page cap [DECIDED 2026-08-13, Sara]: 1 page — stop at the first stop
+    tone, cap is purely the guard for when that tone is missed.
+  - Station identity [DECIDED 2026-08-13, Sara]: an **operator-typed
+    label**, blank by default. Frequency is not available to Nova at
+    all — it is fed audio from a sound card and never sees the radio,
+    which retired the question as posed and corrected the status panel
+    (docs/05 §8.1). Every receiver in the docs/04 corpus contains its
+    own radio; Nova is one component of one, and Finding 4's field list
+    had to be re-sorted by what an audio-only decoder can source.
   - Six screamers planned, none needing an audio device or a window:
     `live_demod_equiv`, `live_tones`, `live_preview` (bit-identical
     whatever the block size), `png_roundtrip`, `override_phase_seed`,
     `override_sync_fallback`.
-  - Four questions still open for Sara: docs/05 §12 (the waterfall
-    question is closed — see M4.5).
+  - All five original docs/05 §12 questions decided 2026-08-13. One new
+    one open: **which picture owns the image pane while an edit is in
+    progress** (§12 item 6), raised by the retention answer. Recommended
+    there: the edit holds the pane, the incoming transmission draws into
+    its background buffer behind a compact receiving indicator.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind
