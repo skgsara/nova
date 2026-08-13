@@ -230,9 +230,14 @@ more likely right than one that agrees only with its own reasoning.
   kUnknown; and ~~nothing repairs a stepping timebase~~ — session 11
   repairs it wherever per-line sync exists (M2b), after Sara's by-eye
   review of all 20 charts found the six zig-zagging recordings that every
-  decoder statistic had called fine. **The lesson for the next agent: a
-  statistic that says a recording is faulty is not the same thing as a
-  decoder that draws it correctly, and only the picture can tell you
+  decoder statistic had called fine. Session 12 extends it across KiwiSDR
+  dropouts: a run of rows unlocked by a sample drop is bracketed by two
+  known levels, and the sync pulse is still in the audio at the far one —
+  probing each row at both levels re-locks every row but the one the drop
+  landed in (far side 0.66-0.96, near side <= 0.22, on all five library
+  dropouts), which is split over the whole line. **The lesson for the next
+  agent: a statistic that says a recording is faulty is not the same thing as
+  a decoder that draws it correctly, and only the picture can tell you
   which one you have.** The suite had no picture-domain check at all
   until this session; it has one now (`--expect-straight-strip`).
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s

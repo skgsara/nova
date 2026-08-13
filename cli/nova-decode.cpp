@@ -90,6 +90,9 @@ int main(int argc, char** argv) {
             if (r.seams)
                 std::printf("; %d seam(s) followed, largest %.1f px",
                             r.seams, r.max_seam_px);
+            if (r.relocked_lines)
+                std::printf("; %d dropped row(s) re-locked at the far side",
+                            r.relocked_lines);
             std::printf("\n");
         }
         if (r.phasing_found)

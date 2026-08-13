@@ -1348,17 +1348,23 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // candidates include "at the very start" and "not in this line at all",
     // so the search can only choose a row that matches its neighbour better
     // than the un-split one did.
-    // Which unlocked rows nothing can place but the picture.
+    // Which unlocked rows nothing can place but the picture — and which the
+    // signal can still place after all.
     //
     // A row with no template match of its own is drawn where the locked
     // lines within ±kMedRad put it, and that is right while nothing moves.
     // It is wrong in one specific place: a run of unlocked rows with a
     // dropout inside it, where the lines before and after disagree about
     // the phase and the rows between belong to neither. JMH KiwiSDR
-    // Himawari loses ~1270 samples that way and its eight unlocked rows sit
+    // Himawari loses ~1270 samples that way and its eight unlocked rows sat
     // ~75 px from the rest of the chart — the band Sara found still there
-    // after session 11, and the audio through it is continuous at full
-    // amplitude, so the signal IS there to be drawn.
+    // after session 11, and again in the session-11b decodes, where the
+    // picture placement below had moved them by the best match within
+    // ±120 px: the true move is 574 px, so the search could not even reach
+    // it. Session 12's answer is to ask the SIGNAL first (the probe below);
+    // the picture placement remains only for the row the drop landed in,
+    // and for faded stations whose pulse scores under the noise at either
+    // level — the registered gap it always was.
     //
     // Only those rows qualify. Rows that merely fail to lock — the warp
     // fixture's first nine, which the window places correctly — are left
@@ -1366,6 +1372,14 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     // the body (measured; it is why the unrestricted version of this was
     // abandoned).
     std::vector<char> adrift(static_cast<size_t>(out_lines), 0);
+    // A row the phase move falls INSIDE of is stretched, not moved (§5b
+    // above), and the move across a dropout is routinely bigger than the
+    // quarter-line the split search normally allows (measured: 0.32 and
+    // 0.41 of a line on the two KiwiSDR dropouts of session 12). The cap
+    // exists to stop the search inventing breaks on noisy rows; a row next
+    // to a re-locked run has independent evidence the phase really moved,
+    // so it is searched over the whole line instead.
+    std::vector<char> torn(static_cast<size_t>(out_lines), 0);
     if (opt.autolock && res.per_line_sync) {
         int i = 0;
         while (i < out_lines) {
@@ -1381,8 +1395,55 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                                  "dbg: unlocked run rows %d-%d (%d), phase "
                                  "moved %.1f smp across it\n",
                                  i, j, j - i + 1, moved);
-                if (moved > kNonlinSec * fs)
-                    for (int m = i; m <= j; m++) adrift[m] = 1;
+                if (moved > kNonlinSec * fs) {
+                    // The run is bracketed by two known levels: the locked
+                    // lines before it (old phase) and after it (new). The
+                    // tracker never locked these rows because its narrow
+                    // window sat on the old prediction until the re-acquire
+                    // sweep fired — but the pulse is IN the audio (Sara,
+                    // session 12: KiwiSDR over the internet drops samples;
+                    // the signal either side of a drop is intact). So ask
+                    // each row directly, at both levels, ±20 samples around
+                    // the extrapolated positions. Measured on the three
+                    // library dropouts: the far side scores 0.66-0.96, the
+                    // near side <= 0.22, and exactly one row per run scores
+                    // nothing at either level — the row the drop landed in,
+                    // whose pulse it took. That row is left to the split
+                    // search and the picture; every other row is placed by
+                    // the signal, which no ±120 px picture match can do —
+                    // the moves are 574 and 743 PIXELS.
+                    bool any = false;
+                    for (int m = i; m <= j; m++) {
+                        const double l_old =
+                            starts[i - 1] + b * (m - (i - 1));
+                        const double l_new =
+                            starts[j + 1] + b * (m - (j + 1));
+                        double so, sn;
+                        const double po = best_sync(video, l_old - 20,
+                                                    l_old + 20, pulse, &so);
+                        const double pn = best_sync(video, l_new - 20,
+                                                    l_new + 20, pulse, &sn);
+                        if (std::getenv("NOVA_DEBUG_SEAMS"))
+                            std::fprintf(stderr,
+                                         "dbg: run row %d: old %.2f  new "
+                                         "%.2f\n", m, so, sn);
+                        if (sn >= lock && so < lock - 0.15) {
+                            starts[m] = pn;
+                            unlocked[m] = 0;
+                            res.relocked_lines++;
+                            any = true;
+                        } else if (so >= lock && sn < lock - 0.15) {
+                            starts[m] = po;
+                            unlocked[m] = 0;
+                            res.relocked_lines++;
+                            any = true;
+                        } else {
+                            adrift[m] = 1;
+                        }
+                    }
+                    if (any)
+                        for (int m = i - 1; m <= j; m++) torn[m] = 1;
+                }
             }
             i = j + 1;
         }
@@ -1404,8 +1465,9 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             }
         };
         double brk = b;  // no break: the pre-session-11b behaviour
+        const double kcap = torn[row] ? b : 0.25 * b;
         if (opt.autolock && row > 0 && std::fabs(k) >= kIntraMin &&
-            std::fabs(k) < 0.25 * b) {
+            std::fabs(k) < kcap) {
             const uint8_t* above =
                 &img.px[static_cast<size_t>(row - 1) * width];
             auto cost = [&](double p) {
@@ -1454,7 +1516,11 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         // window already placed is the unsolved part, and it is the same
         // problem the white-only half of M2b has to solve.
         double draw0 = starts[row];
-        if (adrift[row] && row > 0) {
+        // A torn row that was just split is placed by the split, in two
+        // pieces; a whole-row offset on top of it would drag both halves
+        // off together, so the picture placement stays out of it.
+        if (adrift[row] && row > 0 &&
+            !(torn[row] && std::fabs(k) >= kIntraMin)) {
             // fldigi computes this correlation per line and keeps only the
             // mode of a histogram of them (docs/00, session 11); here it is
             // kept per line, and asked only where nothing else can answer.
@@ -1505,10 +1571,11 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         std::fprintf(stderr,
                      "dbg: place rms=%.2f px max=%.1f px over %d locked "
                      "drawn lines; %d seam(s), largest %.1f px; %d intra-line "
-                     "break(s); %d row(s) placed by the picture\n",
+                     "break(s); %d row(s) re-locked past a dropout; %d row(s) "
+                     "placed by the picture\n",
                      res.place_rms_px, res.place_max_px, place_n, res.seams,
                      res.max_seam_px, res.intra_line_breaks,
-                     res.picture_placed);
+                     res.relocked_lines, res.picture_placed);
 
     res.img = std::move(img);
     res.lines = out_lines;

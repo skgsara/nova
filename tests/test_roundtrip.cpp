@@ -419,6 +419,55 @@ int main() {
         check(stp.timebase == nova::Timebase::kSteps,
               "...while still reporting that the recording steps");
 
+        // The 60 lpm form of the same fault, with JSC1's signature: ~17
+        // samples every ~3 lines (313 per 1000 measured on the recording).
+        // Session 12 exists because JSC1 and JSC5 kept reading 5 px of
+        // row-rigidity after session 11b while the four 120 lpm files went
+        // to 1, and "60 lpm" was a suspect, not a measurement. Measured
+        // here against ground truth: at one step per three lines the steps
+        // are too dense to separate (the ±kSegHalf windows straddle steps
+        // on both sides, so change points mostly do not fire), the rows are
+        // drawn on the fitted ramp to 1.1 px rms / 3.2 px worst, and the
+        // rigidity statistic reads the step SIZE itself — a correctly drawn
+        // picture of this recording genuinely has rows whose two ends
+        // disagree, and 17 samples is 3.8 px at 60 lpm. The library decode
+        // reads the same 5.0 px this provably-good decode reads, so JSC1
+        // and JSC5 are as good as the signal allows. What is pinned is the
+        // placement, not the rigidity: the rigidity number at 60 lpm is a
+        // property of the statistic, not of the decoder.
+        {
+            nova::GenOptions g6;
+            g6.lpm = 60;
+            nova::Image c6 = nova::gen_test_pattern(1810, kLines);
+            const std::vector<float> clean6 =
+                nova::gen_fax_signal(c6, kLines, g6);
+            const size_t line6 =
+                static_cast<size_t>(g6.fs * 60.0 / g6.lpm);
+            constexpr int kIns6 = 17, kEvery6 = 3;
+            std::vector<float> stp6;
+            stp6.reserve(clean6.size() +
+                         clean6.size() / line6 / kEvery6 * kIns6);
+            for (size_t i = 0; i < clean6.size(); i++) {
+                stp6.push_back(clean6[i]);
+                if (i % (line6 * kEvery6) == line6 / 2)
+                    for (int q = 0; q < kIns6; q++) stp6.push_back(clean6[i]);
+            }
+            std::vector<float> v6 =
+                nova::fm_demod(stp6, g6.fs, 1900.0, g6.deviation);
+            const nova::DecodeResult s6 = nova::decode_fax(v6, g6.fs, d);
+            const double sd6 = edge_stdev(crop_rows(s6.img, 40, kLines));
+            std::printf("  60 lpm, JSC1's step density: place %.2f px, bar "
+                        "stdev %.2f px (%d seams)\n",
+                        s6.place_rms_px, sd6, s6.seams);
+            check(s6.place_rms_px < 1.5,
+                  "dense 60 lpm steps are still placed where the signal is");
+            // Not < 1.0 like the 120 lpm case: the ramp residual IS half a
+            // step (17 samples = 3.8 px peak at 60 lpm), so the bar edge
+            // wobbles ~1.2 px around straight. 1.24 measured; pinned with
+            // headroom at 1.5, which an actual slant would blow through.
+            check(sd6 < 1.5, "...and the picture is drawn straight");
+        }
+
         // The false positive that matters. A clock error IS a linear
         // timebase, and it moves the phasing edge by 1 sample per line at
         // 250 ppm — 30 samples across the interval, three times the

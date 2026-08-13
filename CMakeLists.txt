@@ -99,15 +99,20 @@ add_test(NAME fixture_picture_head COMMAND nova-test-fixture
 # recording's phase moves ~1270 samples in the middle of it, and the eight
 # lines that straddle the move carry no sync lock — so the ±8-line window
 # places them where the lines BEFORE the move are, ~75 px from the rest of
-# the chart. Sara found that band still there after session 11. Nothing the
-# decoder reports about itself sees it (place rms 0.60 px either way) and
-# neither does the dead-sector edge, because those rows have no clean edge
-# to measure: only the picture does, by asking what each row matches.
-# 2 rows out of place before, 1 after — the one that remains is the seam
-# itself, where the phase genuinely moved. The check lives ONLY here: it
-# asks what each row matches, and a resolution grating matches its
-# neighbour at several shifts by construction (the JMH test chart reads 23
-# on a picture with nothing wrong with it).
+# the chart. Sara found that band still there after session 11, and again
+# after session 11b: its picture placement searches ±120 px and the true
+# move is 574, so the band stayed torn. Session 12 re-locks the rows on the
+# SIGNAL — the sync pulse is in the audio at the far level, scores 0.94-0.96
+# there against <= 0.22 at the near one — and splits the one row the drop
+# landed inside. Nothing the decoder reports about itself sees any of this
+# (place rms 0.60 px either way) and neither does the dead-sector edge,
+# because those rows have no clean edge to measure: only the picture does,
+# by asking what each row matches. 2 rows out of place before 11b, 1 after
+# and still 1 after session 12 — the one that remains is the row the drop
+# destroyed, whose content is genuinely not in the recording. The check
+# lives ONLY here: it asks what each row matches, and a resolution grating
+# matches its neighbour at several shifts by construction (the JMH test
+# chart reads 23 on a picture with nothing wrong with it).
 add_test(NAME fixture_dropout COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav 120 230 245 -130 -40 0.9
   --expect-rows-in-place 1)

@@ -75,7 +75,7 @@ register are milestone entries, not intentions (SOP P1.5).
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
-## M2b — timebase CORRECTION, not just detection  [DONE 2026-08-12, sessions 11 + 11b]
+## M2b — timebase CORRECTION, not just detection  [DONE 2026-08-12, sessions 11 + 11b; dropout bands + 60 lpm verdict session 12]
 
 Sara reviewed all 20 decoded charts by eye and every complaint she made was
 the same axis — where each line starts, horizontally. Six recordings "zig
@@ -157,15 +157,39 @@ capture chain looks like, and the decoder reports the condition
 Reopen only if a bounded form is found — the shape it would have to take is
 in SESSION-LOG session 11b's next-step note.
 
+Session 12, after Sara's review of the 11b decodes ("losing sync in the
+middle", with screenshots, on JMH KiwiSDR Himawari and test chart):
+- **Dropout runs are re-locked on the SIGNAL, not the picture.** Sara
+  recorded both via KiwiSDR, where an internet stall drops samples
+  mid-recording (1269 and 1642 samples on those two). The 11b picture
+  placement searches ±120 px and the moves are 574/743 px — it could not
+  even reach the right answer. But the run is bracketed by two known
+  levels, and the sync pulse is in the audio at the far one: probing each
+  row ±20 samples around each level, the far side scores 0.66–0.96 and the
+  near side ≤ 0.22 on all five library dropouts, and exactly one row per
+  run scores nothing at either level — the row the drop landed in, which
+  is then split over the whole line (the usual quarter-line cap exists to
+  stop the search inventing breaks; next to a re-locked run the move is
+  independently evidenced). Also fires on HDSDR (40 rows, 5 drops of ~163
+  samples: strip AND text both read now, where 11b's soft-lock follow tore
+  the text — the probe needs ≥ 0.60 with the loser < 0.45, so the mid-way
+  0.40–0.50 measurements that misled 11b decide nothing) and on JSC4 (8
+  rows; the doubled, ghosted contact line is a single crisp row now).
+- **JSC1/JSC5's 5 px rigidity is the statistic, not the decoder.** A
+  ground-truth synthetic at 60 lpm with JSC1's signature (17 samples
+  every 3 lines) reads the same p90 = 5.0 px while placing rows to
+  1.1 rms / 3.2 worst and matching its own clean decode at MAD 2.5/255;
+  the 120 lpm control reads 1.0. At one step per three lines a correctly
+  drawn picture genuinely has rows whose two ends disagree, and 17
+  samples is 3.8 px at 60 lpm. Pinned in roundtrip [10] (placement
+  asserted; rigidity deliberately not — at 60 lpm it measures the
+  recording, not the decode).
+
 STILL OPEN, and small:
-- JSC1 and JSC5 rigidity did not improve (5.0 px, unchanged) while JSC2,
-  JSC3, JSC4 and JSC6 went to 1.0-4.0. Both are 60 lpm, which is the
-  obvious suspect and is not yet a measurement.
-- HDSDR's right-hand strip is banded where the recording drops samples and
-  its text is not. The two want different answers from the same lines
-  (session 11b measured both); nothing is claimed to be right there.
 - No screamer for a faded pulse station whose steps are below its own
-  measurement noise.
+  measurement noise — the probe needs a pulse that scores over the lock
+  threshold at the far level; below that, rows fall back to the ±120 px
+  picture placement, which cannot reach a large move.
 
 ## M3 — full auto sequencing  [done except manual override, which needs M4]
 

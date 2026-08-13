@@ -7,6 +7,95 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 12: the dropout rows were findable all along — ask the signal, not the picture
+
+Agent: Kimi Code CLI (Kimi k2). Code changed: `core/fax.cpp`, `core/fax.hpp`,
+`cli/nova-decode.cpp`, `tests/test_roundtrip.cpp`, `CMakeLists.txt` comments.
+
+**Task as accepted:** Sara, on the session-11b decodes, with screenshots:
+"JMH KiwiSDR Himawari 13986.6 and test chart, they're losing sync in the
+middle and the chart misaligns in the middle" — top priority — "then JSC1
+and JSC5". And the mechanism, from her: "I recorded those by using KiwiSDR,
+so audio drop caused by internet could always be a possibility."
+
+**Root cause, measured.** A KiwiSDR stall drops samples mid-recording:
+1269 on Himawari (drawn row 752), 1642 and 3590 on test chart (drawn rows
+633 and 651 — the second reads +410 samples mod line). Each drop unlocks
+exactly 8 rows — the re-acquisition latency, `kReacqMisses` — and session
+11b placed those rows by matching the row above within **±120 px**, when
+the true moves are **574 and 743 px**. It could not even reach the right
+answer; the torn bands in Sara's screenshots are the spurious minima it
+found instead. The row-splitting pass could not help either: its
+quarter-line cap (1000 samples) sits below both moves.
+
+**The fix: probe the pulse at both levels.** A dropout run is bracketed by
+two known levels — the locked lines before it and after it. The tracker
+never locked the rows between because its narrow window sat on the old
+prediction until the re-acquire sweep fired, but the pulse is IN the audio:
+each row, asked ±20 samples around each extrapolated level, answers
+cleanly. Measured on all five library dropouts (Himawari, test chart ×2,
+HDSDR ×5 runs, JSC4): the far side scores **0.66–0.96**, the near side
+**≤ 0.22** — and exactly one row per run scores nothing at either level:
+the row the drop landed in, whose pulse it took. Rows that answer are drawn
+where the signal puts them; the one that does not is split over the whole
+line (the quarter-line cap is relaxed only next to a re-locked run, where
+the move is independently evidenced); the ±120 px picture placement remains
+as the fallback for rows the signal cannot place — a faded pulse station,
+which is the registered gap it always was.
+
+**Pictures.** Himawari's band: coastline and graticule flow through,
+7 rows re-locked + 1 split. Test chart: the checkerboard border is
+continuous again, 15 re-locked + 4 splits. JSC4's doubled, ghosted contact
+line is a single crisp "【TEL】03−6252−8413 【FAX】03−6252−8805". HDSDR is
+the interesting one: session 11b followed its ~0.40–0.50 soft locks and
+fixed the strip but tore the text, and reverted. The probe decides nothing
+on those scores — it needs ≥ 0.60 with the loser < 0.45 — and finds the
+real far-side pulses at 0.8–0.93 against ~0.0: 40 rows re-locked, text
+intact, and the right-edge strip p99 improved 13 → 7 px. The 11b conflict
+("the strip and the text want different answers") was an artifact of
+measuring at positions neither level vouched for.
+
+**Screamers.** 22/22 pass. `fixture_dropout`'s `--expect-rows-in-place 1`
+is at its floor: the 1 remaining row is the one the drop destroyed, and its
+content is not in the recording — no decoder can draw it.
+
+**JSC1 and JSC5: the decoder was never the thing that failed to move.**
+Their 5.0 px rigidity survived session 11b while the 120 lpm files went to
+1.0, and "60 lpm" was a suspect, not a measurement. Now measured, against
+ground truth: a synthetic 60 lpm signal with JSC1's signature (17 samples
+every 3 lines, mid-line, random positions) decodes to place 1.1 px rms /
+3.2 worst and matches its own clean decode at MAD 2.5/255 — and reads
+rigidity p90 = **5.0 px, the same number the library recordings read**,
+while the 120 lpm control reads 1.0. At one step per three lines the steps
+are too dense for change points to separate, the rows ride the fitted ramp
+to within half a step, and the rigidity statistic reads the step SIZE:
+a correctly drawn picture of such a recording genuinely has rows whose two
+ends disagree. Pinned in `roundtrip [10]` as the 60 lpm stepped case —
+placement asserted, rigidity deliberately not asserted at 60 lpm. JSC1 and
+JSC5 are as good as the signal allows, and M2b's last measured gap closes
+by explanation.
+
+**Contradictions found.** Session 11b's log claims "JSC6 4.0 → 1.0" for
+rigidity; the session-11b decode of JSC6 reads 4.0 today under both the C++
+statistic and a reimplementation, and the current decode also reads 4.0 —
+so no session-12 regression, but the 1.0 was never true of the full
+recording (it was likely measured on a window). FAXSignal reads rigidity
+8.0 px with place rms 0.18 — the statistic's edge finder has content
+sensitivity (it locks onto other light runs); treat the number as a
+screening tool, not a verdict, on new recordings.
+
+**Next step:** Sara reviews `recordings/library-8k/decodes-s12/` (the four
+changed pictures: Himawari, test chart, HDSDR, JSC4) — the acceptance test,
+per session 11c's rule, is the operator looking at the pictures. Then M4
+(GUI + live audio), whose inherited costs are unchanged: incremental
+`detect_tones`, the first-minute timebase verdict, and session 11's
+assembly needing the next line's correction before it can split a row —
+now joined by this session's probe, which needs the run BRACKETED before it
+can re-lock, i.e. a live decoder must wait for the far side of a dropout
+(or draw provisionally and redraw, which was already the plan).
+
+---
+
 ## 2026-08-12 — Session 11c: M2b closes on the operator's judgement, not on a number
 
 Agent: Claude Opus 5. Bookkeeping entry; no code changed.

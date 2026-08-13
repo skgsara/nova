@@ -112,6 +112,14 @@ struct DecodeResult {
     // by matching the row above them (session 11b). Not the same as an
     // unlocked row: most of those are placed correctly by their neighbours.
     int picture_placed = 0;
+    // Rows inside a dropout whose line start the sync template still finds
+    // at the FAR side of the phase move — the tracker's narrow window never
+    // looked there, but the run is bracketed by two known levels and a
+    // ±20-sample probe at each decides it (session 12: far side 0.66-0.96,
+    // near side <= 0.22 on the three library dropouts). Placed by the
+    // signal, not the picture; the one row the drop landed inside scores
+    // nothing at either level and is left to the split search instead.
+    int relocked_lines = 0;
     DeadSector dead_sector = DeadSector::kBlackPulse;
     double dead_consistency = 0.0;  // fraction of lines agreeing at anchor
     // False when the recording carries no per-line sync feature at all —

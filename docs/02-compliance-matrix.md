@@ -71,7 +71,11 @@ Notes:
   stability measurement when it is not one, and since session 11 it also
   CORRECTS the picture wherever the station sends a sync pulse: the drawn
   line starts are placed segment by segment rather than through a fixed
-  smoothing window, how straight they came out is reported per decode
+  smoothing window, rows a mid-line insertion stretched are drawn in two
+  pieces, and rows a stream dropout unlocked are re-locked by probing the
+  sync pulse at the level the lines after the drop vouch for (session 12 —
+  far side scores 0.66–0.96 against ≤ 0.22 at the near one, on all five
+  library dropouts). How straight they came out is reported per decode
   (`place_rms_px`), and six fixtures assert it against the finished pixels
   (`--expect-straight-strip`). On a station with no sync pulse nothing can
   be corrected per line and the paper still moves (M2b, open). Compliance is

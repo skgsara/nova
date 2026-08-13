@@ -290,16 +290,40 @@ library, so that registered gap stands.
      (Theil-Sen) and not a level;
   3. a single large move is a real skip in the capture chain, so it is
      followed within one line — a seam — rather than clamped into a
-     multi-line diagonal tear.
+     multi-line diagonal tear;
+  4. a move can land INSIDE a line, and then the row is stretched, not
+     moved (session 11b): the two ends of a JSC row disagreed by 5–10 px of
+     1810 against 1 px on a linear recording. The move's size is the
+     difference between this line's correction and the next; its position
+     is where splitting the row there agrees best with the row above —
+     "no break" is a candidate, so the search cannot choose worse;
+  5. a KiwiSDR stall drops samples mid-recording and unlocks a run of
+     rows (session 12: 1269 and 1642 samples on the two JMH KiwiSDR
+     recordings, 8 rows each — the re-acquisition latency). The run is
+     bracketed by two known levels and the pulse is still in the audio at
+     the far one: each row, probed ±20 samples at both levels, scores
+     0.66–0.96 at the far level against ≤ 0.22 at the near one on all five
+     library dropouts, and is drawn where the signal puts it. The one row
+     per run that scores nothing at either level is the row the drop
+     landed in; it is split over the whole line (the quarter-line cap is
+     for unevidenced rows). Picture-correlation placement survives only as
+     the fallback for rows whose pulse scores under the noise at both
+     levels — a faded station, the registered gap.
   Ground truth, same 21-samples-every-11-lines signal: **2.19 px → 0.00**,
   and 0.28 px of line-start error when the insertions land on the line
-  boundary instead of mid-line. Whole library: 6 recordings measurably
-  straighter, 14 unchanged, 0 worse. On a white-only station, where nothing
-  tracks, the same signal is still only CONVICTED (by the phasing
-  statistic) and not corrected — the case no library recording covers, and
-  the open half of M2b.
+  boundary instead of mid-line. At 60 lpm with JSC1's step density (17
+  samples every 3 lines) the rows ride the fitted ramp to 1.1 px rms —
+  and the row-rigidity statistic still reads 5.0 px, because at one step
+  per three lines a correctly drawn picture genuinely has rows whose two
+  ends disagree (17 samples is 3.8 px at 60 lpm). The library's two
+  60 lpm recordings read the same 5.0; their rigidity number is the
+  recording's step size, not a decoder defect. Whole library: 6 recordings
+  measurably straighter, 14 unchanged, 0 worse. On a white-only station,
+  where nothing tracks, the same signal is still only CONVICTED (by the
+  phasing statistic) and not corrected — the case no library recording
+  covers, and the open half of M2b.
   [`roundtrip [10]`, `fixture_timebase_steps`, `fixture_warp`, `fixture`,
-  `fixture_60lpm`, `fixture_anchor_delta_xsg`]
+  `fixture_60lpm`, `fixture_anchor_delta_xsg`, `fixture_dropout`]
 - **A pulse station keeps its tracked anchor; the phasing anchor is measured
   there but never preferred.** Argued in session 7 on the grounds that a
   tracked reference beats a fixed one, tested in session 8. JSC2 is the case
