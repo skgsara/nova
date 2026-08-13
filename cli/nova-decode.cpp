@@ -79,6 +79,19 @@ int main(int argc, char** argv) {
             r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
                                                            : "white",
             r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");
+        // How straight the drawn line starts came out, which is the number
+        // an operator can check against the picture in front of them: the
+        // dead sector's edge should be a straight vertical line, and this is
+        // how far from straight it is. Only printed where per-line sync
+        // exists, because nothing else can measure it (session 11).
+        if (r.per_line_sync) {
+            std::printf("  place   %.2f px rms, worst %.1f px", r.place_rms_px,
+                        r.place_max_px);
+            if (r.seams)
+                std::printf("; %d seam(s) followed, largest %.1f px",
+                            r.seams, r.max_seam_px);
+            std::printf("\n");
+        }
         if (r.phasing_found)
             std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp vs "
                         "image  (%s)\n",
@@ -106,10 +119,13 @@ int main(int argc, char** argv) {
                             "recording's clock PLUS its insertion rate, and "
                             "the anchor delta\n"
                             "           is not comparable with other "
-                            "recordings. Where lines lock the picture still "
-                            "comes out, with\n"
-                            "           a few px of wobble at each step "
-                            "(3.3 px of 1810, measured synthetically).\n");
+                            "recordings. Where lines lock, the steps are "
+                            "CORRECTED as well as\n"
+                            "           counted (session 11): the picture is "
+                            "drawn segment by segment, and `place` below "
+                            "says how\n"
+                            "           far from the signal the drawn lines "
+                            "ended up.\n");
                 break;
             case nova::Timebase::kLinear:
                 // Only the evidence that exists. A white-only station has

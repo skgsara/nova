@@ -50,7 +50,23 @@ constexpr double kReacqStep = 4.0;
 // Used twice: by the assembly, to correct the line it draws, and by the
 // timebase test, which is asking whether that same correction moves in
 // steps. One constant so the two cannot drift apart.
+//
+// Session 11: they are no longer identical, and the difference is the
+// point. The test still smooths a flat ±kMedRad window, because it is a
+// calibrated instrument (session 9's library thresholds were measured
+// through it and a change to it re-opens every one of them). The ASSEMBLY
+// now truncates the same window at a change point, because a smoother
+// cannot be a corrector: it lags every real move by up to kMedRad lines.
+// Measured on the residuals the decoder itself produced: on JSC1 the flat
+// window leaves 4.21 px of line-start error against 1.89 px truncated,
+// and Sara's review of the library found exactly those recordings — "the
+// black strip, it's actually zig zagging".
 constexpr int kMedRad = 8;
+// How many locked lines on each side have to agree before the assembly
+// believes the line start really moved. Four: enough that one bad template
+// match cannot open a seam (the median of four rejects it), few enough that
+// JSC's steps every ~11 lines are still resolved as separate moves.
+constexpr int kSegHalf = 4;
 // Timebase linearity [§4d]. A step is a persistent move of the smoothed
 // sync residual bigger than kStepSec; a recording is called non-linear
 // above kStepRateLimit such steps per 1000 drawn lines, or when the
@@ -543,7 +559,6 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
 
     const double pulse = kPulseFrac * period0;
     const double dead = kDeadFrac * period0;
-    const double search = opt.search_frac * period0;
 
     int n_lines = static_cast<int>(avail / period0);
     if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
@@ -754,7 +769,7 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         // must exceed the phasing<->image regime offset (~half a dead
         // sector = 0.0225 lines) or the tracker falls off the grid at the
         // phasing->image boundary and coasts to EOF
-        const double narrow = 0.03 * period0;
+        const double narrow = opt.search_frac * period0;
         // the template reads a dead sector's worth either side of p
         const double margin = 2.0 * dead + 2.0;
         const double pmin = margin;
@@ -1098,7 +1113,63 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                          res.phasing_nonlinearity);
     }
 
-    // --- 5. assembly: fit + local-median residual --------------------------
+    // --- 4e. change points: where the line start REALLY moves --------------
+    // A smoother and a corrector want opposite things from the same window.
+    // The ±kMedRad median exists to reject a bad template match on one line,
+    // and it does; but where the line start genuinely moves — a sample-level
+    // skip in the capture chain — it also averages that move across up to
+    // 17 lines, so the picture is drawn in the wrong place on either side of
+    // it. On a recording that steps every few lines the correction is never
+    // in the right place at all, which is what Sara's review of the whole
+    // library found by eye before any of this was measured: "the black
+    // strip, it's actually zig zagging, not solid at all" on all six JSC
+    // recordings, and nothing of the sort on FAXSignal or XSG.
+    //
+    // The fix is to tell the two apart. A MOVE is a change of level that the
+    // locked lines on both sides agree about; NOISE is not. So: compare the
+    // median of the kSegHalf locked lines before line l with the median of
+    // the kSegHalf from l on, and call l a change point when they disagree
+    // by more than kNonlinSec — the resolution the timebase test already
+    // claims, which is the same claim in a different domain (below that, a
+    // move cannot be told from the measurement).
+    //
+    // Prior art has none of this, and the way it does not is the reason it
+    // is written here rather than reused (docs/00, session 11): fldigi
+    // measures a per-line correlation shift and keeps only the MODE of a
+    // histogram of them (`correlation_shift`), then draws every line at
+    // `m_img_width * frac(m_img_sample / m_smpl_per_lin)` — sample count
+    // alone. JWX rotates each line by one operator-typed constant times the
+    // line number (`clock_correct_line`). weatherfax_pi and KiwiSDR take one
+    // median of the phasing positions and skip that many samples ONCE
+    // (`phasingSkipData` → `m_skip`), then never look again. All four
+    // correct a CLOCK; none corrects a timebase, and the one that already
+    // computes the per-line number throws it away.
+    std::vector<char> cpoint(n_lines, 0);
+    if (opt.autolock) {
+        std::vector<int> lk;
+        for (int l = 0; l < n_lines; l++)
+            if (sstr[l] >= lock) lk.push_back(l);
+        const double move_min = kNonlinSec * fs;
+        // Every line the comparison fires on is a change point, including
+        // runs of adjacent ones. Thinning each run to its largest member —
+        // "one skip is one line" — is the obvious tidy-up and it is WRONG,
+        // measured both ways: it merges the genuinely separate steps of a
+        // recording that inserts samples every few lines, and it made every
+        // number worse (ground-truth synthetic 2.05 -> 2.39 px, its linear
+        // control 0.19 -> 1.71, the JSC2 fixture's drawn edge p90 2.0 -> 5.0
+        // px). Left un-thinned deliberately.
+        for (size_t j = kSegHalf; j + kSegHalf <= lk.size(); j++) {
+            std::vector<double> pre, post;
+            for (size_t k = j - kSegHalf; k < j; k++)
+                pre.push_back(spos[lk[k]] - (a + b * lk[k]));
+            for (size_t k = j; k < j + kSegHalf; k++)
+                post.push_back(spos[lk[k]] - (a + b * lk[k]));
+            if (std::fabs(median(post) - median(pre)) > move_min)
+                cpoint[lk[j]] = 1;
+        }
+    }
+
+    // --- 5. assembly: fit + segment-median residual ------------------------
     // The template anchor is the sync-pulse start in image lines; in the
     // phasing region the best template match sits ~half a dead sector
     // earlier (phasing is white-wedge-then-black, the mirror image).
@@ -1115,19 +1186,92 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
     const double corr_clamp = 0.03 * b;
     double prev_corr = 0.0;
     bool have_corr = false;
+    double place_sq = 0.0;
+    int place_n = 0;
     for (int l = line_lo; l < line_hi; l++) {
         double line_start = a + b * l;  // sync-anchor position
         if (opt.autolock) {
+            // The window stops at a change point on either side, so the
+            // median never mixes two levels: within one segment it is the
+            // same noise-rejecting median as before, and at a seam it
+            // switches over in a single line instead of ramping across it.
+            // ...and at the edges of the drawn picture, because a phasing
+            // line and an image line do not anchor the same feature: the
+            // wedge is the mirror of the pulse, ~half a dead sector away
+            // [WMO §5.2.3.1]. Reaching back into the phasing region for a
+            // median drew the first lines of the picture at the control
+            // signal's phase and then jumped — 88.6 px into XSG FYCI, 76.7
+            // into `test chart`, at drawn lines 8 and 8.
+            int wlo = std::max(line_lo, l - kMedRad);
+            for (int k = l; k > wlo; k--)
+                if (cpoint[k]) { wlo = k; break; }
+            int whi = std::min(line_hi - 1, l + kMedRad);
+            for (int k = l + 1; k <= whi; k++)
+                if (cpoint[k]) { whi = k - 1; break; }
+            // No |residual| gate here. Until session 11 a residual further
+            // than 2*search from the FITTED line was dropped as bogus, which
+            // is a statement about the fit, not about the line: JMH KiwiSDR
+            // Himawari loses ~1270 samples mid-recording, so its first 720
+            // drawn lines sit 1100-1390 samples off the line fitted through
+            // the other 1200 — every one of them thrown away, corr frozen at
+            // 0, and the whole top of the chart drawn half a page across.
+            // That is the "sync lose at the top part" in Sara's review. What
+            // makes a residual bogus is disagreeing with its NEIGHBOURS, and
+            // the segment median already rejects that.
             std::vector<double> r;
-            for (int k = std::max(0, l - kMedRad);
-                 k <= std::min(n_lines - 1, l + kMedRad); k++) {
-                const double rk = spos[k] - (a + b * k);
-                if (sstr[k] >= lock && std::fabs(rk) < 2.0 * search)
-                    r.push_back(rk);
+            std::vector<int> rl;
+            for (int k = wlo; k <= whi; k++)
+                if (sstr[k] >= lock) {
+                    r.push_back(spos[k] - (a + b * k));
+                    rl.push_back(k);
+                }
+            // A line with nothing locked near it coasts: it keeps the level,
+            // it does not SET one. Until session 11 coasting counted as a
+            // level, so a picture whose first lines are unlocked started
+            // from a correction of zero and the clamp then walked it up to
+            // the truth at 0.03 lines each — on the warp fixture, whose
+            // first nine lines do not lock, the first two DRAWN lines came
+            // out 80.7 and 26.3 px from where the signal put them and ten
+            // lines were clamped. The clamp is there to stop a bad median,
+            // not to ration the first real measurement.
+            const bool measured = !r.empty();
+            // Inside a segment the residual is not flat: whatever the
+            // period fit could not absorb walks it, and on a recording that
+            // inserts samples the fit absorbs the MEAN insertion rate, so
+            // between two steps the residual ramps back down at that rate.
+            // On the ground-truth synthetic that ramp is 1.9 samples a line
+            // over an 11-line segment — 19 samples of tilt, twice the step
+            // it sits between — and a median through it is the average of a
+            // slope, wrong at both ends by half of it. So: a robust LINE
+            // through the segment (Theil-Sen, median of pairwise slopes,
+            // which a bad lock cannot lever) evaluated at this line, and the
+            // median only where there are too few points to see a slope.
+            double corr = have_corr ? prev_corr : 0.0;
+            if (measured) {
+                corr = median(r);
+                if (r.size() >= 4) {
+                    std::vector<double> slopes;
+                    slopes.reserve(r.size() * (r.size() - 1) / 2);
+                    for (size_t p = 0; p < r.size(); p++)
+                        for (size_t q = p + 1; q < r.size(); q++)
+                            if (rl[q] != rl[p])
+                                slopes.push_back((r[q] - r[p]) /
+                                                 (rl[q] - rl[p]));
+                    if (!slopes.empty()) {
+                        const double sl = median(slopes);
+                        std::vector<double> icept;
+                        icept.reserve(r.size());
+                        for (size_t p = 0; p < r.size(); p++)
+                            icept.push_back(r[p] - sl * (rl[p] - l));
+                        corr = median(icept);
+                    }
+                }
             }
-            double corr = r.empty() ? (have_corr ? prev_corr : 0.0)
-                                    : median(r);
-            if (have_corr) {
+            // A seam is a move the lines on both sides vouched for, so it
+            // goes through whole; the clamp still guards everything else,
+            // where a large single-line move means the median was fooled.
+            const bool seam = cpoint[l] != 0;
+            if (have_corr && measured && !seam) {
                 if (corr > prev_corr + corr_clamp) {
                     corr = prev_corr + corr_clamp;
                     res.clamped_corrections++;
@@ -1138,10 +1282,34 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
             }
             const double step_px =
                 have_corr ? std::fabs(corr - prev_corr) / b * width : 0.0;
-            res.max_step_px = std::max(res.max_step_px, step_px);
+            if (seam && have_corr) {
+                res.seams++;
+                res.max_seam_px = std::max(res.max_seam_px, step_px);
+                if (std::getenv("NOVA_DEBUG_SEAMS"))
+                    std::fprintf(stderr,
+                                 "dbg: seam line %d (drawn %d): %+.1f smp "
+                                 "= %.1f px\n",
+                                 l, l - line_lo, corr - prev_corr, step_px);
+            } else {
+                res.max_step_px = std::max(res.max_step_px, step_px);
+            }
             prev_corr = corr;
-            have_corr = true;
+            if (measured) have_corr = true;
             line_start += corr;
+            // What the eye will see: how far this line is drawn from where
+            // the signal put it. Locked lines only — an unlocked line has no
+            // measurement to be judged against.
+            if (sstr[l] >= lock) {
+                const double err = (spos[l] - (a + b * l) - corr) / b * width;
+                place_sq += err * err;
+                place_n++;
+                res.place_max_px = std::max(res.place_max_px, std::fabs(err));
+                if (std::fabs(err) > 20.0 && std::getenv("NOVA_DEBUG_SEAMS"))
+                    std::fprintf(stderr,
+                                 "dbg: line %d (drawn %d) drawn %.1f px from "
+                                 "where the signal put it (sstr %.2f)\n",
+                                 l, l - line_lo, err, sstr[l]);
+            }
         }
 
         // the whole line, sync pulse to sync pulse — no cropping
@@ -1154,6 +1322,15 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
                 static_cast<uint8_t>(std::lround(v * 255.0f));
         }
     }
+
+    if (place_n > 0)
+        res.place_rms_px = std::sqrt(place_sq / place_n);
+    if (std::getenv("NOVA_DEBUG"))
+        std::fprintf(stderr,
+                     "dbg: place rms=%.2f px max=%.1f px over %d locked "
+                     "drawn lines; %d seam(s), largest %.1f px\n",
+                     res.place_rms_px, res.place_max_px, place_n, res.seams,
+                     res.max_seam_px);
 
     res.img = std::move(img);
     res.lines = out_lines;

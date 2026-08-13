@@ -62,6 +62,14 @@
 //     the only one in the library, and until session 8 no fixture covered
 //     that waveform's anchor at all. Both anchors exist on it, so it is one
 //     of the two two-anchor agreement screamers (--expect-anchor-delta).
+//   xsg-fyci-phasing-head-120s.wav — XSG (Shanghai) FYCI, 120..240 s: a
+//     phasing interval at 12-42 s into the cut and then the FIRST lines of
+//     the picture. Cut session 11 for the one defect that no number the
+//     decoder produces can see: the first drawn lines usually do not lock,
+//     so the place error reads 0.13 px whether they are drawn in the right
+//     place or 88.6 px away, and a single step does not move a 90th
+//     percentile. Only the picture shows it, which is why the check here
+//     compares the top of the picture against its own body.
 //   kyodo-news-jsc2-steps-120s.wav — JSC2, 200..320 s: the NON-LINEAR
 //     TIMEBASE case, and the only fixture that isolates the image-domain
 //     half of that test. Pure image (JSC2's phasing runs 8-38 s, this cut
@@ -80,14 +88,99 @@
 //                        [--expect-white-only] [--expect-phasing-anchor]
 //                        [--expect-anchor-delta <lo_smp> <hi_smp>]
 //                        [--expect-timebase linear|steps]
+//                        [--expect-straight-strip <max_px>]
 //        nova-test-fixture --expect-reject <path>
 #include "../core/demod.hpp"
 #include "../core/fax.hpp"
 #include "../core/wav.hpp"
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
+
+namespace {
+
+// How straight the dead sector's edge is in the DRAWN picture.
+//
+// The dead sector is a fixed-width band at the start of every line [WMO
+// §5.1.3.3], so the column where it ends is a straight vertical line in a
+// correctly assembled image — and a crooked one is the first thing an
+// operator sees. This walks the finished pixels and shares no code and no
+// number with the decoder, which is the point: every other check in this
+// suite asks the decoder how it thinks it did. Session 11 exists because
+// Sara reviewed the library by eye and found six recordings whose strip
+// "zig zags" while every decoder statistic on them read fine.
+//
+// Roughness, not position, and robust to a seam: the statistic is the 90th
+// percentile of the row-to-row MOVE of that edge. A slow rotation or a clock
+// walk moves it by a fraction of a pixel per row; one legitimate seam, where
+// the recording genuinely lost samples, is a single large move that the 90th
+// percentile ignores; a zig-zag moves it on every row, which is the
+// complaint. (Measured with deviation-from-a-local-median instead, three
+// clean recordings appear to REGRESS in session 11 purely because they
+// gained a correct one-line seam — the statistic has to know the difference.)
+// Same edge, read row by row. Split out because two different questions are
+// asked of it: how much it jitters, and whether the TOP of the picture sits
+// on the same page as the body.
+std::vector<double> strip_edges(const nova::Image& im) {
+    const int span = im.width < 250 ? im.width : 250;
+    const int run = 12;    // consecutive light pixels that end the strip
+    const int thr = 110;   // of 255; the strip is black, the gap is white
+    std::vector<double> e;
+    for (int y = 0; y < im.height; y++) {
+        int light = 0, edge = -1;
+        for (int x = 0; x < span; x++) {
+            const uint8_t v = im.px[static_cast<size_t>(y) * im.width + x];
+            light = (v > thr) ? light + 1 : 0;
+            if (light >= run) {
+                edge = x - run + 1;
+                break;
+            }
+        }
+        if (edge >= 0) e.push_back(edge);
+    }
+    return e;
+}
+
+double strip_edge_jitter(const nova::Image& im, int* used) {
+    const std::vector<double> e = strip_edges(im);
+    *used = static_cast<int>(e.size());
+    if (e.size() < 40) return -1.0;  // too few rows for a 90th percentile
+    std::vector<double> d;
+    d.reserve(e.size() - 1);
+    for (size_t i = 1; i < e.size(); i++)
+        d.push_back(std::fabs(e[i] - e[i - 1]));
+    std::sort(d.begin(), d.end());
+    return d[static_cast<size_t>(0.90 * (d.size() - 1))];
+}
+
+double median_of(std::vector<double> v) {
+    std::sort(v.begin(), v.end());
+    return v.empty() ? 0.0 : v[v.size() / 2];
+}
+
+// Does the top of the picture sit on the same page as the body?
+//
+// The first drawn lines are the ones whose smoothing window can still see
+// the control signal before them, where the sync template anchors half a
+// dead sector away [WMO §5.2.3.1] — and the first lines of a picture often
+// do not lock, so nothing in the decoder's own account of itself can catch
+// this: the place error is measured on locked lines and reads identically
+// either way, and one step does not move a 90th percentile. Only the
+// picture shows it. Measured on XSG FYCI with the window left unbounded:
+// eight lines at 88.6 px of 1810 from the rest of the chart.
+double strip_head_offset(const nova::Image& im) {
+    const std::vector<double> e = strip_edges(im);
+    if (e.size() < 48) return 0.0;  // nothing to compare a head against
+    std::vector<double> head(e.begin(), e.begin() + 8);
+    std::vector<double> body(e.begin() + 8, e.begin() + 40);
+    return std::fabs(median_of(head) - median_of(body));
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     int failures = 0;
@@ -122,6 +215,8 @@ int main(int argc, char** argv) {
     bool want_delta = false;
     double delta_lo = 0.0, delta_hi = 0.0;
     const char* want_timebase = nullptr;
+    bool want_strip = false;
+    double strip_max = 0.0;
     int want_phasing_lines = 0;
     bool want_window = false;
     double win_t0 = 0.0, win_t1 = 0.0;
@@ -146,6 +241,10 @@ int main(int argc, char** argv) {
                              "linear|steps|noisy\n");
                 return 2;
             }
+        } else if (!std::strcmp(argv[i], "--expect-straight-strip") &&
+                   i + 1 < argc) {
+            want_strip = true;
+            strip_max = std::atof(argv[++i]);
         } else if (!std::strcmp(argv[i], "--expect-phasing-lines") &&
                    i + 1 < argc) {
             want_phasing_lines = std::atoi(argv[++i]);
@@ -233,6 +332,35 @@ int main(int argc, char** argv) {
                           r.timebase != nova::Timebase::kUnknown,
                       "timebase verdict as expected");
             }
+        }
+
+        if (want_strip) {
+            int used = 0;
+            const double jit = strip_edge_jitter(r.img, &used);
+            std::printf("  dead-sector edge: row-to-row p90 %.1f px of %d "
+                        "over %d rows; decoder says place rms %.2f px, "
+                        "%d seam(s)\n",
+                        jit, r.img.width, used, r.place_rms_px, r.seams);
+            const double head = strip_head_offset(r.img);
+            std::printf("  top of the picture sits %.1f px from its body\n",
+                        head);
+            check(used >= r.lines / 2,
+                  "the strip is found on most rows at all");
+            check(jit >= 0.0 && jit <= strip_max,
+                  "dead-sector edge straight in the drawn picture");
+            // A quarter of a dead sector (4.5% of the line [WMO §5.1.3.3])
+            // is 20 px of 1810: below what an operator would call a
+            // misaligned top, and eight times under the 88.6 px that a
+            // smoothing window reaching into the phasing region produces.
+            check(head <= 20.0,
+                  "the picture's first lines are on the same page as the "
+                  "rest");
+            // Two measurements of one thing, sharing no code: the decoder's
+            // own place error is computed from sync residuals, this one from
+            // pixels. They should agree; if they ever stop, one of them is
+            // measuring something else and the picture is the authority.
+            check(r.place_rms_px <= strip_max,
+                  "...and the decoder's own account of it agrees");
         }
 
         if (want_window) {

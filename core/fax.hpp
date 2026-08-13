@@ -25,7 +25,12 @@ struct DecodeOptions {
     int ioc = 576;               // 576 or 288 (picture width)
     double start_sec = 0.0;      // skip this much of the input
     bool autolock = true;        // per-line dead-sector relock
-    double search_frac = 0.03;   // sync search window, fraction of line
+    // Per-line sync search window, fraction of a line. Must exceed the
+    // phasing<->image regime offset (~half a dead sector, 0.0225 lines) or
+    // the tracker falls off the grid at that boundary and coasts to EOF.
+    // Until session 11 this also gated which residuals the assembly would
+    // believe, which made it two settings in one; it is now only the window.
+    double search_frac = 0.03;
     int max_lines = 0;           // 0 = all available
     // Take the line-start phase from the phasing interval when the station
     // sends one and the image gives no per-line sync [WMO §5.2.3.4]. Off is
@@ -79,6 +84,25 @@ struct DecodeResult {
     int locked_lines = 0;
     int clamped_corrections = 0;
     double max_step_px = 0.0;    // largest single-line correction
+    // --- how straight the drawn line starts actually are (session 11) -----
+    // Every line is drawn at `a + b*l + corr(l)`; the line the SIGNAL sends
+    // starts at `a + b*l + resid(l)`. What is left over, `resid - corr`, is
+    // not an internal diagnostic — it is the crookedness of the dead-sector
+    // edge in the finished picture, which is the first thing an operator
+    // sees. RMS over the drawn locked lines, in pixels of the image width.
+    // Zero on a white-only station: there is no per-line measurement to be
+    // right or wrong about (`per_line_sync` says which case this is).
+    double place_rms_px = 0.0;
+    double place_max_px = 0.0;
+    // Lines where the line start moved PERSISTENTLY — a sample-level skip in
+    // the capture chain, agreed by the lines on both sides — and the
+    // assembly followed it within one line instead of ramping across the
+    // smoothing window. A seam of one line is the honest picture of a
+    // recording with samples missing; a ramp is a tear several lines deep.
+    // Counted separately from `max_step_px`, which keeps its old meaning of
+    // how far a NON-seam correction wandered in one line.
+    int seams = 0;
+    double max_seam_px = 0.0;
     DeadSector dead_sector = DeadSector::kBlackPulse;
     double dead_consistency = 0.0;  // fraction of lines agreeing at anchor
     // False when the recording carries no per-line sync feature at all —
@@ -124,8 +148,10 @@ struct DecodeResult {
     // recording it is the clock plus the mean insertion rate, and
     // `phasing_anchor_delta` is the porch plus whatever the timebase did
     // between the two measurement epochs — neither is comparable with the
-    // same number from a clean file. The picture is still drawn correctly
-    // wherever per-line sync exists: this reports, it does not repair.
+    // same number from a clean file. Session 11: where per-line sync exists
+    // the steps are CORRECTED as well as reported (see `place_rms_px`), so
+    // this flag is about those two numbers and about the recording, not
+    // about the picture. Where it does not exist, nothing corrects them.
     Timebase timebase = Timebase::kUnknown;
     // Lines the step rate was measured over. ZERO means the image-domain
     // half of the test had nothing to work with (a white-only station, or

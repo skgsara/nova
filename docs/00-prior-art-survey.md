@@ -246,6 +246,52 @@ decision at all. It is rejected here only because Nova scans a whole
 recording blind and needs run BOUNDARIES, which a fold does not give.
 Nothing copied; the ledger below is unchanged.
 
+### Session 11 — does any mature decoder REPAIR a per-line timebase, rather than measure a clock?
+
+Checked, sources read rather than recalled: **fldigi**
+(`src/wefax/wefax.cxx`, `correlation_shift`, `decode_image`), **KiwiSDR**
+(`extensions/FAX/FaxDecoder.cpp`, `phasingSkipData` → `m_skip`,
+`ProcessSamples(..., float shift)`), **weatherfax_pi**
+(`src/FaxDecoder.cpp`, `phasingSkipData`/`skiplen`), **JWX**
+(`DecodeFax.java` `s_sync`/`s_proc`, `CommonCode.clock_correct_line`).
+
+The question is the one Sara's review of the whole library raised: the six
+JSC recordings insert samples every few lines, and their pictures show it —
+"the black strip, it's actually zig zagging, not solid at all". Nova already
+tracked the sync per line and then drew each line at a ±8-line MEDIAN of
+that track, which lags every real move.
+
+| | where each drawn line's horizontal position comes from |
+|---|---|
+| fldigi | Sample count and nothing else: `curr_col = m_img_width * frac(m_img_sample / m_smpl_per_lin)`, evaluated per row in `decode_image`. It DOES compute a per-line correlation shift against the previous line (`correlation_shift`), and then keeps only the MODE of a histogram of them, for space-echo detection — the per-line number exists and is discarded. Separately it notices a globally low sample rate (`estim_smpl_rate < 0.95 * samplerate`) and adjusts a buffer length once. |
+| KiwiSDR | One median of the phasing-line positions, applied once as a sample skip (`m_skip`), plus a manual `shift` an operator can pass into `ProcessSamples`. Never re-measured mid-picture. |
+| weatherfax_pi | The same one-time phasing median (`skiplen`), no per-line term, and its only acknowledgement of lost samples is a PortAudio `paInputOverflow` log line — which a file can never produce. |
+| JWX | Finds the sync ONCE by folding `sync_lines` lines, then rotates every subsequent line by `(int)(delta * line)` — one operator-typed calibration constant times the line number (`clock_correct_line`). Manual whole-image realign lives in the GUI (`ImagePanel`), post-decode and non-destructive. |
+
+**None of the four repairs a timebase.** All four correct a CLOCK — a
+constant rate error — and three of them do it from one measurement taken
+before the picture starts. The one decoder that already computes the
+per-line quantity throws it away. So there is nothing to reuse for this,
+and the ledger below is unchanged again.
+
+What is NEW here and written down as such: **segmenting the tracked sync
+residual at change points, and fitting a robust line within each segment.**
+Two measurements from the library forced both halves. (a) The residual
+MOVES: a ±8-line median through a step is wrong on both sides of it, and
+disabling the segmentation costs 2.89 px of line-start error on the JSC2
+fixture against 0.61 with it. (b) Inside a segment the residual is not
+flat but RAMPS, because the period fit absorbs the mean insertion rate —
+1.9 samples per line on the ground-truth synthetic, 19 samples of tilt
+across an 11-line segment, twice the step it sits between. A median
+through a slope is wrong at both ends by half of it; Theil-Sen is not.
+
+fldigi's discarded per-line correlation is the idea to take for the case
+this session does NOT solve — a white-only station, which has no sync
+pulse to track and therefore no residual to segment (VMW 2215Z's
+staircase). Kept per line rather than collapsed to a mode, it is a
+line-start measurement for a station that has none. Recorded as the live
+option for that work, not taken here.
+
 ## Reuse ledger
 
 Running record — one row per reused artifact, added the day it enters

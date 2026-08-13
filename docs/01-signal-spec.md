@@ -273,15 +273,33 @@ library, so that registered gap stands.
   a capture chain and knows nothing about the line rate — the same numbers
   separate 60 lpm and 120 lpm without rescaling.
   [`roundtrip [10]`, `fixture_timebase_steps`, `fixture_timebase_linear`]
-- **The picture survives a stepping timebase, but not untouched.** Session
-  8 recorded that JSC2 and JSC3 "decode straight". Measured against a
-  synthetic with known ground truth (21 samples inserted every 11 lines),
-  the tracked picture's straight-edge scatter is **3.35 px of 1810** where
-  the same signal without insertions reads 0.00: the local median that
-  tracks the steps lags them by a few lines, so each insertion costs a few
-  lines of misalignment. Both bounds are pinned. On a white-only station,
-  where nothing tracks, the same signal is convicted by the phasing
-  statistic alone — the case no library recording covers.
+- **A stepping timebase is CORRECTED where per-line sync exists, and the
+  correction is a segmented fit, not a smoother.** Session 8 recorded that
+  JSC2 and JSC3 "decode straight"; session 9 measured 3.35 px of
+  straight-edge scatter against ground truth and pinned it as the cost;
+  session 11 removed it, because Sara's by-eye review of the library found
+  the same defect in the pictures ("the black strip, it's actually zig
+  zagging") on all six JSC recordings. Three properties of the residual
+  make the correction, and each was measured before it was written:
+  1. it MOVES in steps, so the smoothing window is cut at every persistent
+     move — agreed by 4 locked lines each side, by more than 10 samples,
+     the same resolution the detection test claims;
+  2. between steps it RAMPS, at the mean insertion rate the period fit
+     absorbed (1.9 samples/line on the synthetic, 19 samples across an
+     11-line segment), so the fit inside a segment is a robust LINE
+     (Theil-Sen) and not a level;
+  3. a single large move is a real skip in the capture chain, so it is
+     followed within one line — a seam — rather than clamped into a
+     multi-line diagonal tear.
+  Ground truth, same 21-samples-every-11-lines signal: **2.19 px → 0.00**,
+  and 0.28 px of line-start error when the insertions land on the line
+  boundary instead of mid-line. Whole library: 6 recordings measurably
+  straighter, 14 unchanged, 0 worse. On a white-only station, where nothing
+  tracks, the same signal is still only CONVICTED (by the phasing
+  statistic) and not corrected — the case no library recording covers, and
+  the open half of M2b.
+  [`roundtrip [10]`, `fixture_timebase_steps`, `fixture_warp`, `fixture`,
+  `fixture_60lpm`, `fixture_anchor_delta_xsg`]
 - **A pulse station keeps its tracked anchor; the phasing anchor is measured
   there but never preferred.** Argued in session 7 on the grounds that a
   tracked reference beats a fixed one, tested in session 8. JSC2 is the case

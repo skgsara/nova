@@ -129,9 +129,21 @@ ppm clocks nobody had questioned. None of the mature decoders reports this
 condition: JWX applies one operator-typed constant to every line,
 weatherfax_pi hears about lost samples only when PortAudio tells it, and
 fldigi builds the histogram that would show it and then keeps only its
-peak. The pictures still come out — a per-line tracker absorbs the steps,
-at a cost of about 3 px of wobble in 1810 — so this reports rather than
-repairs.
+peak. Nor does any of them repair one: all four correct a constant clock,
+three of them from a single measurement taken before the picture starts.
+
+Since session 11, Nova does repair it, and the reason is that the operator
+looked at the pictures. Sara reviewed all twenty decoded charts by eye and
+named six that "zig zag" — every one of them a JSC recording, which is the
+set the flag had been convicting for two sessions while the decoder drew
+them anyway. The tracked sync residual is now cut at the lines where it
+persistently moves, a robust line is fitted inside each piece rather than a
+level, and a real skip is followed in one line instead of ramped across
+seventeen. Ground truth, on a signal generated with insertions at a known
+rate: 2.19 px of scatter on the straightness bar before, **0.00** after.
+Six library recordings improved, fourteen unchanged, none worse. A station
+with no sync pulse still has no per-line phase to correct — VMW 2215Z's
+staircase is the open half of that milestone.
 
 Manual override of everything [ISO §4.2.6] is still untouched and needs
 the GUI (M4).

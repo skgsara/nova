@@ -66,10 +66,16 @@ Notes:
   ONE rate to be stable about. Six of twenty library recordings do not:
   their capture chain inserts samples, so the measured clock is the
   transmitter's clock plus an insertion rate and no single figure describes
-  the file (session 9, docs/01 §5). Nova does not repair this — it detects
-  and reports it (`DecodeResult::timebase`), so the clock figure is never
-  read as a stability measurement when it is not one. Compliance is
+  the file (session 9, docs/01 §5). Nova reports this
+  (`DecodeResult::timebase`), so the clock figure is never read as a
+  stability measurement when it is not one, and since session 11 it also
+  CORRECTS the picture wherever the station sends a sync pulse: the drawn
+  line starts are placed segment by segment rather than through a fixed
+  smoothing window, how straight they came out is reported per decode
+  (`place_rms_px`), and six fixtures assert it against the finished pixels
+  (`--expect-straight-strip`). On a station with no sync pulse nothing can
+  be corrected per line and the paper still moves (M2b, open). Compliance is
   therefore claimed against the recording's timebase where that timebase is
   linear, and the non-linear case is *reported* rather than quietly
   averaged. `roundtrip [10]`, `fixture_timebase_steps`,
-  `fixture_timebase_linear`.
+  `fixture_timebase_linear`, `fixture_warp`, `fixture_picture_head`.

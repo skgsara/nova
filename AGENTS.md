@@ -227,8 +227,14 @@ more likely right than one that agrees only with its own reasoning.
   floor, not a count (dense steps merge under the ±8-line median: 90.9
   inserted reads 36.9); two recordings can be measured by neither statistic
   (GYA 2300Z, VMW 2215Z — white-only with no phasing found) and report
-  kUnknown; and nothing repairs a stepping timebase, which costs ~3 px of
-  wobble in 1810 even where tracking works.
+  kUnknown; and ~~nothing repairs a stepping timebase~~ — session 11
+  repairs it wherever per-line sync exists (M2b), after Sara's by-eye
+  review of all 20 charts found the six zig-zagging recordings that every
+  decoder statistic had called fine. **The lesson for the next agent: a
+  statistic that says a recording is faulty is not the same thing as a
+  decoder that draws it correctly, and only the picture can tell you
+  which one you have.** The suite had no picture-domain check at all
+  until this session; it has one now (`--expect-straight-strip`).
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

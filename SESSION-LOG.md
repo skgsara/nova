@@ -7,6 +7,173 @@ anything as our develop history").
 
 ---
 
+## 2026-08-12 — Session 11: Sara looked at the pictures, and every complaint was the same axis
+
+Agent: Claude Opus 5.
+
+**Task as accepted:** not session 10's next step. Asked to choose between
+M4 and two smaller pieces, Sara said "no, before you start, could you
+decode all charts and I want to manually go through every charts" — so the
+session began by decoding all 20 library recordings with the session-10
+binary and handing them over one at a time. Her verdicts are recorded
+verbatim in `recordings/library-8k/decodes-s10/_review-notes.md`. She then
+chose the milestone this session builds: correct the timebase, not just
+report it.
+
+**Twelve complaints, one axis.** "The black strip, it's actually zig
+zagging, not solid at all" on all six JSC recordings; "not 100% smooth" on
+both JMH test charts; "sync lose at the top part" on JMH KiwiSDR Himawari
+and "at the bottom" on `test chart`; "stair like shape" on VMW 2215Z. Not
+one word about grey scale, geometry, aspect, crop or rotation, which is
+worth as much as the complaints. Measured afterwards in the drawn pixels —
+the dead sector is a fixed-width band, so the column where it ends is a
+straight-line witness — the recordings she named carried 3.0-4.6 px of
+row-to-row edge scatter and the ones she passed over carried 0.3-1.9.
+**The gap her eye found: sessions 9 and 10 built two statistics that DETECT
+and REPORT a bad timebase, and nothing CORRECTED one.** The decoder said
+"NOT LINEAR: 199.7 steps per 1000" about JSC4 and then drew the picture
+anyway.
+
+**Prior art first, as the reuse rule requires, sources read rather than
+recalled** (docs/00, session 11): fldigi `wefax.cxx`, KiwiSDR
+`extensions/FAX/FaxDecoder.cpp`, weatherfax_pi `src/FaxDecoder.cpp`, JWX
+`DecodeFax.java`. **None of the four repairs a timebase.** All four correct
+a CLOCK, three of them from one measurement taken before the picture
+starts (`phasingSkipData` → `m_skip`; `clock_correct_line`). fldigi is the
+painful one: `correlation_shift` computes the per-line shift against the
+previous line and keeps only the MODE of a histogram of them, while
+`decode_image` places every row from sample count alone. The number exists
+and is thrown away. Nothing to reuse; ledger unchanged. fldigi's discarded
+per-line correlation IS the idea to take for the white-only case, which
+this session does not solve, and it is written down as that.
+
+**Three properties of the sync residual, each measured before it was
+written, and each one is a mechanism.**
+
+(a) *It MOVES.* A ±8-line median through a step is wrong on both sides of
+it. The window is now cut at every change point — a move the 4 locked
+lines on each side agree about, by more than `kNonlinSec` (10 samples),
+which is the resolution the timebase test already claims. The timebase
+TEST keeps its flat window on purpose: it is a calibrated instrument and
+session 9's library thresholds were measured through it. The comment
+saying the two smooth identically is corrected rather than left to rot.
+
+(b) *Between steps it RAMPS.* This was the surprise. The period fit
+absorbs the MEAN insertion rate, so inside a segment the residual walks
+back down at 1.9 samples a line — 19 samples of tilt across an 11-line
+segment, twice the step it sits between. A median through a slope is wrong
+at both ends by half of it. A robust line (Theil-Sen, median of pairwise
+slopes) evaluated at the drawn line fixes it, and this single change took
+the ground-truth synthetic from 2.05 px of place error to 0.66 and its
+drawn straightness bar from 2.19 px of scatter to **0.00**.
+
+(c) *One large move is a real skip.* A change point is exempt from the
+per-line clamp, so JMH KiwiSDR Himawari's ~1270 lost samples produce a
+one-line seam instead of a twelve-line diagonal tear. Seams are counted
+separately from `max_step_px`, which keeps its old meaning.
+
+**Two more faults found while measuring, both older than this session.**
+The assembly dropped any residual further than `2*search` from the fitted
+line as bogus — a statement about the fit, not the line. Himawari's first
+720 drawn lines sit 1100-1390 samples off a line fitted through the other
+1200, so every one of them was thrown away, the correction froze at zero,
+and the top of the chart was drawn half a page across. That is exactly
+"sync lose at the top part". And a coasting line COUNTED as a correction
+level, so a picture whose first lines do not lock started from zero and
+the clamp walked it up at 0.03 lines each: on the warp fixture the first
+two drawn lines came out 80.7 and 26.3 px from where the signal put them,
+with ten clamped corrections. Neither had a test. Both do now.
+
+**The suite had no picture-domain check at all, and now has two.**
+`--expect-straight-strip` measures the dead sector's edge in the finished
+pixels and shares no code with the decoder; `place_rms_px` is the
+decoder's own account of the same quantity and is held to the same bound,
+so a disagreement between them is a failure rather than a matter of taste.
+Six fixtures carry it. The second check exists because of a defect that no
+number the decoder produces can see: the smoothing window could reach back
+into the phasing region, where the template anchors half a dead sector
+away, and the first drawn lines were placed at the control signal's phase —
+88.6 px from the rest of the chart on XSG FYCI. The first lines of a
+picture usually do not lock, so the place error reads 0.13 px either way,
+and one step does not move a 90th percentile. Only the picture shows it.
+New fixture `xsg-fyci-phasing-head-120s.wav` (XSG FYCI 120-240 s) and a
+check that the top of the picture sits on the same page as its body.
+
+**Contradictions found.** Seven.
+(a) My own first acceptance metric — rms deviation from a 31-row local
+median — called SIX recordings WORSE after the change, including
+FAXSignal 0.33 → 1.53. Every one of them had gained a correct one-line
+seam, which a local median smears across 31 rows. The statistic was wrong,
+not the code; the 90th percentile of the row-to-row move replaced it.
+Had I trusted the first number I would have reverted a change that
+improved every picture in the library.
+(b) Session 9's `roundtrip [10]` asserted that the stepping picture
+"visibly wobbles, which is why the flag exists". True of a decoder that
+only reported. Now false — the assertion is replaced, not relaxed.
+(c) I predicted mid-line insertions would be permanently harder than
+insertions at the line boundary, because the sync template of the line
+they land in straddles them. Measured: 0.66 px against 0.28. The
+ambiguity costs one line and nothing else. Both cases are now pinned.
+(d) "One skip is one line" — thinning runs of adjacent change points to
+their largest member is the obvious tidy-up, and it is wrong: it merges
+the genuinely separate steps of a recording that inserts samples every few
+lines. Measured worse everywhere (synthetic 2.05 → 2.39, its LINEAR
+control 0.19 → 1.71, JSC2 fixture edge p90 2.0 → 5.0). Not taken, and the
+reason is in the code so nobody re-derives it.
+(e) I told Sara that HDSDR and VMW 2215Z were worth watching because their
+ROTATION was unanchored. The actual defect in both is line-start
+placement; rotation is fine. Corrected to her in the same session.
+(f) The `2*search` gate read as a safety mechanism and was the cause of
+the library's largest single misplacement.
+(g) `opt.search_frac` had become dead configuration — the tracker's window
+was hard-coded at the same 0.03 — while still gating the assembly. It now
+means the one thing it names.
+
+**Tests: 21 suites green, zero warnings (was 20).** One new fixture, one
+new flag on six of them, one new ground-truth case in `roundtrip [10]`
+(the same insertions at the line boundary). **Revert checks run; all six
+surviving mechanisms scream.** Change points off → `roundtrip`,
+`fixture_warp`, `fixture_timebase_steps` fail. Theil-Sen off → `roundtrip`
+and `fixture_timebase_steps` fail. Window not held inside the picture →
+`fixture_picture_head` and `fixture_anchor_delta_xsg` fail. `2*search`
+gate restored → `fixture_warp` fails. Coasting sets a level →
+`fixture_warp` fails. Seams clamped like any other move → `fixture_warp`
+fails. Nothing in this session survives without a test that would catch
+its removal.
+
+**The library-wide effect, measured against the session-10 baseline.**
+Dead-sector edge, 90th percentile of the row-to-row move, in px of 1810:
+**7 recordings better, 13 unchanged, 0 worse.** All six JSC (5.0 → 1.0,
+4.0 → 2.0, 1.0 → 0.0, 2.0 → 1.0, 4.0 → 2.0, 4.0 → 2.0) and JMH KiwiSDR
+Himawari (6.0 → 1.0, and its 99th percentile 94.4 → 5.0). Every pulse
+recording in the library now reports 0.18-1.11 px of place error; the
+worst before was 4.37.
+
+**What did NOT happen.** VMW 2215Z's staircase is untouched, and so are
+GYA 2300Z, GYA 2324Z, NMC 2204Z and VMW 2230Z: a white-only station sends
+no sync pulse, so there is no per-line residual to segment and nothing in
+this session applies to it. That is the open half of M2b and it is the
+half Sara can see — "stair like shape, the chart is not constant" was one
+of her twelve verdicts. HDSDR's complaint ("unreadable, no sync") is also
+not this defect: its place error was 0.40 px before the session. Its
+picture carries the start tone and phasing drawn into the top, because the
+recording holds no control signals the segmenter can find, and its
+rotation is unanchored for the same reason. Neither is registered as
+fixed.
+
+**Next step:** the white-only half of M2b — give a station with no sync
+pulse a per-line line-start measurement, from the picture itself.
+fldigi's `correlation_shift` computes exactly this and keeps only the
+histogram mode (docs/00, session 11); kept per line, with only persistent
+moves accepted, it is the same corrector this session built with a
+different measurement feeding it. VMW 2215Z 0-120 s is the
+fixture-in-waiting, and Sara's "stair like shape" is the acceptance test.
+The risk to watch is that picture content moves for real reasons, so the
+correlation must be trusted only where it is sharp and only where the move
+persists. Tree is green, buildable, and committed.
+
+---
+
 ## 2026-08-12 — Session 10: the rejected candidate was real, and finding it broke three things that were passing by luck
 
 Agent: Claude Opus 5.

@@ -44,8 +44,20 @@ target_link_libraries(nova-test-fixture PRIVATE nova-core)
 # for each fixture's unique coverage). Lock bounds sit below the measured
 # value with room for noise, but above what the previous code achieved, so
 # a regression to the old anchor fails the suite.
+# Session 11: --expect-straight-strip is the PICTURE-domain check the suite
+# had no form of. It measures the dead-sector edge in the finished pixels —
+# 90th percentile of its row-to-row move — and shares no code with the
+# decoder; the same flag also holds the decoder's own account of the error
+# (place_rms_px) to the same bound, so a disagreement between the two is a
+# failure rather than a matter of taste. Bounds sit between the measured new
+# value and the measured pre-session-11 one on the same fixture.
+#
+# The clean reference: a picture with nothing wrong with it must not acquire
+# jitter from a corrector meant for the ones that do (1.0 px measured, and
+# 0.84 px of place error, unchanged by session 11).
 add_test(NAME fixture COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav 120 115 125 -130 -40 0.95)
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav 120 115 125 -130 -40 0.95
+  --expect-straight-strip 1.5)
 # Session 7: line counts below are POST-SEGMENTATION — the start tone and
 # phasing interval are no longer drawn [WMO §5.2.3], so a fixture that
 # opens inside one decodes fewer lines than it holds. Both of these do:
@@ -55,10 +67,34 @@ add_test(NAME fixture_phasing_boundary COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 70 80 -130 -40 0.85)
 add_test(NAME fixture_lpe COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75)
+# The warp fixture is where session 11 shows most: this recording loses
+# ~1270 samples in one go, and until session 11 the assembly threw that
+# residual away as out of range and drew the whole first half of the picture
+# 574 px across (edge move p90 31.2 px). It now follows the skip in a single
+# line — one seam, both halves in place, p90 1.0. Its first nine lines do
+# not lock either, which is the other half of the same fix: coasting used to
+# count as a correction level, so the clamp then walked the first REAL
+# measurement in at 0.03 lines a time and the first two drawn lines came out
+# 80.7 and 26.3 px out (place rms 5.72 -> 0.64, clamped 10 -> 0).
 add_test(NAME fixture_warp COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85)
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
+  --expect-straight-strip 2.0)
+# 60 lpm AND stepping: JSC1 inserts samples like the rest of its family, so
+# this fixture pins that the corrector works at the other line rate too
+# (place rms 3.81 -> 1.38 px, edge p90 4.0 -> 3.0).
 add_test(NAME fixture_60lpm COMMAND nova-test-fixture
-  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.9)
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.9
+  --expect-straight-strip 3.5)
+# XSG FYCI 120-240 s: a phasing interval (12-42 s into the cut) followed by
+# the FIRST lines of the picture, which is where the assembly's smoothing
+# window can still see the control signal. Cut session 11 because no fixture
+# covered that: the effect is invisible to every number the decoder
+# produces — the first drawn lines do not lock, so the place error reads
+# 0.13 px either way — and shows only in the picture, as eight lines sitting
+# 88.6 px from the rest of the chart.
+add_test(NAME fixture_picture_head COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav 120 100 200 -130 -60 0.7
+  --expect-straight-strip 1.5)
 add_test(NAME fixture_white_sector COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
   --expect-white-only)
@@ -99,9 +135,14 @@ add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
 # being drawn as picture. 31.5 s is the answer that matches WMO's ~30 s;
 # the run was previously cut short at the first faded line. The anchor
 # delta, which is what this test is actually about, did not move (-107.2).
+# Session 11 also uses this fixture for the OTHER thing a phasing->image
+# boundary can break: the assembly's smoothing window must not reach back
+# into the phasing region, where the template anchors half a dead sector
+# away [WMO §5.2.3.1]. It did, so the first drawn lines were placed at the
+# control signal's phase and then jumped 88.6 px into the picture.
 add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 128 140 -130 -60 0.85
-  --expect-anchor-delta -160 -55)
+  --expect-anchor-delta -160 -55 --expect-straight-strip 3.5)
 # Session 9: is the recording's timebase the straight line everything
 # upstream assumes? Two fixtures, chosen so that each isolates one half of
 # the test and neither can pass by accident.
@@ -118,9 +159,14 @@ add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
 #   in the fixture set. One skip is not a stepping timebase, and a detector
 #   that convicts on max_step or on any single event calls this file
 #   non-linear and fails here. (Its rate is 1.6/1000.)
+# Session 11 adds the second claim this fixture can carry: the timebase
+# steps AND the picture is drawn straight anyway. Its 239 lines are 100%
+# locked, so nothing here is excused by a weak signal — the pre-session-11
+# assembly still left 2.89 px of place error on it, which is the flat
+# +/-8-line median lagging every step. 1.42 px now.
 add_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav 120 230 245 150 450 0.95
-  --expect-timebase steps)
+  --expect-timebase steps --expect-straight-strip 1.5)
 add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
   --expect-timebase linear)

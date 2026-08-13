@@ -375,9 +375,49 @@ int main() {
         const double sd_stp = edge_stdev(crop_rows(stp.img, 40, kLines));
         std::printf("  bar stdev: linear=%.2f px stepped=%.2f px\n", sd_lin,
                     sd_stp);
-        check(sd_stp < 5.0, "the picture still comes out (wobble < 5 px)");
-        check(sd_stp > 1.0,
-              "...but visibly wobbles, which is why the flag exists");
+        std::printf("  place error: linear=%.2f px (%d seams) "
+                    "stepped=%.2f px (%d seams)\n",
+                    lin.place_rms_px, lin.seams, stp.place_rms_px, stp.seams);
+
+        // The same insertions at the line BOUNDARY rather than mid-line.
+        // I expected this to be the easy case and the mid-line one to be
+        // permanently limited — the sync template of the line the samples
+        // land in straddles them, so it can only read something between the
+        // old level and the new one. Measured, the two are the same to a
+        // third of a pixel (0.66 and 0.28), which says the ambiguity costs
+        // one line and nothing else. Kept as a second ground-truth case:
+        // where the samples go in is a property no real recording lets us
+        // choose, so both are worth pinning.
+        std::vector<float> at_edge;
+        at_edge.reserve(stepped.size());
+        for (size_t i = 0; i < clean.size(); i++) {
+            at_edge.push_back(clean[i]);
+            if (i % (line * kEvery) == 0)
+                for (int k = 0; k < kIns; k++) at_edge.push_back(clean[i]);
+        }
+        const nova::DecodeResult edge = run_video(at_edge);
+        std::printf("  same insertions at the line boundary: place %.2f px, "
+                    "bar stdev %.2f px (%d seams)\n",
+                    edge.place_rms_px,
+                    edge_stdev(crop_rows(edge.img, 40, kLines)), edge.seams);
+        check(edge.timebase == nova::Timebase::kSteps,
+              "boundary insertions are detected too");
+        check(edge.place_rms_px < 1.0,
+              "...and corrected: the picture is drawn where the signal is");
+        // Session 9 pinned this both ways — "the picture still comes out"
+        // AND "...but visibly wobbles, which is why the flag exists" — and
+        // the second half was true of a decoder that only REPORTED a
+        // stepping timebase. Session 11 repairs it, so the assertion that
+        // wobble exists is now the wrong claim and is replaced rather than
+        // relaxed: 2.19 px of bar scatter before, 0.00 after, on the one
+        // signal whose ground truth is known. The flag still exists for what
+        // it always meant: clock_ppm and the anchor delta on a stepping
+        // recording are not comparable with a clean one's.
+        check(sd_stp < 1.0, "the stepping picture is drawn STRAIGHT now");
+        check(stp.place_rms_px < 1.0,
+              "...and the decoder's own account of it agrees");
+        check(stp.timebase == nova::Timebase::kSteps,
+              "...while still reporting that the recording steps");
 
         // The false positive that matters. A clock error IS a linear
         // timebase, and it moves the phasing edge by 1 sample per line at

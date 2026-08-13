@@ -75,6 +75,57 @@ register are milestone entries, not intentions (SOP P1.5).
 - OPEN: fractional resampling (KiwiSDR approach) — not needed so far,
   the fitted-line + local-median correction has been sufficient.
 
+## M2b — timebase CORRECTION, not just detection  [session 11; white-only half open]
+
+Sara reviewed all 20 decoded charts by eye and every complaint she made was
+the same axis — where each line starts, horizontally. Six recordings "zig
+zag"; two "lose sync" at one end; one is a staircase. Sessions 9 and 10
+built two statistics that detect and report a bad timebase, and nothing
+corrected one: the decoder told the truth about JSC and then drew the
+picture anyway. Measured against the drawn pixels, the recordings she named
+carried 3.0–4.6 px of dead-sector-edge scatter and the ones she passed over
+carried 0.3–1.9.
+
+Done:
+- **Segment the tracked sync residual at change points.** A move is real
+  when the kSegHalf=4 locked lines each side agree it happened, by more
+  than kNonlinSec (10 samples) — the resolution the timebase test already
+  claims. The assembly's ±8-line median window is truncated there, so it
+  never averages across a step; the test's window is NOT, because it is a
+  calibrated instrument (session 9's library thresholds were measured
+  through it).
+- **Fit a robust line, not a level, inside each segment.** The residual
+  ramps between steps, because the period fit absorbs the mean insertion
+  rate — 1.9 samples/line on the synthetic, 19 samples of tilt across an
+  11-line segment. Theil-Sen (median of pairwise slopes); the median only
+  where a segment is too short to see a slope.
+- **Follow a real skip in one line.** A change point is exempt from the
+  per-line clamp, so a recording that loses 1270 samples gets a one-line
+  seam instead of a 12-line diagonal tear.
+- **Believe a residual that disagrees with the FIT.** The old ±2*search
+  gate dropped exactly the evidence a big skip produces; JMH KiwiSDR
+  Himawari's whole first half was drawn 574 px across because of it.
+- **Coasting no longer sets a correction level**, so a picture whose first
+  lines do not lock starts at its first real measurement instead of
+  clamping up to it from zero.
+- **A picture-domain screamer at last** (`--expect-straight-strip`): the
+  dead sector's edge measured in the finished pixels, sharing no code with
+  the decoder, on five fixtures. `place_rms_px` is the decoder's own
+  account of the same quantity and is held to the same bound.
+
+Measured, whole library: 6 recordings better, 14 unchanged, 0 worse.
+Ground truth (roundtrip [10]): bar scatter 2.19 px → 0.00 with the same
+insertions, and 0.28 px of place error when they land on the line boundary.
+
+OPEN — the white-only half:
+- A station with no sync pulse has no residual to segment, so VMW 2215Z's
+  staircase is untouched. fldigi's discarded per-line correlation shift
+  (docs/00, session 11) is the idea to take: correlate each line against
+  the previous one, keep the per-line value instead of the histogram mode,
+  accept only persistent moves. Fixture-in-waiting: VMW 2215Z 0–120 s.
+- No screamer yet for a faded pulse station whose steps are below its own
+  measurement noise.
+
 ## M3 — full auto sequencing  [done except manual override, which needs M4]
 
 Done (session 6) — detection, measured against the library:
@@ -231,11 +282,14 @@ Pending:
     drawn lines, and a 60 s fixture at 120 lpm has 120. That is a floor on
     what a rate can honestly be measured over, not a bug, but it means M4's
     live decode has no verdict for the first minute of a transmission.
-  - Nothing repairs a stepping timebase. Where per-line sync exists the
-    picture still comes out with ~3 px of wobble in 1810 (measured
-    synthetically); where it does not, the paper moves. Repair — a piecewise
-    timebase fit, or per-line phase carried through the steps — is unbuilt
-    and is not a milestone. Report first; nobody has asked for repair.
+  - ~~Nothing repairs a stepping timebase~~ — closed session 11, and it
+    became a milestone the moment Sara looked at the pictures (M2b). Where
+    per-line sync exists the steps are now corrected as well as counted:
+    ground-truth synthetic 2.19 px of bar scatter -> 0.00, JSC2 fixture
+    2.89 px of line-start error -> 0.61. Where it does NOT exist — a
+    white-only station — nothing is repaired and the paper still moves;
+    that half is M2b's open item, with VMW 2215Z's staircase as its
+    fixture-in-waiting.
 - Segmentation costs a full `detect_tones` pass over the recording
   (session 7): ~9 s on the 61-minute JSC4 against a 37 s decode. Fine
   offline, unbudgeted for M4, where the scan wants to be incremental.
