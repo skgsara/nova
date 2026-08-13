@@ -1,7 +1,8 @@
 # 05 — M4 shell design: FLTK + RtAudio
 
-Status: **proposal, session 17.** Nothing here is decided by Sara yet.
-Items she must rule on are collected in "Open questions" at the end;
+Status: **proposal, session 17.** One item has since been decided by
+Sara (§12 item 4, the waterfall); the rest is not decided yet. Items
+still needing her ruling are collected in "Open questions" at the end;
 everything else follows from decisions already taken in `docs/04` and is
 marked with the finding or decision it follows from.
 
@@ -312,7 +313,7 @@ boxy `FL_UP_BOX` / `FL_DOWN_FRAME` edges — in the mockup page. Regions:
 │ │                                       │ │  SYNC  [ +0.0 ]  │
 │ └───────────────────────────────────────┘ │  [Apply] [Auto]  │
 ├───────────────────────────────────────────┴──────────────────┤
-│ spectrum / waterfall + level meter                           │
+│ input level  ▁▂▄▆█▆▄▂▁                            −12 dBFS   │  18 px
 ├──────────────────────────────────────────────────────────────┤
 │ DRAWING — PREVIEW          line 431        [====      ]      │  status
 └──────────────────────────────────────────────────────────────┘
@@ -322,6 +323,17 @@ The status line carries the state name [Finding 3, Finding 4]; the
 progress bar is populated **only** during `DECODING`, from the nine
 stages. Saved images are a view of the user's folder — no slot table, no
 LOCK, no ring [docs/04 answer 7].
+
+**The spectrum/waterfall is not in M4** [DECIDED 2026-08-13, Sara,
+session 17]. It ships in M4.5. What stays in its place is a slim input
+level meter, and the distinction is worth stating because it is not the
+same cut: without a level readout, an operator whose audio input is
+muted, clipping, or pointed at the wrong device has no diagnosis at all
+— every failure looks like "no signal". The meter is also the one thing
+here with direct precedent, since the FAX-30 shows signal strength and
+S/N while receiving [docs/04 Finding 4]. **No receiver in the sixteen-
+manual corpus has a waterfall**; it is an SDR-era affordance for tuning,
+which is exactly the job M4 is deferring.
 
 ---
 
@@ -414,9 +426,12 @@ and false of the GUI — that sentence needs the qualifier.
 3. **Page cap default.** Finding 6's failsafe needs a number. Recommend
    1 page, i.e. stop at the first stop tone, with the cap as the guard
    for when it is missed.
-4. **Does M4 ship the waterfall?** The roadmap lists spectrum/waterfall
-   under M4. It is the one region of §8 that serves tuning rather than
-   decoding, and it is cuttable to M4.5 without touching anything else.
+4. ~~**Does M4 ship the waterfall?**~~ **DECIDED 2026-08-13 (Sara,
+   session 17): it ships in M4.5.** A slim input level meter stays in
+   M4 — see §8 for why that is a different thing and not a partial
+   reversal of the cut. Nothing else in this document changes: the
+   waterfall was the one region that served tuning rather than decoding,
+   and no thread, seam, screamer or core field depended on it.
 5. **Station identity.** Per-station persistence [Finding 1] needs a key.
    Frequency alone? Operator-named channel? A channel list is Finding 8's
    scheduling feature, which M4 does not otherwise need.

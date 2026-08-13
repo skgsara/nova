@@ -301,7 +301,7 @@ Pending:
     re-render from retained raw on the saved image; live-path overrides
     seed the batch re-decode as its initial anchor; values persist
     per station.
-- FLTK GUI, RtAudio capture, spectrum/waterfall, image tools,
+- FLTK GUI, RtAudio capture, input level meter, image tools,
   post-decode realign / line-start adjust on retained raw stream
   (ACFax architecture: non-destructive; now load-bearing, since the
   saved image is a decode of the retained stream).
@@ -335,13 +335,28 @@ Pending:
   - Four screamers planned, none needing an audio device or a window:
     `live_demod_equiv`, `live_tones`, `live_preview` (bit-identical
     whatever the block size), `png_roundtrip`.
-  - Five questions still open for Sara: docs/05 §12.
+  - Four questions still open for Sara: docs/05 §12 (the waterfall
+    question is closed — see M4.5).
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind
   `option(NOVA_BUILD_GUI)`. Tests and CLIs must build with it OFF.
   M5's tier-1/tier-2 matrix is only affected for that one target.
 - m4a input via runtime ffmpeg; WAV native.
+
+## M4.5 — tuning aids  [pending; created session 17]
+- Spectrum / waterfall display [DECIDED 2026-08-13, Sara, session 17:
+  cut from M4, ships here]. It is the one part of the M4 window that
+  serves tuning rather than decoding, and nothing in the M4 design —
+  no thread, seam, screamer or core field — depends on it.
+- Note that **no receiver in the 16-manual corpus has a waterfall**
+  [docs/04]. It is an SDR-era affordance with no precedent in the survey,
+  which is part of why it defers cleanly.
+- What stays in M4 instead: a slim input level meter. Not a partial
+  reversal of the cut — without a level readout, a muted, clipping or
+  wrong-device input has no diagnosis and every failure looks like "no
+  signal". It also has the precedent the waterfall lacks: the FAX-30
+  shows signal strength and S/N while receiving [docs/04 Finding 4].
 
 ## M5 — packaging & release  [pending]
 - CI: tier 1 release-tested (Win64, macOS universal, Linux x86_64);
