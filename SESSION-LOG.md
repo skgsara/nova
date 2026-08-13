@@ -7,6 +7,107 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 15: sixteen commercial receivers agree on two knobs, and that settles M4
+
+Agent: Claude Opus 5. Code changed: none. Files changed:
+`docs/04-receiver-ui-survey.md` (new), `ROADMAP.md`.
+
+**Task as accepted:** Sara's idea. She had collected 16 operator's
+manuals for commercial marine weather-fax receivers and asked to go
+through them as a reference for Nova's GUI design, before the M4 shell
+is designed.
+
+**Method.** No PDF tooling was installed: poppler is absent, and the
+manuals were read with a ~60-line PDFKit tool built in the scratchpad
+(`pdftool.swift`, text extraction + page rendering via Swift, already on
+the machine). Ten of sixteen had text layers and were mined directly;
+the six scans were rendered to PNG and read as images. Extracted text
+and page renders live in the session scratchpad, never in the repo —
+same handling as the ISO/WMO PDFs in session 13. The manuals are
+third-party copyrighted works and were read for *facts about
+conventions* only; no text, screen layout or artwork is reproduced in
+Nova or in `docs/04`.
+
+**Corpus.** 15 distinct receivers, 7 manufacturers, ~1985–2024: Furuno
+FAX-30 (two editions — OME-62600 K1 and L1), FAX-408, FAX-410
+(OMC-62610H), FAX-207/208A/210/214; JRC JAX-91 and JAX-9B; Samyung
+SFAX-500 and SFX-100; Steamrock SR-97; Taiyo TF-711; Sony CRF-V21;
+Nagra FAXDM. The corpus splits into paper recorders (corrections during
+reception, destructive) and stored-image receivers (corrections after,
+non-destructive). Nova is in the second group, with ACFax.
+
+**What the survey found.** Four results carried the session. (1) Every
+receiver has *exactly two* picture corrections, PHASE and SYNC, and
+nothing else touches geometry — which maps one-to-one onto Nova's
+phasing anchor and fitted timebase, so the manual-override surface is
+settled at two numbers. (2) The better designs make the operator report
+a measurement rather than guess a correction: Furuno and Samyung print a
+ruler along the image and ask for the coordinate of the dead sector; the
+SR-97 has the operator touch the dead sector directly. (3) AUTO is a
+*value* inside the IOC/rate/frequency controls, never a separate mode
+toggle — which is already how `DecodeOptions::ioc` behaves (session 13) —
+and every receiver without exception has a forced start, because
+automatic detection is expected to fail. (4) The receiver narrates the
+protocol state (`WEFAX READY` → `APT DETECTED` → `SYNCHRONIZING` →
+drawing → `SAVE?`) rather than showing a percentage, which is a
+one-to-one match with the nine stages built in session 14 and answers
+the first-minute problem: show the state name, never the +261 ppm that
+a short baseline produces.
+
+**Three decisions, all Sara's.** The survey answered five of the eight
+open `docs/03` questions from precedent; Sara decided the other three.
+
+- **Streaming model — two paths.** Live view is a provisional forward
+  draw, single pass, never revised (the SR-97's model). The saved image
+  is a batch re-decode of the retained raw stream once the transmission
+  ends, when the long baseline and dropout brackets exist (the FAX-30's
+  operator-initiated re-render, made automatic). The consequence that
+  earns it: **`decode_fax` does not become incremental** — the tested
+  nine-stage core is untouched, its 23 suites keep meaning what they
+  meant, and the new incremental code only ever produces a preview.
+- **Redraw — the live view is never revised.** No commercial receiver
+  redraws on its own initiative. Rows land once; the better rendering
+  arrives as the saved image, not as flicker.
+- **Storage — unbounded, to a user-set folder, greyscale PNG.** The
+  corpus's ring-buffer unanimity (12 to 200 images) answers a 1990s
+  memory budget Nova does not have. LOCK/pin disappears with it.
+
+**Two things this creates, both registered in `docs/04`.** Retained raw
+is promoted from convenience to load-bearing, since the saved image *is*
+a decode of it. And the live view and the saved image are now two
+renderings that can differ visibly — no commercial receiver has this
+problem, because for all of them the live draw was the final image. The
+UI answer is unchosen and registered rather than left to surface as
+"the picture changed after it finished".
+
+**One flag raised, not resolved.** Nova has no external dependencies
+today (no `find_package`; `core/image.cpp` writes PGM), which is part of
+why M5's target matrix is cheap. Greyscale PNG needs libpng, zlib, or a
+small hand-rolled encoder using uncompressed deflate blocks. The
+hand-rolled writer is recommended and noted in `ROADMAP.md`; the
+decision is not taken.
+
+**Validation.** None applicable — no code changed, no tests run. This
+was a paper session by design: `docs/03` made answering these questions
+the gate for starting M4 GUI code, and that gate is now cleared.
+
+**Registered gaps in the survey itself.** Furuno FAX-207 and FAX-214
+operator sections were not read (same paper-recorder generation as the
+408/410, which were read in full); the Sony CRF-V21 PDF turned out to be
+a facsimile-principles booklet with no operator interface; JAX-91 was
+extracted but only JAX-9B was read closely. Screen *layouts* were
+deliberately not measured — this survey records conventions, not
+geometry.
+
+**Next step:** design the FLTK/RtAudio shell against the decided
+architecture in `docs/04` — the live/saved two-path split, the streaming
+tone detector, the PHASE/SYNC override surface, the status line, and the
+named protocol states. The one design question still open before GUI
+code is how the live view gives way to the saved image (`docs/04`, "The
+new question the item-1 decision creates").
+
+---
+
 ## 2026-08-13 — Session 14: M4 core seams — the monolith is nine stages, and the core no longer prints
 
 Agent: Kimi Code CLI (Kimi k2). Code changed: `core/hooks.hpp`,

@@ -29,5 +29,6 @@ that was drawn rotated by 520 px until session 7:
 - `docs/01` — the signal spec (authoritative)
 - `docs/02` — ISO 9876 §4.2 compliance matrix (acceptance checklist)
 - `docs/03` — pre-M4 standards/provenance/GUI-readiness audit
+- `docs/04` — commercial receiver UI survey; the M4 design decisions
 - `ROADMAP.md` — milestones, done vs pending
 - `SESSION-LOG.md` — newest first, append-only, tracked in git

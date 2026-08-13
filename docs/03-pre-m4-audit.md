@@ -199,6 +199,11 @@ was built:
 
 ### M4 design decisions still open
 
+**All eight were answered in session 15 — see `docs/04-receiver-ui-survey.md`,
+"Answers to the eight open M4 questions." Five follow from a survey of 16
+commercial receiver manuals; three were decided by Sara on 2026-08-13
+(streaming model, redraw, storage). The list below is kept as posed.**
+
 - Streaming model: growing-window re-decode, genuinely incremental
   pipeline, or monitor-then-decode on stop tone. Isobar argues for one
   incremental state machine with batch as a wrapper, but Nova's current
@@ -245,3 +250,10 @@ Design the FLTK/RtAudio shell around those seams. Use
 Isobar's `LiveScan` single-state-machine/chunking-invariance architecture
 and ACFax's retained-raw non-destructive model as the references, and
 answer the "M4 design decisions still open" above on paper first.
+
+**Status, session 15.** The "on paper first" condition is met: all eight
+questions are answered in `docs/04-receiver-ui-survey.md`, and the
+decided architecture is recorded under M4 in `ROADMAP.md`. The shell
+design itself is still to be done, and one question `docs/04` created
+remains open before GUI code — how the provisional live view gives way
+to the saved image.

@@ -272,13 +272,33 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [pending; core seams done session 14]
+## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15]
 - Core seams (session 14, done): log/progress callback, cooperative
   cancellation, structured DecodeError kinds, decode_fax split into nine
   named stages (core/hooks.hpp; screamers in `hooks`).
+- Design settled session 15 against a 16-manual survey of commercial
+  receivers [docs/04]. All eight open design questions answered; the
+  docs/03 "answer on paper before GUI code" gate is cleared.
+  - **Two decode paths.** Live view: provisional forward draw, single
+    pass, never revised. Saved image: batch re-decode of the retained
+    raw stream at end of transmission. `decode_fax` stays batch and
+    untouched; only the provisional renderer is incremental.
+  - Streaming tone detector for the live path; batch keeps its full scan.
+  - Two manual geometry overrides only — PHASE and SYNC — surfaced as a
+    ruler along the image plus click-the-dead-sector (ISO §4.2.6/§5.4.3).
+  - AUTO as a value inside the IOC / rate / frequency controls, never a
+    separate mode toggle; always-available forced start with explicit
+    IOC + rate.
+  - Named protocol states, not a percentage; clock/timebase figures
+    withheld until the long baseline exists.
+  - Images saved unbounded to a user-set folder as greyscale PNG; no
+    ring buffer, no LOCK/pin.
 - FLTK GUI, RtAudio capture, spectrum/waterfall, image tools,
   post-decode realign / line-start adjust on retained raw stream
-  (ACFax architecture: non-destructive).
+  (ACFax architecture: non-destructive; now load-bearing, since the
+  saved image is a decode of the retained stream).
+- Greyscale PNG writer. Nova has no external dependencies today; prefer
+  a hand-rolled encoder (uncompressed deflate) over libpng/zlib.
 - m4a input via runtime ffmpeg; WAV native.
 
 ## M5 — packaging & release  [pending]
