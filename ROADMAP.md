@@ -475,6 +475,26 @@ Pending:
   blocks of the reduced ratio's denominator (441 samples at 44100, 6 at
   48000), because a segment boundary that is not a whole number of output
   periods would shift the rest of the stream. Suite count 25 (+2 GUI).
+- **The streaming tone detector [built session 20]** —
+  `live/tone_stream.{hpp,cpp}`: `StreamToneDetector`, the same per-frame
+  purity computation as `detect_tones` over the same frame grid, with
+  the retrospective run assembly replaced by an incremental one that
+  emits **at the earliest qualifying moment**. `core/tones.cpp` changed
+  only by exposing its median and 10–90% spread helpers, so the two
+  paths compute the run statistics with one implementation rather than
+  two. `live_tones` measures it across all 17 fixtures: same kinds and
+  counts, `t_start` identical to **0.0000 s** (§9 asked only for one
+  hop), the event list bit-identical at every block size from 1 sample
+  to 65536, and **12/12 events committed early — 2.6 to 7.1 s each,
+  48.75 s of lead in total**, which is the whole point of the exercise.
+  Two findings worth carrying: the streaming path commits on the
+  *weakest* frames of a tone (purity 0.391 where the batch path reports
+  0.849 for the same tone), so its reported purity is not a quality
+  bar; and **no fixture in the library carries a stop tone or a tone
+  that fades mid-run**, both registered in docs/05 §13, both covered
+  meanwhile by generated signals, and both closable by cutting one new
+  fixture from VMW 2230Z, NMC 2204Z or GYA 2300Z. Suite count 26 (+2
+  GUI).
 - **The save/edit lifecycle [DECIDED 2026-08-13, Sara, session 20;
   docs/05 §8.5]** — five questions asked while those surfaces were being
   written, about the whole life of one chart rather than about the

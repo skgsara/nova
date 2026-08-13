@@ -293,6 +293,45 @@ differ between the two for the same tone. This is inherent, not a bug —
 but it means the screamer in §9 must compare *event kinds and start
 times within a tolerance*, not medians.
 
+**[BUILT session 20: `live/tone_stream.{hpp,cpp}` +
+`tests/test_live_tones.cpp`, running unguarded in every build.]** Five
+things this section did not know, in the order they matter:
+
+1. **The two paths agree on which runs exist, and it can be argued
+   rather than only measured.** The partition of frames into runs
+   depends on nothing but the hot/cold pattern and `max_gap_sec`, and
+   both paths walk the same frames. Batch evaluates a run once over
+   `[first .. last_hot]`; at the moment the streaming detector receives
+   that same `last_hot` frame its accumulated state *is* that interval,
+   and it applies the same three tests. So every run batch accepts is
+   accepted here at or before its last hot frame: **the streaming events
+   are a superset of the batch events**, and the only possible
+   divergence is an *early* emission on a prefix that qualifies while
+   the whole run would not. Not observed on the library or on generated
+   signals; if it ever appears, the honest fix is a confirmation delay,
+   not a wider tolerance.
+2. **`t_start` agrees exactly, not within a tolerance.** §9 asked for
+   "within one hop"; the measured difference is **0.0000 s on all 12
+   events**, because a run begins at the same frame in both paths. The
+   screamer still asserts the hop tolerance and prints the number, on
+   the `live_demod_equiv` principle that an exact agreement which is not
+   guaranteed by construction should be reported rather than banked.
+3. **The lead is 2.6–7.1 s per event, 48.75 s over twelve events** —
+   this is what the section bought. The detector commits during the
+   tone, and `live_tones` fails if that number is ever zero.
+4. **The frames it commits on are the weakest ones, and the reported
+   `purity` is not the run's quality.** On `xsg-fyci-phasing-head` the
+   batch path reports purity 0.849 over the whole 9.12 s run; the
+   streaming path commits at **0.391**, barely over the 0.35 threshold,
+   because it decides on the opening two seconds where the tone is still
+   coming up. The margin against content is intact (library content
+   maxes at 0.16, so 2.4x), but a status line that shows an operator the
+   live event's purity is showing them the worst of the tone, not the
+   tone. §8.1's status panel should not treat it as a quality bar.
+5. **No fixture exercises the gap rule, and none carries a stop tone at
+   all** — see §13. Both are covered by generated signals inside the
+   screamer.
+
 ---
 
 ## 6. The provisional renderer
@@ -1009,6 +1048,21 @@ existing 20 fixtures:
    in the same order, with start times within one hop, as `detect_tones`
    on every tone fixture. Pins §5, with the medians explicitly excluded
    per §5.
+   **[BUILT session 20: `live/tone_stream.{hpp,cpp}` +
+   `tests/test_live_tones.cpp`, running unguarded in every build. All 17
+   fixtures, not only the six carrying a tone — the other eleven are the
+   M3 false-start trap in a second implementation. 136 checks. Measured:
+   same kinds and counts everywhere, `t_start` identical to 0.0000 s,
+   the event list bit-identical at every block size from 1 sample to
+   65536, and 12/12 events committed early (48.75 s of total lead).
+   Three cases no fixture can provide are generated inside the test: the
+   stop tone, the IOC 288 opening, and a tone that fades mid-run.
+   Verified by mutation, five of them: dropping the one-event-per-run
+   guard, shifting the frame grid by one sample, halving the
+   gap-bridging tolerance, dropping `min_hot_frac`, and emitting only at
+   the run's end each fail it. Two of those five passed against an
+   earlier version of the test and are why the last two generated cases
+   exist — see §10.]**
 3. **`live_preview`** — feeding a fixture through the preview renderer
    produces an image of the expected dimensions whose dead-sector edge is
    within a stated tolerance, and — the real claim — **is bit-identical
@@ -1066,7 +1120,13 @@ widget edit can break without moving a pixel:
    mutation: making Start sensitive during DECODING, and lighting the
    ruler with the width unknown, each fail it.]**
 
-The suite count is now **"25 (+2 with the GUI)"**. Session 19 decided
+The suite count is now **"26 (+2 with the GUI)"** — `live_tones` is the
+third unguarded `nova-live` test. It is also the slowest test in the
+suite at 25 s of the 122 s total, and the cost is the block-size sweep:
+seven block sizes over seventeen fixtures, nine detector passes per
+signal. That is the price of the "identical whatever the blocking"
+claim, and it is worth saying out loud so a future session can trade it
+knowingly rather than discover it. Session 19 decided
 "24 (+1 with the GUI)" — correcting session 18's "23 (+1)" — on the
 argument that a test of dependency-free `nova-live` code should run
 everywhere. That argument is unchanged and now applies twice: item 9 is
@@ -1122,6 +1182,29 @@ finding about what appears on screen has to be filtered through what an
 audio-only decoder can source. Findings 1, 2, 3, 5, 6 and 7 survive that
 filter unchanged; Finding 4 did not, and Finding 8 (scheduling by
 channel and frequency) will not either, whenever it is picked up.
+
+**A third, session 20, and it was in a screamer rather than in the
+design.** §9's `live_tones` was written and passed on its first run,
+against every fixture in the library. Mutation testing found that two of
+five deliberate breakages passed it unharmed:
+
+- a **frame grid shifted by one sample** passed, because the test asked
+  the detector for its own window length and then confirmed the frame
+  count agreed with it. That is a test of arithmetic, not of the code.
+  The expected window and hop are now formed in the test from
+  `ToneOptions` by the same expressions `core/tones.cpp` uses;
+- **halving the gap-bridging tolerance** changed no verdict anywhere,
+  because all six library fixtures that carry a control tone carry a
+  clean one. Nothing in the library fades mid-tone, so the run-assembly
+  rule that §5 is *entirely about* was untested in the streaming path.
+  Covered now by a generated tone with a 1.5 s fade placed early enough
+  to matter, plus a two-burst case for the opposite rule.
+
+**The lesson for the next agent, and it is the same shape as session 5's
+`locked_lines`:** a screamer that passes on the first run has not been
+shown to be able to fail. Both survivors were invisible to a green
+suite, and one of them hid a real coverage hole in the fixture library
+rather than a flaw in the test's wiring.
 
 No other contradiction found between `docs/03`, `docs/04`, `ROADMAP.md`
 and the code as it stands.
@@ -1343,6 +1426,25 @@ It is worth expecting a third instance somewhere in this document.
   cannot surprise the resampler the way a real capture chain might, and
   no fixture can close this, because every recording in the library
   reached us through someone else's resampler already.
+- **No fixture in the library carries a STOP tone** (survey, session 20).
+  Six of the seventeen carry a control tone and all six carry a *start*
+  tone; the stop tone — the signal that ends a transmission, and
+  therefore the one the live state machine at §4 leans on hardest — is
+  exercised only by generated signals in `live_tones` and by the
+  synthetic matrix in `tones`. Unlike the capture-rate gap above, **this
+  one is closable**: AGENTS.md records real stop tones measured in VMW
+  2230Z, NMC 2204Z and GYA 2300Z (session 6), fading 0.5–1.5 s at a
+  time. The fixtures were simply cut from other parts of those
+  recordings. A stop-tone fixture cut from one of them would also be the
+  library's first real test of the gap-bridging rule, which is the next
+  gap down.
+- **Nothing in the library fades mid-tone**, so the run-assembly rule
+  §5 rewrote is exercised on real audio nowhere (session 20, found by
+  mutation — halving the streaming detector's gap tolerance changed no
+  verdict on any fixture). `live_tones` covers it with a generated tone
+  interrupted by 1.5 s of noise, and with a two-burst signal for the
+  opposite rule. A real faded stop tone would close both this and the
+  gap above at once.
 - The preview's row-placement quality has no target number yet.
   `place_rms_px` exists for the batch path; the equivalent for the
   preview is not defined, so §9's screamer 3 pins determinism and

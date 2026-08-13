@@ -7,6 +7,122 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 20, continued (3): the streaming tone detector, and the screamer that passed on its first run was not yet a screamer
+
+Agent: Claude. Code changed: `live/tone_stream.hpp`, `live/tone_stream.cpp`
+(new — `StreamToneDetector`), `tests/test_live_tones.cpp` (new),
+`core/tones.{hpp,cpp}` (the median and 10–90% spread helpers move out of
+the anonymous namespace as `tone_median` / `tone_spread_10_90`; no
+behaviour change), `CMakeLists.txt` (`nova-live` gains the source; the
+`live_tones` target over all 17 fixtures). Files changed:
+`docs/05-m4-shell-design.md` (§5 gains five measured findings, §9 item 2
+marked built, §10 gains a third contradiction, §13 two new gaps, the
+suite count), `ROADMAP.md`, `START-HERE.md`, `SESSION-LOG.md`.
+
+**Task as accepted:** the next step as written last entry — the streaming
+tone detector [docs/05 §5], with `live_tones` as its screamer.
+
+**Built, and it does what §5 asked.** The per-frame purity computation is
+the same `tone_purity_band` call over the same absolute frame grid; only
+the run assembly is incremental, emitting as soon as the duration, spread
+and hot-fraction tests pass. Measured over all 17 fixtures and four
+generated signals, 136 checks:
+
+- **same kinds, same order, same counts** as `detect_tones` everywhere,
+  including zero events on the eleven fixtures that carry no tone — the
+  M3 false-start trap, now in a second implementation;
+- **`t_start` agrees exactly — 0.0000 s on all 12 events.** §9 asked only
+  for "within one hop"; a run begins at the same *frame* in both paths,
+  so exact agreement is what the construction predicts. Asserted at the
+  hop tolerance and printed, on session 20's earlier principle that an
+  exactness not guaranteed by construction is reported, not banked;
+- **the event list is bit-identical at every block size** from 1 sample
+  to 65536;
+- **12/12 events committed early: 2.6–7.1 s each, 48.75 s of lead.**
+  That number is the reason the class exists, and `live_tones` fails if
+  it is ever zero.
+
+**The equivalence is arguable, not only measured, and that is worth
+having.** The partition of frames into runs depends on nothing but the
+hot/cold pattern and `max_gap_sec`, which both paths see identically; and
+at the moment the streaming detector receives a run's last hot frame, its
+state *is* the interval the batch path evaluates. So the streaming events
+are a **superset** of the batch events, and the only possible divergence
+is an early emission on a prefix that qualifies while the whole run would
+not. Not observed. If it ever appears the fix is a confirmation delay,
+not a wider tolerance.
+
+**Contradictions found: one, and it was in my own screamer.** `live_tones`
+passed on its first run against every fixture. Mutation testing found
+that two of five deliberate breakages passed it unharmed:
+
+1. **A frame grid shifted by one sample passed**, because the test asked
+   the detector for its own window length and then checked the frame
+   count against it — arithmetic, not code. The expected window and hop
+   are now formed in the test from `ToneOptions` by the same expressions
+   `core/tones.cpp` uses.
+2. **Halving the gap-bridging tolerance changed no verdict anywhere.**
+   All six library fixtures carrying a control tone carry a *clean* one,
+   so the run-assembly rule that §5 is entirely about was untested on
+   real audio. Now covered by a generated tone with a 1.5 s fade placed
+   early — early enough that a detector which fails to bridge reports the
+   tone 2.5 s late rather than merely differently — and by a two-burst
+   signal for the opposite rule, `min_hot_frac`, which no other case
+   here could break either.
+
+All five mutations now fail the test: the one-event-per-run guard, the
+frame grid, the gap tolerance, `min_hot_frac`, and emitting at the run's
+end instead of the earliest moment. **The lesson for the next agent: a
+screamer that passes on its first run has not been shown to be able to
+fail** — and one of the two survivors was hiding a hole in the fixture
+library rather than a flaw in the test's wiring.
+
+**Two gaps registered, and unlike the capture-rate gap these are
+closable.** No fixture in the library carries a **stop tone** — six carry
+a start tone and nothing else — so the signal that *ends* a transmission,
+which the §4 live state machine leans on hardest, is exercised only by
+generated audio. And nothing in the library fades mid-tone. AGENTS.md
+records real stop tones in VMW 2230Z, NMC 2204Z and GYA 2300Z fading
+0.5–1.5 s at a time (session 6); the fixtures were simply cut from other
+parts of those recordings. **One new fixture cut from any of the three
+would close both gaps at once**, and Sara may want that before M4 ships.
+
+**One thing to know before the status panel is wired.** The streaming
+path commits on the weakest frames of a tone: on `xsg-fyci-phasing-head`
+it reports purity **0.391** where the batch path reports **0.849** for the
+same tone, because it decides on the opening two seconds. The margin
+against content is intact (library content maxes at 0.16), but the live
+event's purity is not a quality bar and §8.1 should not show it as one.
+
+**Validation.** 28/28 pass (122 s), clean configure-and-build with zero
+warnings. `live_tones` runs in 25 s unguarded, so it runs in the
+`NOVA_BUILD_GUI=OFF` build too; suite count is now **26 (+2 with the
+GUI)**. It is the slowest test in the suite, and the cost is the
+block-size sweep — seven block sizes over seventeen fixtures — which
+docs/05 §9 now says out loud so a later session can trade it knowingly.
+Nothing was looked at by eye: there is still no new picture, only the
+claim that two paths agree about a signal.
+
+**Next step: the provisional renderer [docs/05 §6], with `live_preview`
+as its screamer.** Forward-only, single pass, never revised. The
+constraint that shapes it: **the preview cannot use the batch period
+estimator at all** — that estimator fits over a long baseline and would
+retroactively move already-drawn rows, which is exactly the revision §6
+forbids. It runs a short forward EMA over the last N locked lines
+instead, seeded from operator forced-start values, else IOC from the
+start tone and rate from the phasing interval, else nominal 120 lpm /
+IOC 576. Per-line dead-sector relock works forward and is kept; bracketed
+dropout repair (session 12), intra-line break placement (session 11b) and
+change-point timebase fitting (session 9) are all unavailable live and
+must not be faked — those rows are drawn wrong once and repaired in the
+saved image, which is the announced swap the pane says "provisional"
+for. `live_preview` pins dimensions, a dead-sector edge within a stated
+tolerance, and — the real claim — that the image is **bit-identical
+whatever the block size**. This is the session where a picture appears in
+the pane for the first time.
+
+---
+
 ## 2026-08-13 — Session 20, continued (2): the streaming front end, and the filter is one sample shorter than it looks
 
 Agent: Kimi. Code changed: `live/stream.hpp`, `live/stream.cpp` (new —

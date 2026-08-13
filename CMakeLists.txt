@@ -32,9 +32,12 @@ target_include_directories(nova-core PUBLIC core)
 # streaming front end (live/stream.cpp), which wraps core's batch
 # resample/demod in block-with-overlap so the live path and the saved
 # image cannot disagree [docs/05 §2.2] — hence the link to nova-core.
+# live/tone_stream.cpp is the same idea one stage later: the control-tone
+# verdicts the live state machine needs as they arrive [docs/05 §5].
 add_library(nova-live STATIC
   live/ruler.cpp
   live/stream.cpp
+  live/tone_stream.cpp
 )
 target_include_directories(nova-live PUBLIC live)
 target_link_libraries(nova-live PUBLIC nova-core)
@@ -304,6 +307,36 @@ add_executable(nova-test-live-equiv tests/test_live_equiv.cpp)
 target_link_libraries(nova-test-live-equiv PRIVATE nova-live)
 add_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav)
+
+# §9 screamer 2 [docs/05]: the streaming tone detector reaches the same
+# verdicts as detect_tones, as they arrive. Every fixture in the library
+# is passed, not only the six that carry a control tone: the eleven that
+# carry none are the false-start trap in a second implementation, and a
+# streaming detector that invents a start tone would begin a decode out
+# of noise with nothing in the saved image to show it. The generated
+# cases inside the test cover the stop tone and the IOC 288 opening,
+# which no library recording has [AGENTS.md registered gaps].
+# Unguarded: no window, no audio device.
+add_executable(nova-test-live-tones tests/test_live_tones.cpp)
+target_link_libraries(nova-test-live-tones PRIVATE nova-live)
+add_test(NAME live_tones COMMAND nova-test-live-tones
+  ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-weak-white-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-phasing-jump-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-start-phasing-100s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav)
 
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an

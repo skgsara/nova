@@ -13,21 +13,22 @@ struct Cand {
     double min_sec;
 };
 
-double median_of(std::vector<double> x) {
+}  // namespace
+
+double tone_median(std::vector<double> x) {
     if (x.empty()) return 0.0;
     std::sort(x.begin(), x.end());
     return x[x.size() / 2];
 }
 
 // 10-90% spread, the weatherfax_pi/KiwiSDR outlier-tolerant width.
-double spread_10_90(std::vector<double> x) {
+double tone_spread_10_90(std::vector<double> x) {
     if (x.size() < 3) return 0.0;
     std::sort(x.begin(), x.end());
     const size_t lo = x.size() / 10;
     const size_t hi = x.size() - 1 - x.size() / 10;
     return x[hi] - x[lo];
 }
-}  // namespace
 
 const char* tone_name(ToneKind k) {
     switch (k) {
@@ -182,12 +183,12 @@ std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
             const double t1 =
                 static_cast<double>(last_hot * hop + n) / fs;
             const double dur = t1 - t0;
-            const double sp = spread_10_90(fr) / c.nominal;
+            const double sp = tone_spread_10_90(fr) / c.nominal;
             dlog(hooks, LogTopic::kInfo,
                  "dbg: tone %s run %.2f-%.2fs (%.2fs) f=%.1f "
                  "purity=%.3f spread=%.4f hot=%.2f",
-                 tone_name(c.kind), t0, t1, dur, median_of(fr),
-                 median_of(pu), sp, hot_frac);
+                 tone_name(c.kind), t0, t1, dur, tone_median(fr),
+                 tone_median(pu), sp, hot_frac);
             // A real control tone holds ONE frequency. A run assembled out
             // of noise wanders across the search band, so the frequency
             // spread rejects it even when single windows look pure.
@@ -197,8 +198,8 @@ std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
                 e.kind = c.kind;
                 e.t_start = t0;
                 e.t_end = t1;
-                e.freq_hz = median_of(fr);
-                e.purity = median_of(pu);
+                e.freq_hz = tone_median(fr);
+                e.purity = tone_median(pu);
                 out.push_back(e);
             }
             i = last_hot + 1;

@@ -85,6 +85,16 @@ double tone_purity_band(const std::vector<float>& v, size_t s, size_t n,
                         int fs, double nominal, double tol,
                         double* freq_out = nullptr);
 
+// The two run statistics, exposed for the streaming detector in
+// `live/tone_stream.hpp` [docs/05 §5]. They are here rather than copied
+// there for the same reason `tone_purity` is shared: the live path and
+// the batch path have to accept and reject the same runs, and two
+// implementations of a median are two chances to disagree about one.
+// `tone_spread_10_90` is the outlier-tolerant width (weatherfax_pi /
+// KiwiSDR), not the full range.
+double tone_median(std::vector<double> x);
+double tone_spread_10_90(std::vector<double> x);
+
 const char* tone_name(ToneKind k);
 
 }  // namespace nova
