@@ -269,3 +269,55 @@ add_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
   --expect-start 56.88 1.0 --expect-phasing 120 50 40)
 add_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav --expect-none)
+
+# ---------------------------------------------------------------------------
+# M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an
+# external dependency [docs/05 §11]. The rule that shapes this block: a
+# missing toolkit skips the target and never fails the build, because the
+# core, the CLIs and all 23 tests must keep building on a machine with
+# neither library installed.
+#
+# Found by their own tools rather than by find_package: neither FLTK 1.4.5
+# nor RtAudio 6.0.1 installs a CMake config package under Homebrew, but both
+# ship the interface they document — fltk-config and a .pc file.
+option(NOVA_BUILD_GUI "Build the FLTK/RtAudio shell (nova-gui)" ON)
+
+if(NOVA_BUILD_GUI)
+  find_program(NOVA_FLTK_CONFIG fltk-config)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(NOVA_RTAUDIO QUIET rtaudio)
+  endif()
+
+  if(NOT NOVA_FLTK_CONFIG)
+    message(STATUS "nova-gui: SKIPPED - fltk-config not found (install FLTK)")
+  elseif(NOT NOVA_RTAUDIO_FOUND)
+    message(STATUS "nova-gui: SKIPPED - rtaudio not found by pkg-config")
+  else()
+    execute_process(COMMAND ${NOVA_FLTK_CONFIG} --cxxflags
+      OUTPUT_VARIABLE NOVA_FLTK_CXXFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND ${NOVA_FLTK_CONFIG} --ldflags
+      OUTPUT_VARIABLE NOVA_FLTK_LDFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    separate_arguments(NOVA_FLTK_CXXFLAGS NATIVE_COMMAND
+      "${NOVA_FLTK_CXXFLAGS}")
+
+    add_executable(nova-gui gui/nova-gui.cpp)
+    # nova-core is linked but not yet called: the three-layer shape of
+    # docs/05 §1 is core -> live -> gui, and the skeleton is proving the
+    # wiring of the outermost layer before nova-live exists.
+    target_link_libraries(nova-gui PRIVATE nova-core ${NOVA_RTAUDIO_LIBRARIES})
+    target_include_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_INCLUDE_DIRS})
+    target_link_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_LIBRARY_DIRS})
+    target_compile_options(nova-gui PRIVATE
+      ${NOVA_FLTK_CXXFLAGS} ${NOVA_RTAUDIO_CFLAGS_OTHER})
+    # LINK_FLAGS, not target_link_options, and the difference is a real bug
+    # this skeleton hit: FLTK's ldflags end in two `-weak_framework NAME`
+    # pairs, target_link_options de-duplicates the repeated `-weak_framework`
+    # token, and the linker is then handed a bare `ScreenCaptureKit` it reads
+    # as a filename. LINK_FLAGS is a string and goes through verbatim.
+    set_property(TARGET nova-gui APPEND_STRING PROPERTY
+      LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+    message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
+                   "${NOVA_RTAUDIO_VERSION})")
+  endif()
+endif()

@@ -394,6 +394,54 @@ progress bar is populated **only** during `DECODING`, from the nine
 stages. Saved images are a view of the user's folder — no slot table, no
 LOCK, no ring [docs/04 answer 7].
 
+### 8.0 Measured against real FLTK (session 18) — four corrections
+
+The layout above was drawn in HTML at FLTK's documented metrics, which made
+it a prediction. `gui/nova-gui.cpp` is the measurement, and it is inspectable
+without a window: `nova-gui --metrics` prints every region's real geometry,
+`--size WxH` builds at another size, `--resize WxH` puts it through FLTK's
+own resize path. Four things the toolkit did not agree with.
+
+1. **The chrome is `#c0c0c0`, not `#c6c6c6`.** That is FLTK 1.4.5's default
+   `FL_BACKGROUND_COLOR` on this machine, read from the running program. The
+   mockup page picked the wrong grey by six counts in each channel. Nothing
+   depends on it; it is recorded so the two stop disagreeing.
+
+2. **The ruler is aligned to the image pane's INTERIOR**, not to the left
+   region and not to the pane's outer edge. The pane is an `FL_DOWN_BOX`
+   with a 2 px bevel, so image column 0 is at `pane_x + 2`. The first
+   version of the skeleton spanned the ruler across the whole left region
+   from x = 0, which put tick 0 six pixels left of column 0 — and this ruler
+   is the phase-entry affordance [docs/04, the ruler/coordinate pattern], so
+   a tick that does not name the column beneath it is the one failure it
+   cannot have. The ASCII above shows the ruler starting at the region edge;
+   read it as starting at the pane's interior edge.
+
+3. **The window size, which §8 never fixed: 980 x 700, minimum 740 x 420.**
+   The minimum is set by the *control row*, not by the picture: captions and
+   menus out to Rate occupy 548 px and Start/Force Start need 168 px against
+   the right edge, so below ~720 px they collide. Worth stating because it
+   is the opposite of the intuition that the image pane sets the floor.
+
+4. **FLTK's resizable-group scaling cannot express this layout, and the
+   window computes its geometry instead.** `Fl_Group::resize` scales every
+   child overlapping the resizable widget's span, so `resizable(image_pane)`
+   — the obvious choice, since the picture is what should absorb slack —
+   dragged 980x700 to 1400x900 and stretched the Device menu from 240 px to
+   370, grew the status rows from 20 px to 27, and moved the ruler to x = 7
+   over a pane whose interior starts at 6, reintroducing correction 2 at
+   every size but the one it was built at. The shell therefore sets no
+   resizable child, uses `size_range` to stay user-resizable, and re-runs
+   one `layout(W, H)` function from `resize()`. Verified: a window built at
+   a size and a window dragged to it now produce byte-identical `--metrics`
+   output at 740x420 and at 1400x900, and the ruler matches the pane
+   interior exactly at 740, 980, 1200, 1400 and 1920 px wide.
+
+**Registered gap:** correction 2 is a bug that came back once already, under
+resize, and no test guards it. The check is three lines against `--metrics`
+output and it is the recommended next screamer; it would also be the first
+one to cover FLTK at all [§13].
+
 ### 8.1 What Nova cannot know, and why the survey's status line was wrong for it
 
 **Corrected 2026-08-13 (Sara, session 17).** The first draft of this
@@ -572,6 +620,24 @@ option(NOVA_BUILD_GUI "Build the FLTK/RtAudio shell" ON)
 # ...find FLTK + RtAudio; if either is missing, warn and skip the target,
 # never fail the build. Tests and CLIs must build with NOVA_BUILD_GUI=OFF.
 ```
+
+**Built session 18, and two details the proposal did not anticipate.**
+
+- **Neither library ships a CMake config package** under Homebrew (FLTK
+  1.4.5, RtAudio 6.0.1), so `find_package` is not the way in. Both ship the
+  interface they document instead: `fltk-config` and a pkg-config `.pc`
+  file. The block uses `find_program(fltk-config)` and
+  `pkg_check_modules(rtaudio)`, and either one missing prints
+  `nova-gui: SKIPPED - ...` and configures successfully.
+- **`target_link_options` corrupts FLTK's link line.** `fltk-config
+  --ldflags` ends in `-weak_framework UniformTypeIdentifiers
+  -weak_framework ScreenCaptureKit`; CMake de-duplicates the repeated
+  `-weak_framework` token and hands the linker a bare `ScreenCaptureKit`,
+  which fails as a missing file. The flags go through the `LINK_FLAGS`
+  string property instead, which is passed verbatim.
+
+Verified: `NOVA_BUILD_GUI=OFF` builds the three CLIs and all 23 test suites,
+which pass, and produces no `nova-gui`.
 
 M5 consequence, stated now rather than discovered at packaging: the
 tier-1/tier-2 target matrix stays cheap for the CLIs and the test suite,

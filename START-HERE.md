@@ -15,6 +15,12 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
 (23 test suites: three synthetic matrices + 20 real-fixture screamers.)
+See the M4 shell, if FLTK and RtAudio are installed — an empty window with
+no decode behind it yet: `./build/nova-gui`
+It also answers without opening anything: `./build/nova-gui --devices` lists
+the input devices, `--metrics` prints the real geometry of every region.
+No FLTK or RtAudio? The build says `nova-gui: SKIPPED` and everything else
+builds and passes as before.
 Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav out.pgm`
 See the control signals: `./build/nova-tones fixtures/vmw-start-phasing-100s.wav`
 See a recording that loses 1270 samples mid-picture drawn in one piece —

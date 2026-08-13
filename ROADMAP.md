@@ -272,7 +272,7 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15, shell designed session 17]
+## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15, shell designed session 17, skeleton built session 18]
 - Core seams (session 14, done): log/progress callback, cooperative
   cancellation, structured DecodeError kinds, decode_fax split into nine
   named stages (core/hooks.hpp; screamers in `hooks`).
@@ -374,6 +374,21 @@ Pending:
     to guarantee.
   - **No design question remains open** (docs/05 §12, all six decided
     2026-08-13). The next step is code.
+- **Walking skeleton [DONE session 18]** — `option(NOVA_BUILD_GUI)`,
+  `gui/nova-gui.cpp`, the §8 window in real FLTK widgets, RtAudio device
+  enumeration in the Device menu. No decode, no threads, no DSP, no audio
+  stream: the point was the dependency wiring and the layout, both proven.
+  Verified: 23/23 suites pass with `NOVA_BUILD_GUI=OFF` and no `nova-gui`
+  is produced; a missing FLTK or RtAudio skips the target and configures
+  successfully. Four §8 corrections came out of it (docs/05 §8.0), of
+  which one is load-bearing: the ruler must be aligned to the image
+  pane's *interior*, and FLTK's resizable-group scaling breaks that at
+  every size but the built one, so the shell computes its layout on
+  resize instead of scaling children.
+  - **Registered gap:** no screamer covers the layout. The ruler/pane
+    alignment has now been wrong twice — once as written, once again
+    under resize — and `nova-gui --metrics` makes the check three lines.
+    It would be the first test in the project to cover FLTK at all.
 - **Dependency qualifier.** "Nova has no external dependencies" stays
   true of the core, the CLIs and the test suite after M4, and becomes
   false of the GUI binary alone, which links FLTK and RtAudio behind

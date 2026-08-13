@@ -7,6 +7,127 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 18: the walking skeleton, and the mockup was wrong about the ruler
+
+Agent: Claude Opus 5. Code changed: `gui/nova-gui.cpp` (new, 594 lines),
+`CMakeLists.txt` (the `NOVA_BUILD_GUI` block). Files changed:
+`docs/05-m4-shell-design.md` (new §8.0, four measured corrections; §11
+gains what the CMake proposal did not anticipate), `ROADMAP.md` (M4
+skeleton done, one registered gap), `START-HERE.md`, `SESSION-LOG.md`.
+
+Branch `m4-skeleton`, cut before the first commit this time — the session
+17 lesson applied rather than repeated.
+
+**Task as accepted:** the next step exactly as session 17 left it — the
+first M4 code. `option(NOVA_BUILD_GUI)` finding FLTK and RtAudio and
+skipping the target rather than failing; an empty FLTK window laid out to
+`docs/05` §8; RtAudio device enumeration in the Device menu; tests and
+CLIs verified to still build with it OFF. No decode, no threads, no DSP.
+
+**Result: all four, and the layout is not what the mockup predicted.**
+
+**Validation.** 23/23 test suites pass with `NOVA_BUILD_GUI=OFF`, and no
+`nova-gui` is produced in that tree. Both skip paths configure
+successfully and print why (`fltk-config` absent; rtaudio absent from
+pkg-config). The window was built, run, and looked at — twice, before and
+after the ruler fix. Devices enumerate: four inputs on this machine, the
+default correctly marked.
+
+**Two things about the dependencies that the design's CMake sketch did
+not anticipate**, both now in `docs/05` §11:
+
+- **Neither library ships a CMake config package** under Homebrew, so
+  `find_package` is not the way in for either. Both ship what they
+  document instead — `fltk-config` and a pkg-config `.pc` file — and
+  that is what the block uses.
+- **`target_link_options` silently corrupts FLTK's link line.**
+  `fltk-config --ldflags` ends in two `-weak_framework NAME` pairs; CMake
+  de-duplicates the repeated `-weak_framework` token and hands the linker
+  a bare `ScreenCaptureKit`, which fails as a missing file. `LINK_FLAGS`
+  is a string property and goes through verbatim. The failure is loud, but
+  the cause is not, and it would have cost the next agent an hour.
+
+**Contradictions found: four, all the mockup's, all recorded in a new
+`docs/05` §8.0. One of them matters.**
+
+1. FLTK 1.4.5's default chrome is `#c0c0c0`, not the `#c6c6c6` the mockup
+   drew. Nothing depends on it; recorded so they stop disagreeing.
+2. **The ruler must be aligned to the image pane's INTERIOR.** The pane is
+   an `FL_DOWN_BOX` with a 2 px bevel, so image column 0 is at
+   `pane_x + 2`. The first version of this file spanned the ruler across
+   the whole left region from x = 0, exactly as §8's ASCII draws it, which
+   put tick 0 six pixels left of column 0. This ruler is the phase-entry
+   affordance, so a tick that does not name the column beneath it is the
+   one thing it cannot do.
+3. §8 never fixed a window size. It is 980 x 700 now, minimum 740 x 420,
+   and the minimum is set by the **control row**, not by the picture —
+   the opposite of the obvious assumption.
+4. **FLTK's resizable-group scaling cannot express this layout.**
+   `resizable(image_pane)` is the obvious choice and it is wrong:
+   `Fl_Group::resize` scales every child overlapping the resizable
+   widget's span, so dragging 980x700 to 1400x900 stretched the Device
+   menu from 240 px to 370, grew the status rows from 20 px to 27, and
+   moved the ruler to x = 7 over a pane whose interior starts at 6 —
+   reintroducing correction 2 at every size except the built one. The
+   shell now sets no resizable child, stays user-resizable via
+   `size_range`, and re-runs one `layout(W, H)` from `resize()`.
+
+**The lesson for the next agent: a layout bug you fix at one window size
+is not fixed.** Correction 2 was found by eye in a screenshot and fixed;
+it came straight back under resize, through a completely different
+mechanism, and only a second measurement caught it. `--metrics` output is
+now byte-identical between a window built at a size and one dragged to it,
+at both 740x420 and 1400x900, and the ruler matches the pane interior
+exactly at 740, 980, 1200, 1400 and 1920 px wide.
+
+**Three flags exist so the shell is checkable without a window**, which is
+also how it gets checked on a machine with no audio device: `--devices`
+lists the input devices RtAudio reports, `--metrics` prints every region's
+real geometry, `--size WxH` / `--resize WxH` build or drag it elsewhere.
+This is the same instinct as the rest of the project — a claim about
+pixels should be readable as numbers.
+
+**One more thing worth its line: RtAudio talks to stderr, and a GUI must
+not.** `RtAudio::UNSPECIFIED` probes devices *inside the constructor*,
+before any error callback can exist, so a device that fails to answer
+prints and nothing downstream can stop it — on this machine, an iPhone
+offered as a microphone but not connected fails its CoreAudio sample-rate
+query on every run. `showWarnings(false)` does not cover it; warnings and
+errors are separate channels in RtAudio 6. The shell replicates
+UNSPECIFIED's own selection rule — the compiled APIs in RtAudio's order,
+first one reporting a device wins — with the callback installed first.
+stderr is now empty.
+
+**Registered gap, and it is the recommended next step.** No screamer
+covers the layout, and `docs/05` §13 already had "no screamer covers
+RtAudio or FLTK". Correction 2 has now been wrong twice by two different
+mechanisms, which is exactly the profile of a bug that comes back a third
+time. The check is three lines against `--metrics` output — ruler x/w
+equals pane x+2 / w-4, at several sizes, built and resized — and it needs
+no window and no audio device.
+
+**Next step: the layout screamer, then `nova-live`.** In order:
+
+1. **`gui_layout`** — a ctest, guarded by `NOVA_BUILD_GUI`, asserting from
+   `nova-gui --metrics` that the ruler matches the pane interior and that
+   built-at-size equals dragged-to-size, at 740x420, 980x700 and
+   1400x900. It is the first test in the project to cover FLTK, and it
+   closes half of §13's gap. Note for whoever writes it: the suite count
+   in `START-HERE.md` becomes conditional, which is a doc change, and
+   Sara should be asked whether she wants the count stated as "23 (+1
+   with the GUI)" or left alone.
+2. **`nova-live`**, the layer with no FLTK, no RtAudio and no real clock
+   [docs/05 §1] — streaming resample/demod by block-with-overlap first,
+   because `live_demod_equiv` (streaming equals whole-file, sample for
+   sample, at every block size) is the screamer the whole live path rests
+   on. The skeleton deliberately links `nova-core` without calling it, so
+   that seam is already wired.
+
+Nothing about §2's threads, the retained store or the provisional
+renderer was touched, and nothing in this session contradicts them.
+
+---
+
 ## 2026-08-13 — Session 17: the shell drawn on paper, and the survey's one-to-one claim does not survive it
 
 Agent: Claude Opus 5. Code changed: none. Files changed:
