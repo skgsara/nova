@@ -272,7 +272,10 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [pending]
+## M4 — GUI + live audio  [pending; core seams done session 14]
+- Core seams (session 14, done): log/progress callback, cooperative
+  cancellation, structured DecodeError kinds, decode_fax split into nine
+  named stages (core/hooks.hpp; screamers in `hooks`).
 - FLTK GUI, RtAudio capture, spectrum/waterfall, image tools,
   post-decode realign / line-start adjust on retained raw stream
   (ACFax architecture: non-destructive).

@@ -183,8 +183,10 @@ No copied third-party code, tables, or files were found in Nova.
 
 ### Small core changes worth doing at the start of M4
 
-These were deliberately **not** folded into this audit because they are
-API/refactor work, not audit fixes:
+**Done, session 14** (`core/hooks.hpp`; screamers in the `hooks` suite;
+fixture images, CLI output and all five debug streams verified
+byte-identical against the pre-split baseline). The list below is what
+was built:
 
 1. Replace `std::getenv` debug printing with an optional log/progress
    callback.
@@ -236,8 +238,10 @@ API/refactor work, not audit fixes:
 
 ## Recommended next step
 
-Start M4 with the small core seam work: log/progress callback,
-cancellation, structured errors, and a stage split of `decode_fax`. Use
+Session 14 completed the first half of this: the core seam work (above)
+is done. What remains, verbatim from the audit:
+
+Design the FLTK/RtAudio shell around those seams. Use
 Isobar's `LiveScan` single-state-machine/chunking-invariance architecture
-and ACFax's retained-raw non-destructive model as the references, then
-design the FLTK/RtAudio shell around those seams.
+and ACFax's retained-raw non-destructive model as the references, and
+answer the "M4 design decisions still open" above on paper first.

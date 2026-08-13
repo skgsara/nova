@@ -2,8 +2,6 @@
 #include "tones.hpp"
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 
 namespace nova {
 namespace {
@@ -119,7 +117,8 @@ double tone_purity_band(const std::vector<float>& v, size_t s, size_t n,
 }
 
 std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
-                                    const ToneOptions& opt) {
+                                    const ToneOptions& opt,
+                                    const DecodeHooks& hooks) {
     std::vector<ToneEvent> out;
     const size_t n = static_cast<size_t>(opt.win_sec * fs);
     const size_t hop = static_cast<size_t>(opt.hop_sec * fs);
@@ -130,12 +129,13 @@ std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
         {ToneKind::kStartIOC288, 675.0, opt.min_start_sec},
         {ToneKind::kStop,        450.0, opt.min_stop_sec},
     };
-    const bool dbg = std::getenv("NOVA_DEBUG") != nullptr;
 
     for (const Cand& c : cands) {
         struct W { double purity, freq; };
         std::vector<W> wins;
         for (size_t s = 0; s + n <= video.size(); s += hop) {
+            if ((wins.size() & 127) == 0)
+                throw_if_cancelled(hooks, "tones");
             W best{0.0, c.nominal};
             best.purity = tone_purity_band(video, s, n, fs, c.nominal,
                                            opt.tol, &best.freq);
@@ -183,12 +183,11 @@ std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
                 static_cast<double>(last_hot * hop + n) / fs;
             const double dur = t1 - t0;
             const double sp = spread_10_90(fr) / c.nominal;
-            if (dbg)
-                std::fprintf(stderr,
-                             "dbg: tone %s run %.2f-%.2fs (%.2fs) f=%.1f "
-                             "purity=%.3f spread=%.4f hot=%.2f\n",
-                             tone_name(c.kind), t0, t1, dur, median_of(fr),
-                             median_of(pu), sp, hot_frac);
+            dlog(hooks, LogTopic::kInfo,
+                 "dbg: tone %s run %.2f-%.2fs (%.2fs) f=%.1f "
+                 "purity=%.3f spread=%.4f hot=%.2f",
+                 tone_name(c.kind), t0, t1, dur, median_of(fr),
+                 median_of(pu), sp, hot_frac);
             // A real control tone holds ONE frequency. A run assembled out
             // of noise wanders across the search band, so the frequency
             // spread rejects it even when single windows look pure.

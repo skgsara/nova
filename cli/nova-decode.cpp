@@ -4,6 +4,7 @@
 #include "../core/image.hpp"
 #include "../core/resample.hpp"
 #include "../core/wav.hpp"
+#include "env_hooks.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +67,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
+    opt.hooks = nova::hooks_from_env();
     const bool bad_lpm = opt.lpm != 0 && opt.lpm != 60 && opt.lpm != 90 &&
                          opt.lpm != 120;
     const bool bad_ioc = opt.ioc != 0 && opt.ioc != 288 && opt.ioc != 576;

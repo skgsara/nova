@@ -17,6 +17,7 @@
 // the local white leading-edge crossing, take the median over the phasing
 // lines, and reject the result if the 10-90% spread is too wide.
 #pragma once
+#include "hooks.hpp"
 #include <vector>
 
 namespace nova {
@@ -142,9 +143,11 @@ struct PhasingResult {
 
 // `period` is the line length in samples (nominal is good enough: a
 // clock error of even 500 ppm walks under 30 samples across a whole
-// phasing interval).
+// phasing interval). `hooks` carries the log/cancellation seams
+// (core/hooks.hpp); the default is silent.
 PhasingResult detect_phasing(const std::vector<float>& video, int fs,
                              double period,
-                             const PhasingOptions& opt = PhasingOptions());
+                             const PhasingOptions& opt = PhasingOptions(),
+                             const DecodeHooks& hooks = DecodeHooks());
 
 }  // namespace nova

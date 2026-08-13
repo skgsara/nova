@@ -15,6 +15,7 @@
 //   - locked_lines counts real sync-template matches only; if no comb
 //     is found the decoder fails loudly instead of drawing noise.
 #pragma once
+#include "hooks.hpp"
 #include "image.hpp"
 #include <vector>
 
@@ -44,6 +45,9 @@ struct DecodeOptions {
     // draws every line from onset to EOF, which is what Nova did before
     // session 7.
     bool segment = true;
+    // Log/progress/cancellation seams (core/hooks.hpp). All three null is
+    // the batch default: silent, uninterruptible.
+    DecodeHooks hooks;
 };
 
 // Which of the two dead-sector styles WMO §5.1.3.3 permits the station
@@ -196,5 +200,7 @@ struct DecodeResult {
 
 DecodeResult decode_fax(const std::vector<float>& video, int fs,
                         const DecodeOptions& opt);
+// Failures are DecodeError (core/hooks.hpp), which is a std::runtime_error
+// with a machine-readable kind.
 
 }  // namespace nova

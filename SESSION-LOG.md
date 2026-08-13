@@ -7,6 +7,82 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 14: M4 core seams — the monolith is nine stages, and the core no longer prints
+
+Agent: Kimi Code CLI (Kimi k2). Code changed: `core/hooks.hpp`,
+`core/hooks.cpp`, `core/fax.cpp`, `core/fax.hpp`, `core/tones.cpp`,
+`core/tones.hpp`, `core/phasing.cpp`, `core/phasing.hpp`,
+`cli/env_hooks.hpp`, `cli/nova-decode.cpp`, `cli/nova-tones.cpp`,
+`tests/test_hooks.cpp`, `CMakeLists.txt`, `ROADMAP.md`, `START-HERE.md`,
+`docs/03-pre-m4-audit.md`. Developed on the `m4-seams` scratch branch and
+merged to `main` at Sara's request at the end of the session.
+
+**Task as accepted:** the M4 seam work named in `docs/03-pre-m4-audit.md`
+("Small core changes worth doing at the start of M4"), before any GUI
+design: log/progress callback, cooperative cancellation, structured error
+kinds, and a behaviour-preserving stage split of `decode_fax`.
+
+**What was built.** `core/hooks.hpp` is the whole surface: `DecodeHooks`
+(log sink, progress callback, cancel predicate — all three null is the
+silent batch default), `DecodeError` (a `std::runtime_error` with a
+machine-readable `DecodeErrorKind`), and three helpers (`dlog`,
+`report`, `throw_if_cancelled`) that each cost one branch when no hook is
+installed. The five NOVA_DEBUG* variables became five `LogTopic`s; the
+core never reads the environment now — the CLIs map the same variables
+onto a stderr sink (`cli/env_hooks.hpp`), so the shell debugging workflow
+is unchanged. One deliberate difference, documented there: kDetail stands
+alone, so NOVA_DEBUG_FULL=1 without NOVA_DEBUG now shows the per-line
+detail it used to suppress.
+
+**The stage split is a seam, not a reorganization.** `decode_fax`'s
+numbered sections are nine named functions over a `DecodeState` struct —
+onset, dead-sector, phasing, sync-track, period-fit, segmentation,
+timebase, change-points, assembly — driven by a table in `decode_fax`.
+Only cross-stage values live in the state; stage-locals stayed local.
+Every constant, comment and comparison was carried over verbatim;
+cancellation checks and progress reports were added at stage boundaries
+and every 16–64 iterations of the long loops (comb windows, sync track,
+assembly rows), plus inside `detect_tones` and `detect_phasing`, which
+gained a trailing `DecodeHooks` parameter (defaulted: tests unchanged).
+Errors: empty input / too short / no comb / too few lines are now
+`kEmptyInput` / `kTooShort` / `kNoSignal` / `kTooFewLines`, with the same
+message strings as before; cancellation throws `kCancelled`.
+
+**Behaviour preservation is measured, not argued.** Before touching
+anything: baseline 22/22, PGM hashes of four fixture decodes, and the
+five debug streams captured. After the split: all four images
+byte-identical, the CLI's stdout byte-identical, and all five
+NOVA_DEBUG* streams byte-identical. Final suite **23/23** (100.5 s).
+
+**New screamers** (`hooks`, 13 checks): each error kind by value;
+DecodeError still catches as `std::runtime_error`; the sink receives
+`dbg:` lines and changes nothing (image and metrics identical with and
+without); all nine stages reported in pipeline order with fractions in
+[0,1]; cancellation at a stage boundary, mid-decode, and inside
+`detect_tones` all end in `kCancelled`, never in a partial image.
+
+**Contradictions found.** None against the audit: docs/03's list mapped
+one-to-one onto what was built (item 4, helper consolidation, found no
+truly identical variants; item 5, comments moved with their code). The
+audit said the split gives "progress, cancellation, and future
+incremental execution" seams — the first two are exercised by tests; the
+third is a design property and is honestly untested until M4 builds on
+it.
+
+**Validation.** Suite: **23/23 pass, 100.52 s**. Baseline comparison as
+above: four fixture PGMs, CLI text, and all five debug streams
+byte-identical to the pre-split baseline. `git diff --check` clean;
+`-Wall -Wextra` build has zero warnings.
+
+**Next step:** design the FLTK/RtAudio shell around these seams, using
+Isobar's `LiveScan` single-state-machine/chunking-invariance model and
+ACFax's retained-raw non-destructive adjustment architecture (docs/03
+"M4 design decisions still open" — streaming model, incremental tone
+scan, provisional status, retained raw, memory policy — need answers
+first, on paper, before GUI code).
+
+---
+
 ## 2026-08-13 — Session 13: pre-M4 audit — the standards were mostly right; the provenance file was not
 
 Agent: Kimi Code CLI (Kimi k2). Code changed: `core/fax.cpp`,
