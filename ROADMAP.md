@@ -713,20 +713,27 @@ one feature with several parts, plus one verification no test can do.
    whether anyone is looking — but it is the last piece of the "edit
    holds the pane" decision.
 7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
-8. **The KiwiSDR browser hop** (found by item 1, session 25). The live
-   HLL catch saved a chart with 221 seams in 802 lines — a sample-skip
-   every 3–4 lines, dead-sector edges ragged to ±20 px — where the
-   library norm is placement RMS under 1 px and dead-straight edges. The
-   decoder followed the steps honestly; the steps are in the audio the
-   browser delivered to BlackHole (SDR → network → WebAudio resample →
-   BlackHole → Nova). First move is isolation, not adaptation: a paired
-   capture (KiwiSDR's own record button + Nova live on the same
-   broadcast) convicts or clears the hop. If convicted, the adaptation is
-   capture-side — pipe `kiwirecorder` straight into BlackHole and skip
-   the browser — not decoder-side: the samples are gone, and no smoother
-   invents them. Note the session-25 catch is also the standing argument
-   for item 3: with the raw stream retained, this diagnosis would not
-   have to wait for another broadcast.
+8. **The KiwiSDR browser hop** (found by item 1, session 25; scope set by
+   Sara: **the browser stays the audio source**). The live HLL catch saved
+   a chart with 221 seams in 802 lines — a sample-skip every 3–4 lines,
+   dead-sector edges ragged to ±20 px — where the library norm is
+   placement RMS under 1 px and dead-straight edges. The decoder followed
+   the steps honestly; the steps are in the audio BlackHole delivered.
+   With the browser as a fixture of the setup, the work is three parts:
+   (a) *isolate* — record BlackHole in parallel (QuickTime audio
+   recording, source BlackHole 2ch) on the next broadcast and decode that
+   WAV offline: identical seam counts clear Nova's 48 kHz capture and
+   resample entirely, and the parallel file is the fixture this class of
+   defect has never had; (b) *decide how a seam is drawn* — session 11
+   chose the honest one-line step over a multi-line tear, but at 221
+   seams per chart "honest" reads as ragged, and whether to ramp, hold,
+   or interpolate across a skip is a docs/01-level decision for Sara,
+   not something to smuggle into code; (c) *surface it* — the Quality
+   field already says "764/802, −78 ppm" and could say the seam count
+   too, so the operator learns the audio path is stepping while there is
+   still time to switch SDRs. Note the session-25 catch is also the
+   standing argument for item 3: with the raw stream retained, none of
+   this has to wait for another broadcast.
 
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
