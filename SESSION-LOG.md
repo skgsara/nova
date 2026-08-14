@@ -7,6 +7,168 @@ anything as our develop history").
 
 ---
 
+## 2026-08-13 — Session 21: a picture in the pane, and the block-size claim was false for a reason nobody would have read
+
+Agent: Claude. Code changed: `live/preview.hpp`, `live/preview.cpp` (new —
+`StreamPreview`), `tests/test_live_preview.cpp` (new),
+`core/fax.{hpp,cpp}` (`lerp_at` / `pulse_score` / `best_sync` leave the
+anonymous namespace as `fax_lerp_at` / `fax_pulse_score` /
+`fax_best_sync`, together with the layout constants, the two thresholds
+and the re-acquisition rule; no behaviour change, 28/28 green across the
+move), `tests/test_tones_fixture.cpp` (`--expect-stop`), `CMakeLists.txt`
+(`nova-live` gains the source; `live_preview` and
+`tones_fixture_nmc_stop`). New fixture:
+`fixtures/nmc-image-stop-tone-120s.wav`. Files changed:
+`docs/05-m4-shell-design.md` (§6 gains five findings, §9 item 3 marked
+built, §10 gains a fourth contradiction, §13 closes two gaps and opens
+one, the suite count), `ROADMAP.md`, `AGENTS.md`, `START-HERE.md`,
+`SESSION-LOG.md`.
+
+**Task as accepted:** the next step as written last entry — the
+provisional renderer [docs/05 §6], with `live_preview` as its screamer —
+and then, at Sara's direction, the stop-tone fixture session 20 said one
+cut would close.
+
+**There is a picture in the pane.** The first one out of it was the JMH
+test chart, readable — "JMH /JMH2 /JMH4, 3622.5KHZ / 7795KHZ /
+13988.5KHZ, TOKYO JAPAN" — drawn forward-only, one pass, no row revised.
+Against the batch image the difference is a hair more wobble in the
+lettering, which is the announced swap and nothing else. The picture to
+look at by eye is `himawari-jmh-warp-120s`: the batch draws its
+1270-sample loss in one piece, the preview shows the tear across the
+middle and then **recovers below it**, which is the re-acquisition sweep
+doing its job.
+
+**Three real bugs on the screamer's first run, and the first one is the
+one worth remembering.**
+
+1. **The picture depended on the audio callback's block size** —
+   identical at 1, 7, 333, 1000 and 2000 samples, different at 12345 and
+   65536, on five fixtures. Not a logic error: `fax_best_sync` walks its
+   search window by accumulation (`p += step`), so where that window sits
+   in the retained buffer decides the last bits of every probe position,
+   and at absolute magnitude the double grid is coarser than near zero.
+   The renderer released video at the end of each `push`, so a bigger
+   block trimmed further, moved the buffer origin, and drifted the probe
+   grid by **1.46e-11** — enough to move a sub-sample vertex, and from
+   there a pixel. Releasing once per *row* makes the buffer origin a
+   function of the rows drawn and nothing else. **A streaming component
+   can be perfectly correct in its logic and still depend on its
+   chunking, through arithmetic that has nothing to do with the
+   algorithm**, and only a sweep finds that.
+2. **No re-acquisition.** §6 says the per-line relock "works forward and
+   is kept"; `stage_track`'s whole-line sweep after a run of misses works
+   forward too, and leaving it out cost `himawari-kiwisdr-dropout-120s`
+   **140 locked rows of 238** against the batch's 232 of 240 — the
+   tracker never came back after the dropout and every row below it was
+   torn. With the sweep: 230 of 239, and 95–100% locks across the
+   library.
+3. **§6's seed list is missing PHASE, and on a white-only station that is
+   the only seed that works.** §6 seeds IOC and rate and is silent on
+   where the anchor comes from before any row is drawn. For a pulse
+   station the renderer's own profile is excellent (0–1 px from the batch
+   column on all eleven). For a white-only station it is the *wrong
+   feature*: no per-line phase exists at all (session 4), so the phasing
+   interval's leading edge of white is the only anchor there is
+   [WMO §5.2.3.4] and `decode_fax` already takes it from there.
+   `vmw-phasing-image-160s` was drawn **524 px around** from the saved
+   image until `PreviewOptions::phase_anchor` was added — the operator
+   would have watched a chart arrive sideways and then jump.
+
+**One design decision §6 did not make, made here: acquisition is
+latency, not revision.** Forward-only forbids fixing an anchor after
+rows are drawn, so the renderer holds 16 lines, builds the same
+consistency profile `stage_dead_sector` builds, commits, and never
+revisits — then draws those same 16 lines first, so nothing is lost to
+the wait. Short is not a compromise: the profile rides the *seeded*
+period, so a rate error smears the pulse by `lines * period * e`. At 16
+lines and 300 ppm that is 19 samples against a 90-sample pulse; at 120
+lines it would be 144, wider than the pulse. A preview that waited
+longer would be measurably worse, not merely later.
+
+**What the screamer measures.** Sixteen fixtures, seven block sizes: the
+dead sector lands within **1 px** of the batch image's column on all
+eleven pulse fixtures and both phasing-anchored white-only ones, and the
+image and every row's placement are **bit-identical at every block size
+from 1 sample to 65536**. The live halves of PHASE and SYNC are pinned
+here too, because nothing else pinned them: PHASE moves the rows below
+it by the fraction asked for (−452 px against −453 asked) and leaves the
+rows above byte-identical, with exactly one row marked; and SYNC behaves
+as session 17 decided it must — a deliberate +2000 ppm leaves **0 ppm
+standing on a pulse station and 2000 of 2000 on a white-only one**. That
+asymmetry is now the same at both moments, which was the point of
+`override_sync_fallback` existing at all.
+
+**Mutation testing, and the same lesson as session 20 in a new species.**
+Seven deliberate breakages, all now killed; two survived the first
+version of the test. One survived because the mutation is genuinely
+nearly harmless on this library — drawing every row at the prediction
+instead of at its own lock loses only the within-row correction, 0.1–3 px
+here — so it is pinned by re-deriving each row's pixels from its own
+reported `start_sample` and `period` rather than by any geometry
+threshold. The other is worth stating as a rule: **the test classified
+each fixture by asking the RENDERER which anchor it had used**, so a
+change that stopped using the phasing anchor reclassified itself into the
+class that is not checked. A test must classify its subject from the
+inputs it supplied, never from the subject's own account of what it did.
+
+**Two gaps closed with one cut, exactly as session 20 predicted.**
+`fixtures/nmc-image-stop-tone-120s.wav` is NMC 2204Z 340–462 s: a real
+chart ending in a real 450 Hz stop tone [WMO §5.2.5] at 111.38–116.50 s
+of the cut, which **fades to nothing for 0.88 s in its middle**. NMC was
+chosen over VMW 2230Z and GYA 2324Z on three counts — the deepest
+mid-tone fade of the three (VMW fades 0.50 s and 0.25 s, GYA is nearly
+clean), no NMC fixture in the library at all, and it exercises the TAIL
+half of segmentation, which nothing else did (the decode drops 22 lines
+of stop tone and ends the picture at 111.17 s). `tones_fixture_nmc_stop`
+pins that the fade is bridged into ONE run rather than two bursts,
+neither of which would reach `min_stop_sec`; the streaming detector
+commits it **3.12 s before the run ends**, same start time as the batch
+path, identical at every block size.
+
+**One gap opened, and it should be read before M4 ships.** Two library
+fixtures are white-only AND carry no phasing interval, so **nothing in
+the transmission says where their dead sector is.** Both paths guess
+from a consistency profile and guess over different numbers of lines, so
+the preview can draw the page rotated: **563 px on `gya-weak-white-120s`,
+46 px on `vmw-white-sector-120s`**. `live_preview` reports this and
+deliberately does not pin it — a tolerance wide enough to admit a third
+of a page would stop the check failing at all. The answer is the
+operator [ISO §4.2.6, docs/05 §7], and the screamer demonstrates it:
+**one PHASE click lands the page to within 1 px of the batch image.** The
+consequence for the shell is that on these stations the preview will
+visibly jump when the saved image replaces it unless the operator phases
+it, and §8.5's account of the swap should probably say so.
+
+**Validation.** 30/30 pass (146 s), clean configure-and-build with zero
+warnings. `live_preview` runs 23 s unguarded; with `live_tones` at 25 s
+the two block-size sweeps are now a third of the suite, which docs/05 §9
+says out loud along with the argument for keeping them — this sweep
+caught bug 1, which nothing else would have. Suite count **28 (+2 with
+the GUI)**.
+
+**Next step: the live session state machine [docs/05 §4]**, which is the
+piece that turns the three built streaming stages into a session. It
+owns the transitions `IDLE → READY → START TONE → PHASING → DRAWING —
+PREVIEW → STOP TONE → DECODING → SAVED`, the forced start that jumps
+`READY → DRAWING` with operator IOC and rate, and the operator Stop that
+takes `DRAWING → DECODING` by the same path a stop tone takes (holding
+the image, never discarding it). It is also the component that fills in
+what this session found missing: it is the thing that watches the
+phasing interval and therefore the thing that hands `StreamPreview` its
+`phase_anchor`, and the thing that freezes the retained snapshot for the
+batch decode [docs/05 §3]. Its screamer is the obvious one — drive the
+machine with a whole fixture and assert the state sequence, with
+`nmc-image-stop-tone-120s` now able to carry it all the way to `STOP
+TONE` on real audio for the first time. Two smaller things left undone
+and worth doing whenever convenient: there is no `nova-preview` CLI, so
+the only way to run the renderer is the screamer (~50 lines would fix
+that, and looking at a preview by eye is how three of this session's
+findings were confirmed); and `png_roundtrip` [§9 screamer 4] is still
+unbuilt, which the save path will need.
+
+---
+
 ## 2026-08-13 — Session 20, closing note: the two GUI screamers stay two targets
 
 Agent: Claude. Code changed: none. Files changed:

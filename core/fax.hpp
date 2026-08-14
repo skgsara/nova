@@ -21,6 +21,100 @@
 
 namespace nova {
 
+// --- the line layout, and the sync template defined against it ------------
+//
+// These were private to `core/fax.cpp` until session 21. They are public
+// now because the live preview renderer draws its own rows
+// [live/preview.hpp, docs/05 §6] and must lock onto the SAME feature the
+// batch path locks onto. The preview and the saved image are two pictures
+// of one signal; two implementations of one template are two chances to
+// disagree about which feature is the line start, and the operator would
+// see that disagreement as the picture jumping when the batch decode
+// replaces the preview. Same argument, and the same remedy, as
+// `tone_median` moving into `core/tones.hpp` in session 20.
+//
+// Nothing here changed value or behaviour in the move: each constant keeps
+// the measurement that set it, restated below.
+
+// Dead sector, as a fraction of the line [WMO §5.1.3.3], and the optional
+// black sync pulse inside it, which is at most half the dead sector.
+constexpr double kFaxDeadFrac = 0.045;
+constexpr double kFaxPulseFrac = 0.0225;
+
+// Level slices for the across-line consistency profile. Deliberately well
+// inside the demodulator's 0..1 black..white range so that fading and
+// noise do not push a genuinely black pulse over the line.
+constexpr double kFaxDarkLevel = 0.25;
+constexpr double kFaxWhiteLevel = 0.93;
+
+// A station "sends the pulse" when its black->white pulse shape holds on
+// this fraction of lines. Measured across the 20-recording library
+// (session 4): stations that send one score 0.48-0.94, stations that do
+// not score 0.14-0.34. The cut sits in that gap; the two closest files to
+// it are HDSDR (0.48) and JSC4 (0.50), both of which are pulse stations on
+// other recordings of the same transmitter, so the cut errs the safe way.
+constexpr double kFaxPulseConsistency = 0.40;
+
+// Lock threshold: the pulse template swings ~0.9 on a clean black->white
+// edge. This is "did the template really match", never "did the correction
+// stay put".
+constexpr double kFaxPulseLock = 0.6;
+
+// Re-acquisition: after this many consecutive unlocked lines, sweep the
+// whole line instead of the ±narrow window — but only on every Nth line,
+// and at a coarse step, so a file that never locks costs a bounded extra.
+//
+// A tracker that only ever looks ±narrow around its own prediction can
+// never come back from being wrong: a coarse anchor off by more than the
+// window, or a stream time-skip, puts the sync outside every future window
+// (measured: himawari.wav, anchor 128 samples late, 14 locks of 1988 — the
+// signal itself is textbook). The sweep only counts if the template
+// actually matches, so a white-only station cannot re-acquire onto picture
+// content: it simply keeps coasting, which is the honest outcome.
+//
+// Public since session 21 for the same reason as the template itself: a
+// dropout is exactly where the live preview and the batch decode would
+// otherwise part company, and the preview coasting past one it could have
+// recovered from is a visibly torn picture [live/preview.cpp].
+constexpr int kFaxReacqMisses = 8;
+constexpr int kFaxReacqEvery = 8;
+constexpr double kFaxReacqStep = 4.0;
+
+// Linear interpolation into the video at a fractional sample position.
+// Clamps at both ends — so a caller that asks outside the data it holds
+// gets the edge sample rather than an error, which is why the live
+// renderer checks its buffer covers a row BEFORE drawing it
+// [live/preview.cpp].
+float fax_lerp_at(const std::vector<float>& v, double pos);
+
+// Sync-template score for a station that sends the optional black pulse
+// [WMO §5.1.3.3]: the dead sector opens with black (<= half the dead
+// sector) followed by white. Content-independent — unlike edge strength
+// this cannot lock onto picture content, because the pulse is black->white
+// in every image line regardless of what precedes it.
+// Returns roughly [-1, 1]; ~1.0 = clean sync at p.
+double fax_pulse_score(const std::vector<float>& v, double p, double pulse);
+
+// Best template position in [lo, hi], parabolic sub-sample refinement.
+// `step` > 1 scans coarsely first and then refines at single-sample
+// resolution around the winner — the template is smooth on the scale of
+// its own width, so a coarse pass cannot step over the peak, and a
+// whole-line re-acquisition sweep stays affordable.
+//
+// There is deliberately NO per-line template for a white-only dead sector.
+// Two were built and measured against VMW 2215Z (session 4): "white across
+// the dead sector, against the picture either side", and "rising edge into
+// white". Both raise the lock count (0 -> 753 and -> 879 of 1162) and both
+// make the picture WORSE — the first jitters inside the white run and tears
+// the chart into strips, the second drifts and drags the fitted clock from
+// -121 to -285 ppm, slanting the whole image. Neither is a lock; both are
+// the picture's own white margin being matched. A white-only dead sector
+// carries no per-line phase information, because WMO §5.1.3.3 puts nothing
+// in it that the paper does not also contain. Such stations are decoded on
+// the measured clock, and report zero locks, which is the truth.
+double fax_best_sync(const std::vector<float>& v, double lo, double hi,
+                     double pulse, double* score, double step = 1.0);
+
 struct DecodeOptions {
     int lpm = 0;                 // 60/90/120; 0 = measure from signal
     // 576/288 manual; 0 = select from the 300/675 Hz start tone, falling

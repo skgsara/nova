@@ -10,8 +10,16 @@
 namespace nova {
 namespace {
 
-constexpr double kDeadFrac = 0.045;   // dead sector, of line [WMO §5.1.3.3]
-constexpr double kPulseFrac = 0.0225; // sync pulse <= half the dead sector
+// The line layout, the level slices and the two thresholds now live in
+// core/fax.hpp, because the live preview renderer draws against the same
+// template [docs/05 §6]. The measurement behind each one moved with it;
+// these aliases keep the batch code below reading exactly as it did.
+constexpr double kDeadFrac = kFaxDeadFrac;
+constexpr double kPulseFrac = kFaxPulseFrac;
+constexpr double kDarkLevel = kFaxDarkLevel;
+constexpr double kWhiteLevel = kFaxWhiteLevel;
+constexpr double kPulseConsistency = kFaxPulseConsistency;
+constexpr double kPulseLock = kFaxPulseLock;
 // Line layout measured on the JMH test chart (SESSION-LOG 2026-08-12
 // session 3): 7.5 ms sync pulse, 10.5 ms white gap, 474 ms picture,
 // then a ~8 ms black porch before the next pulse — the WMO §5.1.3.3
@@ -21,28 +29,9 @@ constexpr double kPulseFrac = 0.0225; // sync pulse <= half the dead sector
 // cropping), so pulse/gap/picture/porch all render truthfully.
 constexpr double kPi = 3.14159265358979323846;
 
-// Level slices for the across-line consistency profile. Deliberately well
-// inside the demodulator's 0..1 black..white range so that fading and
-// noise do not push a genuinely black pulse over the line.
-constexpr double kDarkLevel = 0.25;
-constexpr double kWhiteLevel = 0.93;
-// A station "sends the pulse" when its black->white pulse shape holds on
-// this fraction of lines. Measured across the 20-recording library
-// (session 4): stations that send one score 0.48-0.94, stations that do
-// not score 0.14-0.34. The cut sits in that gap; the two closest files to
-// it are HDSDR (0.48) and JSC4 (0.50), both of which are pulse stations on
-// other recordings of the same transmitter, so the cut errs the safe way.
-constexpr double kPulseConsistency = 0.40;
-// Lock threshold: the pulse template swings ~0.9 on a clean black->white
-// edge. This is "did the template really match", never "did the correction
-// stay put".
-constexpr double kPulseLock = 0.6;
-// Re-acquisition: after this many consecutive unlocked lines, sweep the
-// whole line instead of the ±narrow window — but only on every Nth line,
-// and at a coarse step, so a file that never locks costs a bounded extra.
-constexpr int kReacqMisses = 8;
-constexpr int kReacqEvery = 8;
-constexpr double kReacqStep = 4.0;
+constexpr int kReacqMisses = kFaxReacqMisses;
+constexpr int kReacqEvery = kFaxReacqEvery;
+constexpr double kReacqStep = kFaxReacqStep;
 // Half-width of the local median applied to the sync residual, in lines.
 // Used twice: by the assembly, to correct the line it draws, and by the
 // timebase test, which is asking whether that same correction moves in
@@ -174,87 +163,14 @@ double best_period(const std::vector<float>& v, double lo, double hi) {
     return best_lag + d;
 }
 
-inline float lerp_at(const std::vector<float>& v, double pos) {
-    if (pos < 0.0) return v.front();
-    if (pos >= v.size() - 1) return v.back();
-    const size_t i = static_cast<size_t>(pos);
-    const double f = pos - i;
-    return static_cast<float>(v[i] * (1.0 - f) + v[i + 1] * f);
-}
-
+// `fax_lerp_at`, `fax_pulse_score` and `fax_best_sync` are declared in
+// core/fax.hpp and defined below the anonymous namespace; only `mean_over`,
+// which nothing outside this file needs, stays private.
 inline double mean_over(const std::vector<float>& v, double from, double len) {
     double acc = 0.0;
     int n = 0;
-    for (double x = from; x < from + len; x += 1.0, n++) acc += lerp_at(v, x);
+    for (double x = from; x < from + len; x += 1.0, n++) acc += fax_lerp_at(v, x);
     return n ? acc / n : 0.0;
-}
-
-// Sync-template score for a station that sends the optional black pulse
-// [WMO §5.1.3.3]: the dead sector opens with black (<= half the dead
-// sector) followed by white. Content-independent — unlike edge strength
-// this cannot lock onto picture content, because the pulse is black->white
-// in every image line regardless of what precedes it.
-// Returns roughly [-1, 1]; ~1.0 = clean sync at p.
-double pulse_score(const std::vector<float>& v, double p, double pulse) {
-    return mean_over(v, p + pulse, pulse) - mean_over(v, p, pulse);
-}
-
-// There is deliberately NO per-line template for a white-only dead sector.
-// Two were built and measured against VMW 2215Z (session 4): "white across
-// the dead sector, against the picture either side", and "rising edge into
-// white". Both raise the lock count (0 -> 753 and -> 879 of 1162) and both
-// make the picture WORSE — the first jitters inside the white run and tears
-// the chart into strips, the second drifts and drags the fitted clock from
-// -121 to -285 ppm, slanting the whole image. Neither is a lock; both are
-// the picture's own white margin being matched. A white-only dead sector
-// carries no per-line phase information, because WMO §5.1.3.3 puts nothing
-// in it that the paper does not also contain. Such stations are decoded on
-// the measured clock, and report zero locks, which is the truth.
-// Best template position in [lo, hi], parabolic sub-sample refinement.
-// `step` > 1 scans coarsely first and then refines at single-sample
-// resolution around the winner — the template is smooth on the scale of
-// its own width, so a coarse pass cannot step over the peak, and a
-// whole-line re-acquisition sweep stays affordable.
-double best_sync(const std::vector<float>& v, double lo, double hi,
-                 double pulse, double* score, double step = 1.0) {
-    if (hi <= lo) {  // window clamped out of existence at the file edges
-        if (score) *score = -1e300;
-        return lo;
-    }
-    double best_s = -1e300, best_p = lo;
-    for (double p = lo; p < hi; p += step) {
-        const double s = pulse_score(v, p, pulse);
-        if (s > best_s) {
-            best_s = s;
-            best_p = p;
-        }
-    }
-    if (step > 1.0) {
-        const double f0 = std::max(lo, best_p - step);
-        const double f1 = std::min(hi, best_p + step);
-        for (double p = f0; p < f1; p += 1.0) {
-            const double s = pulse_score(v, p, pulse);
-            if (s > best_s) {
-                best_s = s;
-                best_p = p;
-            }
-        }
-    }
-    // Sub-sample vertex, but only where there really is one. `denom != 0`
-    // is not enough: at a coarse-scan winner the neighbours need not
-    // bracket a maximum, and the vertex formula then throws the position
-    // arbitrarily far — measured on FAXSignal, where one such jump moved a
-    // line by a quarter million samples, poisoned the median intercept and
-    // left the whole file at 59 locks of 2192.
-    const double sm = pulse_score(v, best_p - 1, pulse);
-    const double sp = pulse_score(v, best_p + 1, pulse);
-    const double denom = sm - 2.0 * best_s + sp;
-    if (denom < 0.0) {
-        const double d = 0.5 * (sm - sp) / denom;
-        best_p += std::max(-1.0, std::min(1.0, d));
-    }
-    if (score) *score = best_s;
-    return best_p;
 }
 
 double median(std::vector<double> x) {
@@ -358,7 +274,7 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
                 const double base =
                     start + (static_cast<double>(b) * per_block + l) * period;
                 for (int i = 0; i < plen; i++)
-                    prof[b][i] += lerp_at(v, base + i);
+                    prof[b][i] += fax_lerp_at(v, base + i);
             }
             double m = 0.0;
             for (int i = 0; i < plen; i++) m += prof[b][i];
@@ -434,6 +350,66 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
 }
 
 }  // namespace
+
+// --- the shared sync template [core/fax.hpp] ------------------------------
+// Public since session 21 so the live preview renderer locks onto the same
+// feature this file does. The bodies are unchanged from when they were
+// private; the comments justifying them moved to the header, where the new
+// caller reads them.
+
+float fax_lerp_at(const std::vector<float>& v, double pos) {
+    if (pos < 0.0) return v.front();
+    if (pos >= v.size() - 1) return v.back();
+    const size_t i = static_cast<size_t>(pos);
+    const double f = pos - i;
+    return static_cast<float>(v[i] * (1.0 - f) + v[i + 1] * f);
+}
+
+double fax_pulse_score(const std::vector<float>& v, double p, double pulse) {
+    return mean_over(v, p + pulse, pulse) - mean_over(v, p, pulse);
+}
+
+double fax_best_sync(const std::vector<float>& v, double lo, double hi,
+                     double pulse, double* score, double step) {
+    if (hi <= lo) {  // window clamped out of existence at the file edges
+        if (score) *score = -1e300;
+        return lo;
+    }
+    double best_s = -1e300, best_p = lo;
+    for (double p = lo; p < hi; p += step) {
+        const double s = fax_pulse_score(v, p, pulse);
+        if (s > best_s) {
+            best_s = s;
+            best_p = p;
+        }
+    }
+    if (step > 1.0) {
+        const double f0 = std::max(lo, best_p - step);
+        const double f1 = std::min(hi, best_p + step);
+        for (double p = f0; p < f1; p += 1.0) {
+            const double s = fax_pulse_score(v, p, pulse);
+            if (s > best_s) {
+                best_s = s;
+                best_p = p;
+            }
+        }
+    }
+    // Sub-sample vertex, but only where there really is one. `denom != 0`
+    // is not enough: at a coarse-scan winner the neighbours need not
+    // bracket a maximum, and the vertex formula then throws the position
+    // arbitrarily far — measured on FAXSignal, where one such jump moved a
+    // line by a quarter million samples, poisoned the median intercept and
+    // left the whole file at 59 locks of 2192.
+    const double sm = fax_pulse_score(v, best_p - 1, pulse);
+    const double sp = fax_pulse_score(v, best_p + 1, pulse);
+    const double denom = sm - 2.0 * best_s + sp;
+    if (denom < 0.0) {
+        const double d = 0.5 * (sm - sp) / denom;
+        best_p += std::max(-1.0, std::min(1.0, d));
+    }
+    if (score) *score = best_s;
+    return best_p;
+}
 
 // --- decode_fax: state and stages -----------------------------------------
 // decode_fax is a fixed pipeline of the numbered stages below, run in
@@ -670,7 +646,7 @@ void stage_dead_sector(DecodeState& st) {
         throw_if_cancelled(st.hooks, "dead-sector");
         const double base = st.start + (prof0 + l) * period0;
         for (int i = 0; i < plen; i++) {
-            const float x = lerp_at(video, base + i);
+            const float x = fax_lerp_at(video, base + i);
             if (x < kDarkLevel) dark_frac[i] += 1.0;
             if (x > kWhiteLevel) white_frac[i] += 1.0;
         }
@@ -886,7 +862,7 @@ void stage_track(DecodeState& st) {
         const double pmin = margin;
         const double pmax = video.size() - margin;
         double pred = st.start + st.dead_start0;
-        spos[0] = best_sync(video, std::max(pmin, pred - wide),
+        spos[0] = fax_best_sync(video, std::max(pmin, pred - wide),
                             std::min(pmax, pred + wide), st.pulse, &sstr[0]);
         double last_good = spos[0];
         long last_good_l = 0;
@@ -913,7 +889,7 @@ void stage_track(DecodeState& st) {
             const double span = reacq ? 0.5 * period0 : narrow;
             const double lo = std::max(pmin, c - span);
             const double hi = std::min(pmax, c + span);
-            spos[l] = best_sync(video, lo, hi, st.pulse, &sstr[l],
+            spos[l] = fax_best_sync(video, lo, hi, st.pulse, &sstr[l],
                                 reacq ? kReacqStep : 1.0);
             if (sstr[l] >= lock) {
                 last_good = spos[l];
@@ -1589,9 +1565,9 @@ void stage_assembly(DecodeState& st) {
                         const double l_new =
                             starts[j + 1] + b * (m - (j + 1));
                         double so, sn;
-                        const double po = best_sync(video, l_old - 20,
+                        const double po = fax_best_sync(video, l_old - 20,
                                                     l_old + 20, st.pulse, &so);
-                        const double pn = best_sync(video, l_new - 20,
+                        const double pn = fax_best_sync(video, l_new - 20,
                                                     l_new + 20, st.pulse, &sn);
                         dlog(st.hooks, LogTopic::kSeams,
                              "dbg: run row %d: old %.2f  new %.2f",
@@ -1635,7 +1611,7 @@ void stage_assembly(DecodeState& st) {
                 const double off = b * j / width;
                 const double pos = s0 + off + (off > brk ? k : 0.0);
                 dst[j] = static_cast<uint8_t>(
-                    std::lround(lerp_at(video, pos) * 255.0f));
+                    std::lround(fax_lerp_at(video, pos) * 255.0f));
             }
         };
         double brk = b;  // no break: the pre-session-11b behaviour
@@ -1707,7 +1683,7 @@ void stage_assembly(DecodeState& st) {
                     const double o = b * j / width;
                     const double pos = draw0 + off + o + (o > brk ? k : 0.0);
                     const int v = static_cast<int>(
-                        std::lround(lerp_at(video, pos) * 255.0f));
+                        std::lround(fax_lerp_at(video, pos) * 255.0f));
                     acc += std::abs(v - static_cast<int>(above[j]));
                 }
                 return acc;
@@ -1733,7 +1709,7 @@ void stage_assembly(DecodeState& st) {
             const double o = b * j / width;
             const double pos = draw0 + o + (o > brk ? k : 0.0);
             best[j] = static_cast<uint8_t>(
-                std::lround(lerp_at(video, pos) * 255.0f));
+                std::lround(fax_lerp_at(video, pos) * 255.0f));
         }
         std::copy(best.begin(), best.end(),
                   img.px.begin() + static_cast<size_t>(row) * width);

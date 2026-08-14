@@ -145,8 +145,12 @@ Six library recordings improved, fourteen unchanged, none worse. A station
 with no sync pulse still has no per-line phase to correct — VMW 2215Z's
 staircase is the open half of that milestone.
 
-Manual override of everything [ISO §4.2.6] is still untouched and needs
-the GUI (M4).
+Manual override [ISO §4.2.6] now exists in the decoder and not yet on
+screen (session 21): the live renderer takes an operator PHASE — where
+the dead sector is, as a fraction of the line — and an operator SYNC ppm
+trim, both applying forward from the next row so that rows already drawn
+never move. What is left is wiring them to the ruler and the numeric
+fields (M4), and carrying them into the batch re-decode.
 
 **M4 has started (2026-08-13): the shell exists, with nothing behind it.**
 The design was settled first, against a survey of sixteen commercial

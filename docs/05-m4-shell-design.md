@@ -361,6 +361,65 @@ the preview, once, and repaired in the saved image. That visible
 difference is the announced swap, and it is why the pane says
 "provisional" from the first row.
 
+**[BUILT session 21: `live/preview.{hpp,cpp}` + `tests/
+test_live_preview.cpp`, running unguarded in every build.]** Five things
+this section did not know, in the order they matter:
+
+1. **The seed list is missing an entry, and on a white-only station the
+   missing one is the only one that works.** §6 seeds IOC and RATE and
+   says nothing about PHASE, which left the renderer finding its own
+   anchor from image lines. That is the best available on a station that
+   sends a black pulse and the *only wrong answer* on one that does not:
+   a white-only dead sector carries no per-line phase at all (session 4),
+   so the phasing interval's leading edge of white is the single place
+   its anchor exists [WMO §5.2.3.4], and `decode_fax` takes it from
+   exactly there. Measured before this was added, on
+   `vmw-phasing-image-160s`: the preview drew the page **524 px** —
+   nearly a third of a line — around from where the saved image put it.
+   Now `PreviewOptions::phase_anchor`, filled in by the live state
+   machine on its way out of `PHASING`, and used only where the image
+   lines cannot answer, which is `decode_fax`'s own rule. The two paths
+   now agree to **1 px** on both phasing-anchored fixtures.
+2. **Acquisition is latency, not revision, and shorter is also better.**
+   §6 forbids revising a drawn row, so the anchor has to be right before
+   row 0 appears. The renderer holds 16 lines, builds the same across-line
+   consistency profile `stage_dead_sector` builds, commits an anchor and
+   never revisits it — and draws those same 16 lines first, so nothing is
+   lost to the wait. The window is short because the two pressures on it
+   oppose: a longer stack is a cleaner fraction but a blurrier one, since
+   the profile rides the *seeded* period and a rate error e smears the
+   pulse by `lines * period * e`. At 16 lines and a 300 ppm seed error
+   that is 19 samples against a 90-sample pulse; at the 120 lines the
+   batch path can afford — it has a refined period by then — the same
+   error would smear 144, wider than the pulse itself.
+3. **Re-acquisition is part of "the relock works forward", and leaving it
+   out costs the page below a dropout.** `stage_track`'s whole-line sweep
+   after a run of misses is forward-only and belongs here. Measured
+   without it on `himawari-kiwisdr-dropout-120s`: **140 rows locked of
+   238**, against 232 of 240 for the batch path — the tracker never came
+   back and every row below the dropout was drawn torn. With it, 230 of
+   239, and the preview's lock rate is 95–100% across the library.
+4. **The forward EMA is measured away from on a pulse station, and that
+   is the SYNC decision of §7.1 arriving one stage early.** Where the
+   station sends a pulse the relock keeps measuring the real period and
+   the EMA walks an operator's trim off within `ema_lines` rows; where it
+   does not, nothing contradicts the operator and the value stands for the
+   whole page. Measured with a deliberate +2000 ppm: **0 ppm of 2000
+   still standing** on a pulse station, **2000 of 2000** on a white-only
+   one. Implementing the live trim as a plain override would have made the
+   live path and the batch path disagree about the same operator action.
+5. **Block-size independence is a property of the trim schedule, which is
+   not where anyone would look.** `fax_best_sync` walks its search window
+   by accumulation, so where that window sits in the retained buffer
+   decides the last bits of every probe position — at absolute magnitude
+   the double grid is coarser than near zero, and the two sequences drift
+   apart by ~1e-11 over a line. Releasing video per *push* rather than per
+   *row* therefore made the picture depend on the audio callback's block
+   size: identical at 1, 7, 333, 1000 and 2000 samples, different at 12345
+   and 65536, on five fixtures. Releasing once per row makes `buf_start_`
+   a function of the rows drawn and nothing else, which is what makes the
+   picture one too.
+
 ---
 
 ## 7. The manual override surface, and the two core fields it needs
@@ -381,6 +440,23 @@ Behaviour differs by moment, as decided:
   never move. The SR-97's "touch once and wait several lines before
   judging" caution earns a real affordance — after a live override the
   pane marks the row where it took effect.
+  **[BUILT session 21: `StreamPreview::set_phase_anchor` /
+  `set_clock_ppm`, marked on the row by `PreviewRow::phase_mark` /
+  `sync_mark`, pinned by `live_preview`. Measured: the rows above an
+  override are byte-identical to a render without it, exactly one row
+  carries the mark, and the rows below move by the fraction asked for
+  (−452 px against −453 asked). Two notes the section did not have.
+  **PHASE is always taken FORWARD in the signal** — there may be no
+  retained samples left to take it backward through — so a report of
+  0.9 costs most of one row rather than winding back a tenth of one.
+  And **SYNC behaves live exactly as §7.1 decided it must behave in the
+  batch re-decode**: measured away where the per-line relock can
+  contradict it (0 ppm of a deliberate 2000 still standing on a pulse
+  station), and standing for the whole page where nothing can (2000 of
+  2000 on a white-only one). Building the live trim as a plain override
+  would have made the two moments disagree about the same operator
+  action, which is the bug §7.1 exists to prevent — it just had one more
+  place to hide in than §7.1 knew about.]**
 - *After the stop tone*: a re-render from the retained snapshot,
   non-destructive and repeatable. This is the home of the remaining
   ISO §4.2.6 / §5.4.3 compliance item [docs/02].
@@ -1068,6 +1144,24 @@ existing 20 fixtures:
    within a stated tolerance, and — the real claim — **is bit-identical
    whatever the block size**. A preview that depends on how the audio
    callback happened to chunk the stream is broken.
+   **[BUILT session 21: `live/preview.{hpp,cpp}` +
+   `tests/test_live_preview.cpp`, running unguarded in every build. All
+   16 fixtures that hold a picture, plus a generated IOC 288 signal
+   because no recording carries one. Measured: the dead sector lands
+   within **1 px** of the batch image's column on all eleven pulse
+   fixtures and both phasing-anchored white-only ones, and the image and
+   every row's placement are bit-identical at all seven block sizes from
+   1 sample to 65536. The "stated tolerance" turned out to need splitting
+   by ANCHOR CLASS — see §13 — because two fixtures contain nothing that
+   says where the dead sector is, and no tolerance can be right about
+   those. Six more claims the writing of it needed: no row ever starts
+   behind the retained buffer (forward-only as a property of the memory);
+   the two paths agree what kind of dead sector the station sends; the
+   forward tracker keeps the sync the batch path keeps (which is what
+   pins re-acquisition); every row's pixels are the ones its own reported
+   start and period produce; and the live halves of PHASE and SYNC.
+   Verified by mutation, seven of them, all killed — two survived an
+   earlier version and both survivals were holes in the test. See §10.]**
 4. **`png_roundtrip`** — the hand-rolled writer's output decodes back to
    the source pixels (checked against an independent decoder, e.g.
    Python/`sips`, in the test), and the file is a valid PNG.
@@ -1120,13 +1214,23 @@ widget edit can break without moving a pixel:
    mutation: making Start sensitive during DECODING, and lighting the
    ruler with the width unknown, each fail it.]**
 
-The suite count is now **"26 (+2 with the GUI)"** — `live_tones` is the
-third unguarded `nova-live` test. It is also the slowest test in the
-suite at 25 s of the 122 s total, and the cost is the block-size sweep:
-seven block sizes over seventeen fixtures, nine detector passes per
-signal. That is the price of the "identical whatever the blocking"
-claim, and it is worth saying out loud so a future session can trade it
-knowingly rather than discover it. Session 19 decided
+The suite count is now **"28 (+2 with the GUI)"** — session 21 adds
+`live_preview`, the fourth unguarded `nova-live` test, and
+`tones_fixture_nmc_stop` on the new stop-tone fixture.
+
+**The block-size sweep is now the suite's dominant cost, and it is worth
+seeing the whole bill in one place.** `live_tones` runs 25 s and
+`live_preview` 23 s of a 146 s total — a third of the suite, spent
+almost entirely on rendering or detecting the same signals seven times
+over at seven block sizes. That is the price of the two "identical
+whatever the blocking" claims, and both have now earned it: the sweep is
+exactly what caught session 21's trim-schedule bug, which was invisible
+at every block size below 12345 and which no amount of reading the code
+would have suggested. A future session may still want to trade it — the
+honest lever is fewer block sizes on the long fixtures rather than fewer
+fixtures, since the pathological cases are 1 and 65536 — but it should
+trade it knowing that this sweep has caught a real bug, not merely cost
+time. Session 19 decided
 "24 (+1 with the GUI)" — correcting session 18's "23 (+1)" — on the
 argument that a test of dependency-free `nova-live` code should run
 everywhere. That argument is unchanged and now applies twice: item 9 is
@@ -1212,6 +1316,29 @@ shown to be able to fail. Both survivors were invisible to a green
 suite, and one of them hid a real coverage hole in the fixture library
 rather than a flaw in the test's wiring.
 
+**A fourth, session 21, and it is the same lesson a third time — but the
+survivor is a new species of it.** `live_preview` failed on its first
+run and found three real bugs, so it had already been shown able to
+fail. Mutation testing still found two of seven breakages surviving:
+
+- **drawing every row at the prediction instead of at its own lock**
+  survived, because the prediction is re-seeded from each lock, so all
+  that is lost is the within-row correction — 0.1–3 px on this library.
+  No threshold on either geometry statistic separates that from a clean
+  render without also failing the two warp fixtures, whose spread is a
+  real tear the preview is *supposed* to show. Pinned instead by
+  re-deriving each row's pixels from its own reported `start_sample` and
+  `period`: the row must be drawn where the row says it was drawn;
+- **ignoring the phasing anchor** survived for a reason worth naming.
+  The test classified each fixture by asking the RENDERER which anchor it
+  had used — so a change that stopped using the phasing anchor
+  *reclassified itself* into the class the test does not check. **A test
+  must classify its subject from the inputs it supplied, never from the
+  subject's own account of what it did**, or a broken implementation gets
+  to choose which claim it is held to. The classification now comes from
+  `PreviewOptions`, and the renderer's own report is a separate assertion
+  against it.
+
 No other contradiction found between `docs/03`, `docs/04`, `ROADMAP.md`
 and the code as it stands.
 
@@ -1246,8 +1373,10 @@ option(NOVA_BUILD_GUI "Build the FLTK/RtAudio shell" ON)
   which fails as a missing file. The flags go through the `LINK_FLAGS`
   string property instead, which is passed verbatim.
 
-Verified: `NOVA_BUILD_GUI=OFF` builds the three CLIs and all 23 test suites,
-which pass, and produces no `nova-gui`.
+Verified: `NOVA_BUILD_GUI=OFF` builds the three CLIs and all 28 unguarded
+test suites, which pass, and produces no `nova-gui`. (23 when this was
+written at session 18; every `nova-live` screamer since has been added
+unguarded, which is the argument in §9.)
 
 M5 consequence, stated now rather than discovered at packaging: the
 tier-1/tier-2 target matrix stays cheap for the CLIs and the test suite,
@@ -1432,26 +1561,46 @@ It is worth expecting a third instance somewhere in this document.
   cannot surprise the resampler the way a real capture chain might, and
   no fixture can close this, because every recording in the library
   reached us through someone else's resampler already.
-- **No fixture in the library carries a STOP tone** (survey, session 20).
-  Six of the seventeen carry a control tone and all six carry a *start*
-  tone; the stop tone — the signal that ends a transmission, and
-  therefore the one the live state machine at §4 leans on hardest — is
-  exercised only by generated signals in `live_tones` and by the
-  synthetic matrix in `tones`. Unlike the capture-rate gap above, **this
-  one is closable**: AGENTS.md records real stop tones measured in VMW
-  2230Z, NMC 2204Z and GYA 2300Z (session 6), fading 0.5–1.5 s at a
-  time. The fixtures were simply cut from other parts of those
-  recordings. A stop-tone fixture cut from one of them would also be the
-  library's first real test of the gap-bridging rule, which is the next
-  gap down.
-- **Nothing in the library fades mid-tone**, so the run-assembly rule
-  §5 rewrote is exercised on real audio nowhere (session 20, found by
-  mutation — halving the streaming detector's gap tolerance changed no
-  verdict on any fixture). `live_tones` covers it with a generated tone
-  interrupted by 1.5 s of noise, and with a two-burst signal for the
-  opposite rule. A real faded stop tone would close both this and the
-  gap above at once.
+- ~~**No fixture in the library carries a STOP tone**~~ and ~~**nothing
+  in the library fades mid-tone**~~ (both registered session 20).
+  **CLOSED session 21 by one fixture, as predicted.**
+  `nmc-image-stop-tone-120s.wav` is NMC 2204Z 340–462 s: a real chart
+  ending in a real 450 Hz stop tone at 111.38–116.50 s of the cut
+  [WMO §5.2.5], which **fades to nothing for 0.88 s in its middle** —
+  the run-assembly gap-bridging rule of §5 meeting a real fade instead
+  of a generated one. It also brings NMC into the fixture library for
+  the first time, and exercises the tail half of segmentation, which no
+  other fixture did: the batch decode drops 22 lines of stop tone and
+  ends the picture at 111.17 s. Pinned by `tones_fixture_nmc_stop` (the
+  batch detector, including that the fade is bridged into ONE run rather
+  than two bursts, neither of which would reach `min_stop_sec`) and
+  carried by `live_tones` and `live_preview`. The streaming detector
+  commits it **3.12 s before the run ends**, at the same start time as
+  the batch path, identical at every block size.
+- **A white-only station with no phasing interval has no anchor at all,
+  and the preview may draw the page rotated** (session 21, measured).
+  This is a property of the transmission, not of the renderer: a
+  white-only dead sector carries no per-line phase (session 4), so the
+  only evidence is an across-line consistency profile — and the batch
+  path builds one over 120 lines where a forward renderer has 16. Where
+  those two profiles pick different candidates the two pictures differ
+  by however far apart the candidates are: measured **563 px on
+  `gya-weak-white-120s`** and 46 px on `vmw-white-sector-120s`, the two
+  fixtures in the library that are in this class. `live_preview`
+  reports this and does **not** pin it, deliberately — a tolerance wide
+  enough to admit a third of a page would stop the check failing at all.
+  The answer is not a wider tolerance but the operator: `ISO §4.2.6`
+  manual adjustment, §7's PHASE control, and the screamer demonstrates
+  that **one click lands the page to within 1 px of the batch image**.
+  Worth knowing before M4 ships: on these two stations the operator will
+  see the preview jump when the saved image replaces it unless they
+  phase it themselves, and §8.5's swap should probably say so.
 - The preview's row-placement quality has no target number yet.
   `place_rms_px` exists for the batch path; the equivalent for the
-  preview is not defined, so §9's screamer 3 pins determinism and
-  dimensions, not quality.
+  preview is not defined, so §9's screamer 3 pins determinism,
+  dimensions and where the dead sector lands, not quality. Session 21
+  measured the raw material for one: the drawn dead-sector edge has a
+  row-to-row roughness of **0.00 px on every fixture**, with 7.02 px of
+  *spread* on the two warp fixtures — which is a precise statement that
+  their edge takes one step and stays there, rather than jittering. A
+  target number would have to be stated in those terms.

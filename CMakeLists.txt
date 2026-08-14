@@ -34,10 +34,16 @@ target_include_directories(nova-core PUBLIC core)
 # image cannot disagree [docs/05 §2.2] — hence the link to nova-core.
 # live/tone_stream.cpp is the same idea one stage later: the control-tone
 # verdicts the live state machine needs as they arrive [docs/05 §5].
+# live/preview.cpp is the same idea one stage later again: the picture
+# itself, drawn forward-only as the rows arrive [docs/05 §6], against the
+# same sync template core/fax.cpp locks onto (promoted to core/fax.hpp in
+# session 21 so the two paths cannot disagree about which feature is the
+# line start).
 add_library(nova-live STATIC
   live/ruler.cpp
   live/stream.cpp
   live/tone_stream.cpp
+  live/preview.cpp
 )
 target_include_directories(nova-live PUBLIC live)
 target_link_libraries(nova-live PUBLIC nova-core)
@@ -287,6 +293,13 @@ add_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
   --expect-start 56.88 1.0 --expect-phasing 120 50 40)
 add_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav --expect-none)
+# The library's only real STOP tone, cut session 21 from NMC 2204Z: the
+# signal that ENDS a transmission, which every fixture before this one
+# lacked, and which fades to nothing for 0.88 s in its middle — the
+# gap-bridging rule meeting a real fade instead of a generated one.
+add_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
+  --expect-stop 111.38 1.0)
 
 # §9 screamer 8 [docs/05]: the ruler's column mapping — the column under a
 # screen x is the column the ruler names there, at every zoom, scroll
@@ -317,10 +330,42 @@ add_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
 # cases inside the test cover the stop tone and the IOC 288 opening,
 # which no library recording has [AGENTS.md registered gaps].
 # Unguarded: no window, no audio device.
+# §9 screamer 3 [docs/05]: the provisional renderer draws the picture
+# forward-only, and the picture does not depend on how the audio callback
+# chunked the stream. Every fixture that holds a picture is rendered and
+# compared with the batch image's dead-sector column — the two paths share
+# the sync template and nothing else, so agreeing about which column it is
+# in is two independent answers. Also pins the live half of the PHASE/SYNC
+# asymmetry [docs/05 §7.1], which nothing else covered, and generates an
+# IOC 288 signal because no library recording carries one.
+# Unguarded: no window, no audio device.
+add_executable(nova-test-live-preview tests/test_live_preview.cpp)
+target_link_libraries(nova-test-live-preview PRIVATE nova-live)
+add_test(NAME live_preview COMMAND nova-test-live-preview
+  ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/gya-weak-white-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-phasing-jump-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-start-phasing-100s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav)
+
 add_executable(nova-test-live-tones tests/test_live_tones.cpp)
 target_link_libraries(nova-test-live-tones PRIVATE nova-live)
 add_test(NAME live_tones COMMAND nova-test-live-tones
   ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/gya-weak-white-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav

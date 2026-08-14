@@ -495,6 +495,45 @@ Pending:
   meanwhile by generated signals, and both closable by cutting one new
   fixture from VMW 2230Z, NMC 2204Z or GYA 2300Z. Suite count 26 (+2
   GUI).
+- **The provisional renderer [built session 21]** —
+  `live/preview.{hpp,cpp}`: `StreamPreview`, forward-only, single pass,
+  never revised. Rate from a short EMA over the last N locked lines,
+  phase from the same per-line dead-sector relock the batch path uses —
+  `fax_best_sync`, promoted out of `core/fax.cpp` into `core/fax.hpp`
+  with the layout constants and the re-acquisition rule, so the preview
+  and the saved image lock onto the same feature rather than onto two
+  implementations of one template. `core/fax.cpp` changed by nothing
+  else. **A picture appears in the pane for the first time**, and the
+  first one out was the JMH test chart, readable.
+  `live_preview` renders all 16 fixtures that hold a picture: the dead
+  sector lands within **1 px** of the batch image's column on all eleven
+  pulse fixtures and both phasing-anchored white-only ones, and the
+  image and every row's placement are **bit-identical at seven block
+  sizes from 1 sample to 65536**. Three real bugs on its first run, all
+  fixed: the retained buffer was released per push rather than per row,
+  which made the picture depend on the block size through the last bits
+  of the sync search's accumulated probe positions; the forward tracker
+  had no whole-line re-acquisition sweep, so a dropout tore the page
+  from there to the end (140 locks of 238 against the batch's 232 of
+  240, now 230 of 239); and `docs/05 §6`'s seed list named IOC and rate
+  but not PHASE, which on a white-only station is the only seed that
+  works — the preview drew `vmw-phasing-image-160s` **524 px around**
+  from the saved image until the phasing anchor was passed in.
+  Registered gap: two library fixtures are white-only AND carry no
+  phasing interval, so nothing in the signal says where their dead
+  sector is; the preview may draw them rotated (563 px measured), and
+  the screamer demonstrates that one operator PHASE click lands the page
+  to 1 px. Suite count 28 (+2 GUI).
+- **The stop-tone gap, closed [session 21]** — `fixtures/
+  nmc-image-stop-tone-120s.wav`, NMC 2204Z 340–462 s: a real chart
+  ending in a real 450 Hz stop tone [WMO §5.2.5] that **fades to nothing
+  for 0.88 s in its middle**. One fixture closes both gaps session 20
+  registered — the library had no stop tone at all and nothing that
+  faded mid-tone — and it adds NMC to the fixture library and exercises
+  the tail half of segmentation, which nothing else did (22 lines of
+  stop tone dropped). `tones_fixture_nmc_stop` pins that the fade is
+  bridged into ONE run rather than two bursts; the streaming detector
+  commits it **3.12 s before the run ends**.
 - **The save/edit lifecycle [DECIDED 2026-08-13, Sara, session 20;
   docs/05 §8.5]** — five questions asked while those surfaces were being
   written, about the whole life of one chart rather than about the

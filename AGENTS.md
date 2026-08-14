@@ -131,6 +131,27 @@ more likely right than one that agrees only with its own reasoning.
 
 ## Registered gaps
 - 90 lpm fixture: none in the library (batch survey, session 3).
+- ~~Stop-tone fixture: none~~, and ~~nothing in the library fades
+  mid-tone~~ — both closed session 21 by one cut, as session 20 predicted
+  they would be. `fixtures/nmc-image-stop-tone-120s.wav` is NMC 2204Z
+  340–462 s: a real chart ending in a real 450 Hz stop tone at 111.38 s
+  of the cut, which fades to nothing for 0.88 s in its middle. First NMC
+  fixture in the library, and the first to exercise the TAIL half of
+  segmentation (22 lines of stop tone dropped). The other two candidates
+  measured the same day, for whoever wants a second: VMW 2230Z's stop
+  tone at 631.75 s fades twice (0.50 s and 0.25 s), GYA 2324Z's at
+  670.62 s is nearly clean.
+- **A white-only station with no phasing interval has no line-start
+  anchor at all** (session 21). Not a decoder limitation — the
+  transmission contains no such information: the dead sector carries no
+  per-line phase (session 4) and there is no phasing edge to fall back
+  on [WMO §5.2.3.4]. Both paths must guess from an across-line
+  consistency profile, and they guess over different numbers of lines
+  (batch 120, live preview 16), so their pictures can differ by however
+  far apart the candidates are: 563 px on `gya-weak-white-120s`, 46 px
+  on `vmw-white-sector-120s`. `live_preview` reports it and does not pin
+  it; the operator's PHASE control is the answer and one click lands the
+  page to 1 px. Do not "fix" this by widening a tolerance.
 - IOC 288 fixture: none. Re-confirmed session 6 with a detector that works
   in the right domain and searches ±1.5% around 675 Hz: no IOC-288 start
   tone anywhere in the library. IOC 288 remains synthetic-only.

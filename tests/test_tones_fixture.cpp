@@ -14,6 +14,16 @@
 //     station: its dead sector holds no per-line sync at all (session 4),
 //     so the phasing stage is the only place its line-start phase can come
 //     from [WMO §5.2.3.4]. This fixture is the evidence that it is there.
+//   nmc-image-stop-tone-120s.wav — NMC (US Navy/NWS Pt Reyes) 2204Z,
+//     340..462 s. The library's only real STOP tone [WMO §5.2.5]: 450 Hz
+//     at 111.38-116.50 s of the cut, ending a real chart. Until session 21
+//     every tone fixture carried a start tone and nothing else, so the
+//     signal that ENDS a transmission — the one the live state machine
+//     leans on hardest [docs/05 §4] — was exercised only by generated
+//     audio. It also fades mid-tone, 0.88 s at its deepest, which is the
+//     gap-bridging rule of `ToneOptions::max_gap_sec` meeting a real fade
+//     for the first time rather than a synthesised one. NMC is white-only,
+//     like VMW, and this is the library's first fixture from it.
 //   kyodo-news-jsc1-60lpm-120s.wav — JSC1 Kyodo News, 60..180 s. Dense
 //     newspaper text: the roadmap's named false-start trap. The parent
 //     recording carries no control signal anywhere in its 1606 s, so any
@@ -71,6 +81,46 @@ int main(int argc, char** argv) {
             std::printf("    unexpected phasing %.2f-%.2f s (%d lines)\n",
                         p.t_start, p.t_end, p.lines);
         check(!p.found, "no phasing invented from newspaper text");
+        std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall checks passed\n",
+                    failures);
+        return failures ? 1 : 0;
+    }
+
+    if (!std::strcmp(argv[2], "--expect-stop")) {
+        // The end of a transmission, on real off-air audio [WMO §5.2.5].
+        if (argc != 5) {
+            std::fprintf(stderr, "test_tones_fixture: bad argument count\n");
+            return 2;
+        }
+        const double want_at = std::atof(argv[3]);
+        const double tol = std::atof(argv[4]);
+        const nova::ToneEvent* stop = nullptr;
+        for (const auto& e : ev)
+            if (e.kind == nova::ToneKind::kStop) stop = &e;
+        for (const auto& e : ev)
+            if (e.kind != nova::ToneKind::kStop)
+                std::printf("    also %s %.2f-%.2f s purity %.3f\n",
+                            nova::tone_name(e.kind), e.t_start, e.t_end,
+                            e.purity);
+        check(stop != nullptr, "450 Hz stop tone found in a real recording");
+        if (stop) {
+            std::printf("    stop %.2f-%.2f s  f=%.2f Hz  purity=%.3f\n",
+                        stop->t_start, stop->t_end, stop->freq_hz,
+                        stop->purity);
+            check(std::fabs(stop->t_start - want_at) <= tol,
+                  "stop tone at the expected time");
+            check(std::fabs(stop->freq_hz - 450.0) <= 4.5,
+                  "within the ±1% of WMO §5.2.6");
+            // The claim the fixture was cut FOR. This tone fades to nothing
+            // for 0.88 s in the middle, and the run-assembly rule that
+            // bridges such a gap [ToneOptions::max_gap_sec] had never met a
+            // real fade — every library tone before this one is clean, so
+            // session 20 had to generate one. A detector that ends the run
+            // at the first faded frame reports two short bursts here, and
+            // neither reaches `min_stop_sec`.
+            check(stop->t_end - stop->t_start >= 4.0,
+                  "reported as ONE run across its mid-tone fade, not two");
+        }
         std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall checks passed\n",
                     failures);
         return failures ? 1 : 0;
