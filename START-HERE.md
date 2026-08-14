@@ -14,7 +14,7 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(34 test suites (+2 with the GUI): three synthetic matrices + 21
+(35 test suites (+2 with the GUI): three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually

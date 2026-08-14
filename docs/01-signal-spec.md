@@ -313,7 +313,25 @@ library, so that registered gap stands.
      (Theil-Sen) and not a level;
   3. a single large move is a real skip in the capture chain, so it is
      followed within one line — a seam — rather than clamped into a
-     multi-line diagonal tear;
+     multi-line diagonal tear. **But a move that RETURNS within the
+     vouching distance is not a stream event and is not followed**
+     [session 26]: four lines at the new level is what "the level moved"
+     means to the change-point detector, so a step cancelled by an
+     opposite step within three lines, with the levels outside the pair
+     agreeing to the detection resolution, never established a level at
+     all. HLL 2147Z is the case that taught it: a faded signal with dark
+     content close behind the white gap pollutes the pulse template's
+     white window, a position ~60 samples late out-scores the true one
+     (0.72 vs 0.44 on line 342, measured, with the audio straight to ±5
+     samples), and the hop returns one to three lines later with a dipped
+     lock score (0.62–0.71 against the family's 0.88–0.91). Followed,
+     those hops jog the dead-sector strip by 22 px for two rows — the
+     raggedness Sara sent back twice. Real skips persist: the warp drop
+     and the JSC insertions never return. The known cost: a real drop
+     compensated by a real insertion within three lines would also
+     cancel, and its rows would draw displaced by the event it hides —
+     no library recording does that, and a browser catch-up pair is
+     unmeasured, not known;
   4. a move can land INSIDE a line, and then the row is stretched, not
      moved (session 11b): the two ends of a JSC row disagreed by 5–10 px of
      1810 against 1 px on a linear recording. The move's size is the
@@ -346,7 +364,8 @@ library, so that registered gap stands.
   phasing statistic) and not corrected — the case no library recording
   covers, and the open half of M2b.
   [`roundtrip [10]`, `fixture_timebase_steps`, `fixture_warp`, `fixture`,
-  `fixture_60lpm`, `fixture_anchor_delta_xsg`, `fixture_dropout`]
+  `fixture_60lpm`, `fixture_anchor_delta_xsg`, `fixture_dropout`,
+  `fixture_false_locks`]
 - **A pulse station keeps its tracked anchor; the phasing anchor is measured
   there but never preferred.** Argued in session 7 on the grounds that a
   tracked reference beats a fixed one, tested in session 8. JSC2 is the case

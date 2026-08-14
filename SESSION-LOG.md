@@ -7,7 +7,73 @@ anything as our develop history").
 
 ---
 
-## 2026-08-14 — Session 26 (cont): the grey hold is rejected, and the ragged edges are FALSE LOCKS, not seams
+## 2026-08-14 — Session 26 (cont 2): seam admission — a move that returns was never a move
+
+Agent: Kimi. Code changed: `core/fax.cpp` (`stage_change_points` cancels a
+step/return pair), `tests/test_fixture.cpp` (`porch_edges` /
+`porch_edge_maxmove` / `--expect-straight-porch`), `CMakeLists.txt`
+(`fixture_false_locks`), `fixtures/hll-2147z-false-locks-40s.wav` (new,
+cut from Sara's QuickTime parallel capture of HLL 2147Z, 160–200 s — the
+first fixture whose job is a tracker failure, not a signal feature).
+Files changed: `docs/01-signal-spec.md` (§5 item 3 gains the persistence
+proviso), `ROADMAP.md` (item 8(b) decided and built), `SESSION-LOG.md`.
+
+**Task as accepted:** Sara picked fix direction 1 from the previous
+entry — seam admission — with template robustness (direction 2)
+registered for later if the library shows the need.
+
+**The rule, and why it is shaped this way.** The change-point detector
+says "the level moved" when the median of 4 locked lines each side
+disagrees by >10 samples. HLL's false locks come in pairs, and two bad
+lines in a four-line window beat that median — so the detector vouched
+for moves that were one lock hopping and hopping back. The cancellation
+asks the same detector's own question one level up: a step followed
+within the vouching distance (3 lines) by an opposite step, netting to
+zero, with the levels outside the pair agreeing to the same resolution,
+never established a level. The pair is cancelled and the rows between
+draw with their segment. Real skips persist — the warp drop and the JSC
+insertions never return — so the library is untouched by construction,
+and the full suite agrees: 36/36 before this entry's test was added,
+then 37/37 with it.
+
+**Measured on the air.** HLL 2147Z whole recording: 55 → 39 seams
+followed, and the 8 cancelled pairs are exactly the dipped-score hops
+(0.62–0.71 against the family's 0.88–0.91). The picture check is the
+porch edge (the dead-sector strip on this chart is unmeasurable — the
+same coastline that crowds the white gap and causes the false locks also
+breaks the 12-light-pixel run the strip statistic looks for; the porch
+has no content behind it): the 22 px two-row jogs at the hop pairs are
+gone, worst interior move 22 → 5 px. `--expect-straight-porch` exists
+because a percentile is blind to a two-row jog by design — p90 reads 2 px
+on the pre-fix picture — so the porch check is a MAX over row-to-row
+moves, excluding the two tail rows a mid-transmission cut always frays
+(23 px there in every decode, before and after). On the 40 s fixture:
+8 → 2 seams (largest 29.6 → 1.2 px), porch max move 22 → 5 px, bound
+set mid-gap at 10.
+
+**One honest accounting note.** `place_rms_px` on HLL reads slightly
+WORSE after the fix (2.88 → 3.44): the place metric judges each row
+against its own lock, and a false lock is a wrong "where the signal put
+it". The decoder's self-report and the picture now disagree in the
+opposite direction, and the picture is the authority — session 25's
+lesson, inverted.
+
+**Contradictions found:** the previous entry's "the seam count convicts
+the audio path" was already amended there; this entry adds the numbers.
+None else.
+
+**Validation.** 37/37 (the new fixture test included). Pre-fix numbers
+measured on a HEAD worktree build, not reconstructed from memory.
+
+**Next step: ROADMAP M4 items 3–4** (the retained snapshot and the
+post-decode edit lifecycle), the build order Sara set. Registered for
+later: template white-window robustness (the true fix for the false
+locks) if the library ever shows the need; the browser catch-up pair is
+an unmeasured shape the cancellation would hide — if a future recording
+ever shows a real drop compensated within three lines, that is the day
+to revisit.
+
+---
 
 Agent: Kimi. No code survives from this half-session: the seam-hold
 change (`kHoleGrey` fill in `stage_assembly`, `roundtrip [16]`, the

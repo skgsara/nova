@@ -89,6 +89,7 @@
 //                        [--expect-anchor-delta <lo_smp> <hi_smp>]
 //                        [--expect-timebase linear|steps]
 //                        [--expect-straight-strip <max_px>]
+//                        [--expect-straight-porch <max_px>]
 //                        [--expect-rigid-rows <max_px>]
 //                        [--expect-rows-in-place <max_rows>]
 //        nova-test-fixture --expect-reject <path>
@@ -157,6 +158,47 @@ double strip_edge_jitter(const nova::Image& im, int* used) {
         d.push_back(std::fabs(e[i] - e[i - 1]));
     std::sort(d.begin(), d.end());
     return d[static_cast<size_t>(0.90 * (d.size() - 1))];
+}
+
+// The same edge, at the OTHER end of the line. The porch at the line's end
+// is signal with no picture content behind it, so its left edge stays
+// measurable where the dead sector's right edge is crowded by content (on
+// HLL 2147Z a coastline sits hard against the gap — which is what polluted
+// the pulse template's white window and caused the false locks of session
+// 26). The statistic is the MAX row-to-row move, not a percentile: what it
+// exists to catch is a jog of two or three rows — a lock that hopped and
+// came back — and a 90th percentile is blind to exactly that (measured on
+// the fixture: p90 reads 2 px on the picture whose porch jumps 22 px for
+// two rows). The last two drawn rows are excluded: a fixture cut
+// mid-transmission ends mid-line, and the tail row's porch is ragged in
+// every decode (23 px on this fixture, identically before and after the
+// session-26 fix).
+std::vector<double> porch_edges(const nova::Image& im) {
+    const int run = 12, thr = 110;  // same levels as the strip
+    std::vector<double> e;
+    for (int y = 0; y < im.height - 2; y++) {
+        int light = 0, edge = -1;
+        for (int x = im.width - 1; x >= 0 && x >= im.width - 250; x--) {
+            const uint8_t v = im.px[static_cast<size_t>(y) * im.width + x];
+            light = (v > thr) ? light + 1 : 0;
+            if (light >= run) {
+                edge = x + run;
+                break;
+            }
+        }
+        if (edge >= 0) e.push_back(edge);
+    }
+    return e;
+}
+
+double porch_edge_maxmove(const nova::Image& im, int* used) {
+    const std::vector<double> e = porch_edges(im);
+    *used = static_cast<int>(e.size());
+    if (e.size() < 40) return -1.0;
+    double mx = 0.0;
+    for (size_t i = 1; i < e.size(); i++)
+        mx = std::max(mx, std::fabs(e[i] - e[i - 1]));
+    return mx;
 }
 
 // Is a drawn row RIGID — does it move as one piece?
@@ -288,7 +330,9 @@ int main(int argc, char** argv) {
                      " <max_lines> <clock_lo> <clock_hi> <min_locked_frac>"
                      " [--expect-white-only] [--expect-phasing-anchor]"
                      " [--expect-anchor-delta <lo> <hi>]"
-                     " [--expect-timebase linear|steps]\n"
+                     " [--expect-timebase linear|steps]"
+                     " [--expect-straight-strip <px>]"
+                     " [--expect-straight-porch <px>]\n"
                      "       nova-test-fixture --expect-reject <path>\n");
         return 2;
     }
@@ -298,6 +342,8 @@ int main(int argc, char** argv) {
     const char* want_timebase = nullptr;
     bool want_strip = false;
     double strip_max = 0.0;
+    bool want_porch = false;
+    double porch_max = 0.0;
     bool want_rigid = false;
     double rigid_max = 0.0;
     bool want_in_place = false;
@@ -330,6 +376,10 @@ int main(int argc, char** argv) {
                    i + 1 < argc) {
             want_strip = true;
             strip_max = std::atof(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--expect-straight-porch") &&
+                   i + 1 < argc) {
+            want_porch = true;
+            porch_max = std::atof(argv[++i]);
         } else if (!std::strcmp(argv[i], "--expect-rigid-rows") &&
                    i + 1 < argc) {
             want_rigid = true;
@@ -454,6 +504,17 @@ int main(int argc, char** argv) {
             // measuring something else and the picture is the authority.
             check(r.place_rms_px <= strip_max,
                   "...and the decoder's own account of it agrees");
+        }
+
+        if (want_porch) {
+            int used = 0;
+            const double mv = porch_edge_maxmove(r.img, &used);
+            std::printf("  porch edge: worst row-to-row move %.1f px over "
+                        "%d rows; %d seam(s) followed\n",
+                        mv, used, r.seams);
+            check(used >= r.lines / 2, "the porch is found on most rows");
+            check(mv >= 0.0 && mv <= porch_max,
+                  "the porch edge never jogs");
         }
 
         if (want_in_place) {

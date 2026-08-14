@@ -164,6 +164,25 @@ add_test(NAME fixture_picture_head COMMAND nova-test-fixture
 add_test(NAME fixture_dropout COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav 120 230 245 -130 -40 0.9
   --expect-rows-in-place 1)
+# The false-lock fixture, cut session 26 from HLL 2147Z (Korea Met, 500 hPa
+# analysis) as received through the KiwiSDR browser hop and Sara's
+# QuickTime/BlackHole parallel capture. On a faded signal whose picture
+# content crowds the white gap, the pulse template's white window is
+# polluted and a position ~60 samples late out-scores the true one
+# (0.72 vs 0.44, measured) — the tracker hops and hops back, and before
+# session 26
+# the change-point detector blessed each hop as a seam: 8 seams in this 40
+# s cut, and the porch edge jogged 22 px for two rows. Now a level move
+# that returns within the vouching distance is cancelled instead of
+# followed (2 seams, both under 2 px) and the porch never moves more than
+# 5 px; the bound sits mid-gap between that and the 22 it was. The check
+# is the picture's RIGHT edge, not the dead-sector strip: here the strip
+# is unmeasurable by construction, because the same coastline that crowds
+# the gap also breaks the 12-light-pixel run the strip statistic looks
+# for.
+add_test(NAME fixture_false_locks COMMAND nova-test-fixture
+  ${CMAKE_SOURCE_DIR}/fixtures/hll-2147z-false-locks-40s.wav 120 75 82 -100 -40 0.7
+  --expect-straight-porch 10.0)
 add_test(NAME fixture_white_sector COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
   --expect-white-only)

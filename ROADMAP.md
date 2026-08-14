@@ -769,8 +769,18 @@ one feature with several parts, plus one verification no test can do.
    position ~60 samples late out-scores the true one (0.72 vs 0.44 on
    HLL line 342, measured), the change-point detector blesses the hop as
    a seam, and the strip jogs. The audio's real drops exist (HLL lines
-   1189–1243 are a true mute) but are not what the eye trips on. Fix
-   direction is Sara's call — see SESSION-LOG 2026-08-14 (cont).
+   1189–1243 are a true mute) but are not what the eye trips on.
+   **Decided by Sara, session 26: seam admission, built the same day.**
+   A level move that returns within the vouching distance (three lines)
+   and nets to zero is a lock error, not a stream event; the pair is
+   cancelled and the rows draw with their segment [docs/01 §5 item 3].
+   On HLL 2147Z: 55 → 39 seams, the 22 px porch jogs gone, and the real
+   moves (warp drop, JSC insertions) never return, so the library is
+   untouched. Pinned by `fixture_false_locks` (a 40 s cut of the HLL
+   capture) with `--expect-straight-porch`, the right-edge picture check
+   the strip statistic can't do here. Template robustness — the polluted
+   white window itself — is registered as the later, bigger fix if the
+   library ever shows the need.
 
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the

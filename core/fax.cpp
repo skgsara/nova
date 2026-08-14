@@ -1435,6 +1435,72 @@ void stage_change_points(DecodeState& st) {
             if (std::fabs(median(post) - median(pre)) > move_min)
                 st.cpoint[lk[j]] = 1;
         }
+
+        // A move the STREAM really took persists; a lock error cancels
+        // itself the next time the tracker finds the true feature. Session
+        // 26 measured this on HLL 2147Z: isolated hops of +50..+90 samples
+        // that return to the family level one to three lines later, always
+        // with a dipped lock score (0.62-0.71 against the family's
+        // 0.88-0.91) — the pulse template's white window polluted by dark
+        // content close behind the gap, so a position ~60 samples late
+        // out-scores the true one (0.72 vs 0.44 measured on line 342,
+        // where the audio itself is straight to ±5 samples). Two hops in
+        // one four-line window beat the median above, the "move" is
+        // vouched, and the dead-sector strip jogs — the raggedness Sara
+        // sent back twice.
+        //
+        // So: a step that RETURNS within the vouching distance never
+        // established a level — four lines at the new level is what "the
+        // level moved" means to the detector above. The pair is cancelled
+        // when the steps net to zero within the detection resolution and
+        // the levels outside the pair agree the same way. The lines
+        // between are then drawn by the same segment as their neighbours.
+        //
+        // The cost, stated: a real drop compensated by a real insertion
+        // within three lines would also cancel, and its rows would be
+        // drawn at the surrounding level — displaced by exactly the event
+        // it hides. Nothing in the library does that: the warp drop and
+        // the JSC insertions never return, and a browser catch-up pair is
+        // unmeasured, not known.
+        std::vector<int> cp;
+        for (int l = 0; l < n_lines; l++)
+            if (st.cpoint[l]) cp.push_back(l);
+        auto win_med = [&](int line, bool post_side) {
+            const size_t j = static_cast<size_t>(
+                std::lower_bound(lk.begin(), lk.end(), line) - lk.begin());
+            std::vector<double> v;
+            if (post_side) {
+                for (size_t k = j; k < j + kSegHalf && k < lk.size(); k++)
+                    v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+            } else {
+                for (size_t k = j >= kSegHalf ? j - kSegHalf : 0; k < j; k++)
+                    v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+            }
+            return v.empty() ? 0.0 : median(v);
+        };
+        for (size_t i = 0; i + 1 < cp.size();) {
+            const int l1 = cp[i], l2 = cp[i + 1];
+            bool cancel = false;
+            if (l2 - l1 < kSegHalf) {
+                const double d1 = win_med(l1, true) - win_med(l1, false);
+                const double d2 = win_med(l2, true) - win_med(l2, false);
+                if (std::fabs(d1 + d2) <= move_min &&
+                    std::fabs(win_med(l1, false) - win_med(l2, true)) <=
+                        move_min)
+                    cancel = true;
+            }
+            if (cancel) {
+                st.cpoint[l1] = 0;
+                st.cpoint[l2] = 0;
+                dlog(st.hooks, LogTopic::kSeams,
+                     "dbg: seam pair at lines %d/%d cancelled: a lock hop "
+                     "that returned, not a stream move",
+                     l1, l2);
+                i += 2;
+            } else {
+                i++;
+            }
+        }
     }
 }
 
