@@ -1,0 +1,292 @@
+// engine.hpp — the wiring of docs/05 §2: the audio ring, the streaming
+// front end, the live session and the batch decode, joined into the four
+// threads the shell needs, with **no FLTK and no RtAudio**.
+//
+// Why this is in `nova-live` and not in `gui/nova-gui.cpp`. Everything
+// between the sound card and the saved PNG can be wrong about a signal,
+// and §1's rule is that anything which can be wrong about a signal must
+// be drivable by a test with a fixture instead of a sound card. The GUI
+// is then what §1 asks it to be: widgets, and the RtAudio callback that
+// calls `push_audio`. `tests/test_live_engine.cpp` drives this class with
+// a real producer thread over a real recording and never opens a window.
+//
+// The threads [docs/05 §2], and who owns what:
+//
+//   1  the caller's realtime audio callback -> `push_audio` -> the ring.
+//      The only lock-free path; it allocates nothing (`live_ring` counts).
+//   2  the engine's own thread: ring -> StreamResampler -> StreamDemod ->
+//      LiveSession::push -> messages. It is the ONLY thread that touches
+//      the session, which is what `session.hpp` asks for when it says the
+//      operator controls must be marshalled onto one thread.
+//   3  one per completed transmission: `decode_fax` over the frozen
+//      snapshot, then the result into the batch inbox. It shares no
+//      writable state with thread 2 — the snapshot is a
+//      `shared_ptr<const vector<float>>` [§3].
+//   4  the caller's GUI thread: `drain()`, `copy_image()`, and the
+//      operator controls. It never touches the session, the preview or
+//      the ring.
+//
+// **§2.3 said SPSC and that was wrong by one producer.** The document has
+// thread 2 AND thread 3 pushing GUI messages, which is two producers on
+// one queue. Rather than build a multi-producer queue, everything is
+// funnelled through thread 2: thread 3 posts its result to a one-slot
+// inbox, thread 2 picks it up, saves, calls `batch_done` and emits. The
+// GUI queue then really is single-producer, `LiveSession` really is
+// owned by one thread, and the observable event order is the session's
+// own — which is the property session 22 had to fix a re-entrant
+// `batch_done` to get.
+//
+// The three queues are mutex-guarded, and that is not a violation of §2's
+// "never block": the no-lock rule is about thread 1, the realtime one,
+// which touches only the ring. Threads 2, 3 and 4 may take an uncontended
+// mutex for the length of a vector append.
+//
+// Thread 2 polls the ring rather than waiting on a condition variable,
+// because the only thing that could signal it is thread 1, and a realtime
+// callback may not touch a condvar. The poll interval is a latency floor,
+// not a throughput limit: one wake drains everything the ring holds.
+#pragma once
+
+#include "../core/fax.hpp"
+#include "../core/hooks.hpp"
+#include "../core/image.hpp"
+#include "png.hpp"
+#include "ring.hpp"
+#include "session.hpp"
+#include "stream.hpp"
+
+#include <atomic>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace nova {
+
+// The GUI queue's message kinds [docs/05 §2.3], plus the two the save
+// path needs — §2.3 predates §8.5's decision that the decode completing
+// is what writes the file.
+enum class EngineMsg {
+    kStateChanged,
+    kRowsDrawn,
+    kStats,
+    kBatchProgress,
+    kBatchDone,
+    kBatchFailed,
+    kSaved,
+    kSaveFailed,
+};
+
+const char* engine_msg_name(EngineMsg m);
+
+// One message. A single struct rather than a variant: every consumer is
+// a switch in one function in the GUI, and the fields a kind does not use
+// cost a pointer each.
+struct EngineMessage {
+    EngineMsg kind = EngineMsg::kStats;
+
+    // kStateChanged
+    SessionState state = SessionState::kIdle;
+    int ioc = 0;
+
+    // kRowsDrawn — the rows themselves, so the GUI can show the operator
+    // marks §7 asks for, plus the totals the status line reads.
+    std::vector<PreviewRow> rows;
+    int rows_total = 0;
+    int locked_rows = 0;
+    int reacquired_rows = 0;
+
+    // kStats — the level meter and the honesty counter [§2.1].
+    double level_dbfs = -120.0;
+    unsigned long long overruns = 0;
+    double consumed_sec = 0.0;
+
+    // kBatchProgress — the nine decode stages [§8].
+    std::string stage;
+    double fraction = 0.0;
+
+    // kBatchDone / kBatchFailed
+    std::shared_ptr<const DecodeResult> result;
+    DecodeErrorKind error = DecodeErrorKind::kEmptyInput;
+
+    // kSaved / kSaveFailed
+    std::string path;
+    std::string detail;
+};
+
+struct EngineOptions {
+    SessionOptions session;
+    int internal_rate = 8000;      // cli/nova-decode.cpp: kInternalRate
+    double demod_center = 1900.0;
+    double demod_deviation = 400.0;
+
+    // 0 means 4 s at the capture rate [docs/05 §2.1].
+    std::size_t ring_capacity = 0;
+
+    // Where a completed decode writes its PNG [§8.5 item 1]. Empty means
+    // do not save — the engine's own screamer uses that when it wants the
+    // decode and not a file.
+    std::string image_folder;
+
+    // The clock, injected. `nova-live` has "no real clock" [§1] precisely
+    // so a test can pin a filename; the GUI passes the system clock.
+    // Returns a UTC stamp of the form 20260814T031544Z [§8.5 item 5].
+    std::function<std::string()> utc_now;
+
+    // How long thread 2 sleeps when the ring is dry.
+    int poll_ms = 5;
+};
+
+// --- the filename rules of §8.5 item 5, as pure functions ------------------
+// Free functions rather than private members, because the sanitizing rule
+// is a claim about a dozen awkward strings and the cheapest way to defend
+// a dozen awkward strings is to call the function with them.
+
+// Anything in \ / : * ? " < > | and every run of whitespace becomes a
+// single '-', the result is trimmed and capped at 32 characters, and if
+// nothing survives the label is treated as blank [§8.5 item 5].
+std::string sanitize_label(const std::string& label);
+
+// "20260813T220417Z.png", or "20260813T220417Z-JMH.png" when the
+// sanitized label is non-empty. The timestamp is first and always, so
+// chronological order is alphabetical order.
+std::string image_filename(const std::string& utc_stamp,
+                           const std::string& label);
+
+// The decode QA that goes into the PNG's tEXt chunks [§8.3 item 7]. The
+// Furunos printing `Phase OK` / `Phase NG` on every chart are the
+// precedent: the header tells the truth about how the picture was
+// obtained. `phase_operator` / `sync_operator` record §8.5 item 3's
+// requirement that a re-render says the values were the operator's.
+std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
+                               bool phase_operator, bool sync_operator);
+
+class LiveEngine {
+public:
+    LiveEngine(int capture_rate, const EngineOptions& opt);
+    ~LiveEngine();
+
+    LiveEngine(const LiveEngine&) = delete;
+    LiveEngine& operator=(const LiveEngine&) = delete;
+
+    // --- thread 1: the realtime audio callback -----------------------------
+    // Allocation-free, lock-free, never throws. What does not fit is
+    // counted, not hidden [§2.1]. Returns the number of samples accepted;
+    // a realtime callback has nothing to do with the shortfall but a test
+    // feeding a fixture does, and so does anything that wants to know the
+    // loss was ours rather than the band's.
+    std::size_t push_audio(const float* in, std::size_t n) {
+        return ring_.write(in, n);
+    }
+
+    // --- thread 4: the operator ---------------------------------------------
+    // All queued for thread 2, never executed on the caller's thread, so
+    // the session has exactly one owner.
+    void start_capture();
+    void stop_capture();
+    void force_start(int ioc, double lpm);
+    void set_phase(double frac);
+    void set_sync(double ppm);
+    // The label reaches the filename at the next save and the PNG text at
+    // every save [§8.5 item 5]. Nova never renames a file already written.
+    void set_label(const std::string& label);
+    // Where the NEXT completed decode writes [§8.5 item 1]. Queued like
+    // every other control, because thread 2 is what reads it at save
+    // time. Files already written keep their names: Nova never renames.
+    void set_image_folder(const std::string& folder);
+
+    // --- thread 4: what the widgets read ------------------------------------
+    std::vector<EngineMessage> drain();
+    // The picture, copied under the image lock so the caller can paint
+    // from its own copy with nothing held. Returns false while there is
+    // no picture. Rows are appended and never revised, so this is a
+    // snapshot of a prefix, never a torn image.
+    bool copy_image(Image* out);
+
+    unsigned long long overruns() const { return ring_.overruns(); }
+    std::size_t ring_capacity() const { return ring_.capacity(); }
+
+    // --- lifecycle ----------------------------------------------------------
+    // Spawns thread 2. The session stays IDLE until start_capture().
+    void run();
+    // End of stream: no more audio will arrive. Thread 2 drains the ring,
+    // flushes the session, waits for any batch decode, and stops. Joins
+    // both threads. Idempotent; the destructor calls it.
+    void shutdown();
+
+private:
+    enum class CmdKind { kStart, kStop, kForce, kPhase, kSync, kLabel,
+                         kFolder };
+    struct Cmd {
+        CmdKind kind = CmdKind::kStart;
+        int ioc = 0;
+        double a = 0.0;
+        std::string text;
+    };
+
+    void thread2();
+    void run_commands();
+    void emit(const SessionOutput& out);
+    void post(EngineMessage m);
+    void begin_batch(std::shared_ptr<const std::vector<float>> snap,
+                     const DecodeOptions& dopt);
+    void collect_batch();
+    void append_display_rows();
+    std::string save_image(const DecodeResult& r);
+
+    int capture_rate_;
+    EngineOptions opt_;
+
+    AudioRing ring_;
+    StreamResampler resamp_;
+    StreamDemod demod_;
+    LiveSession session_;
+
+    std::thread t2_;
+    std::thread t3_;
+    std::atomic<bool> stopping_{false};
+    std::atomic<bool> running_{false};
+
+    std::mutex cmd_mu_;
+    std::vector<Cmd> cmds_;
+
+    std::mutex out_mu_;
+    std::vector<EngineMessage> outbox_;
+
+    // Thread 3 -> thread 2. One slot: the shell is serialized, one
+    // transmission decoding at a time [§8.3 item 4, the Start button dead
+    // during DECODING].
+    std::mutex batch_mu_;
+    bool batch_ready_ = false;
+    bool batch_ok_ = false;
+    DecodeResult batch_result_;
+    DecodeErrorKind batch_error_ = DecodeErrorKind::kEmptyInput;
+    std::atomic<bool> batch_running_{false};
+
+    // Thread 3 -> thread 2, for the progress bar. Kept out of the outbox
+    // so the claim above — one producer on the GUI queue — stays true. It
+    // is a slot rather than a queue on purpose: progress is a level, not
+    // an event, and coalescing nine stages down to whatever thread 2 saw
+    // last is exactly right for a bar repainted at 20 Hz.
+    std::mutex prog_mu_;
+    std::string prog_stage_;
+    double prog_frac_ = 0.0;
+    bool prog_new_ = false;
+
+    std::mutex img_mu_;
+    Image display_;
+    // Identity of the preview `display_` was grown from. A new
+    // transmission replaces the preview and restarts its image at row 0,
+    // so the pane must start over rather than append to the old chart.
+    const StreamPreview* display_src_ = nullptr;
+
+    // Thread 2 only, after the commands are drained.
+    std::string label_;
+    bool phase_operator_ = false;
+    bool sync_operator_ = false;
+};
+
+}  // namespace nova

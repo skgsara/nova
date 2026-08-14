@@ -1,20 +1,31 @@
 // nova-gui — the M4 shell: the window of docs/05 §8 built from real FLTK
-// widgets, carrying the §8.3 and §8.4 surfaces, with no decode behind them yet.
+// widgets, carrying the §8.3 and §8.4 surfaces, with the live decode
+// behind them since session 23.
 //
 // Why this binary exists. The §8 layout was drawn in HTML at FLTK's
 // documented metrics, which makes it a prediction. This is the measurement.
 // Wherever the toolkit disagrees with the mockup, `docs/05` §8 is the thing
 // that gets corrected — not this file.
 //
-// What it deliberately does NOT do: no decode, no threads, no DSP, no audio
-// stream, none of §2's concurrency. The one live wire is RtAudio device
-// enumeration, because the other thing a shell proves is that the
-// dependency wiring works. Every control that would need a decode behind it
-// is created deactivated, so the window does not claim to do what it cannot
-// [docs/05 §3: an image with no raw behind it shows PHASE/SYNC visibly
-// disabled rather than silently inert]. That is why the transport buttons
-// are inert on a plain run: there is nothing to capture yet, and a Start
-// that greys itself is honest where a Start that does nothing is not.
+// **What is in this file, and what is deliberately not.** Everything that
+// can be wrong about a SIGNAL lives in `nova-live` — the ring, the
+// streaming front end, the session machine, the preview, the batch
+// handoff and the save path are all `live/engine.hpp`, drivable by a test
+// with a fixture instead of a sound card [docs/05 §1]. What is here is
+// widgets, the RtAudio stream that feeds `LiveEngine::push_audio`, and the
+// 50 ms timer that drains its queue. No DSP, no state machine, no file
+// naming: if a picture comes out wrong, this file is not where it went
+// wrong, and that is the point of the split.
+//
+// A control with nothing behind it is created deactivated, so the window
+// never claims to do what it cannot [docs/05 §3: an image with no raw
+// behind it shows PHASE/SYNC visibly disabled rather than silently
+// inert]. On a machine with no input device there is no engine, and the
+// transport stays grey exactly as it did before the wiring landed — a
+// Start that greys itself is honest where a Start that does nothing is
+// not. `Auto` is still grey for everyone, because putting the measured
+// values back means re-rendering a decoded picture, and §7.1's two
+// DecodeOptions fields do not exist yet.
 //
 // No column arithmetic is written inside a widget. The ruler's mapping —
 // zoom, scroll, tick step, and the left-edge retention of §8.4 item 2 —
@@ -45,6 +56,7 @@
 #include <FL/Fl_Menu_Bar.H>
 #include <FL/Fl_Native_File_Chooser.H>
 #include <FL/Fl_Progress.H>
+#include <FL/Fl_RGB_Image.H>
 #include <FL/Fl_Scroll.H>
 #include <FL/fl_draw.H>
 
@@ -54,11 +66,14 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "engine.hpp"
 #include "ruler.hpp"
+#include "session.hpp"
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -92,53 +107,38 @@ constexpr int kPad = 4;
 constexpr int kPanelRowH = 20;
 constexpr int kFontSize = 12;  // §8: "12 px Helvetica"
 constexpr int kFrame = 2;      // §8: "two-pixel FL_UP_BOX / FL_DOWN_BOX"
+// The GUI queue's drain interval [docs/05 §2.3]: 50 ms, one repaint per
+// tick at most. 20 Hz is well past what a 120 lpm picture — two rows a
+// second — can justify.
+constexpr double kTickSec = 0.05;
 
 // Image width is round(IOC * pi) [docs/05 §8.3]: 1810 columns at IOC 576,
 // 905 at IOC 288, both measured from the real decoder.
 constexpr double kPi = 3.14159265358979323846;
 
 // ---------------------------------------------------------------------------
-// The live session state [docs/05 §4]. Nothing here drives a decode: the
-// shell holds a state so that the transport rules of §8.3 item 4 and §8.4
-// items 3-4 exist as code and can be inspected, and so that wiring
-// nova-live to them later is an assignment rather than a rewrite.
-enum class LiveState {
-    kIdle,
-    kReady,
-    kStartTone,
-    kPhasing,
-    kDrawing,
-    kStopTone,
-    kDecoding,
-    kSaved,
-};
+// The live session state [docs/05 §4]. Until session 23 this file carried
+// its own copy of the enum — a "display twin" of `SessionState`, written
+// when there was no session to display. There is one now, and the twin is
+// gone: two enums that must stay in the same order is a bug waiting for
+// somebody to insert a state in one of them.
+using LiveState = nova::SessionState;
 
 // The state name for the status line. It is the state's own name and never
 // a percentage [docs/04 Finding 3], and the button never carries it
-// [§8.4 item 4].
-const char* state_text(LiveState s) {
-    switch (s) {
-        case LiveState::kIdle: return "IDLE";
-        case LiveState::kReady: return "READY";
-        case LiveState::kStartTone: return "START TONE";
-        case LiveState::kPhasing: return "PHASING";
-        case LiveState::kDrawing: return "DRAWING \xe2\x80\x94 PREVIEW";
-        case LiveState::kStopTone: return "STOP TONE";
-        case LiveState::kDecoding: return "DECODING";
-        case LiveState::kSaved: return "SAVED";
-    }
-    return "IDLE";
-}
+// [§8.4 item 4]. `nova::session_state_name` is the one definition.
+const char* state_text(LiveState s) { return nova::session_state_name(s); }
 
 // The short token --metrics prints, so a test script matches on a word
-// rather than on a UTF-8 em dash.
+// rather than on a UTF-8 em dash. This one stays here: it exists for the
+// test harness, not for the operator, and nothing in nova-live needs it.
 const char* state_token(LiveState s) {
     switch (s) {
         case LiveState::kIdle: return "IDLE";
         case LiveState::kReady: return "READY";
         case LiveState::kStartTone: return "START-TONE";
         case LiveState::kPhasing: return "PHASING";
-        case LiveState::kDrawing: return "DRAWING";
+        case LiveState::kDrawingPreview: return "DRAWING";
         case LiveState::kStopTone: return "STOP-TONE";
         case LiveState::kDecoding: return "DECODING";
         case LiveState::kSaved: return "SAVED";
@@ -151,10 +151,14 @@ bool parse_state(const char* s, LiveState* out) {
         const char* name;
         LiveState state;
     } kNames[] = {
-        {"idle", LiveState::kIdle},           {"ready", LiveState::kReady},
-        {"start-tone", LiveState::kStartTone}, {"phasing", LiveState::kPhasing},
-        {"drawing", LiveState::kDrawing},     {"stop-tone", LiveState::kStopTone},
-        {"decoding", LiveState::kDecoding},   {"saved", LiveState::kSaved},
+        {"idle", LiveState::kIdle},
+        {"ready", LiveState::kReady},
+        {"start-tone", LiveState::kStartTone},
+        {"phasing", LiveState::kPhasing},
+        {"drawing", LiveState::kDrawingPreview},
+        {"stop-tone", LiveState::kStopTone},
+        {"decoding", LiveState::kDecoding},
+        {"saved", LiveState::kSaved},
     };
     for (const auto& n : kNames)
         if (!std::strcmp(s, n.name)) {
@@ -188,7 +192,7 @@ Transport transport_for(LiveState s, bool ioc_explicit, bool rate_explicit,
                         bool capture) {
     const bool receiving =
         s == LiveState::kReady || s == LiveState::kStartTone ||
-        s == LiveState::kPhasing || s == LiveState::kDrawing ||
+        s == LiveState::kPhasing || s == LiveState::kDrawingPreview ||
         s == LiveState::kStopTone;
     Transport t;
     t.label = receiving ? "Stop" : "Start";
@@ -468,18 +472,64 @@ private:
     int last_x_ = 0;
 };
 
-// What lives inside the scroll: the picture. It has no picture yet — the
-// provisional renderer arrives with nova-live — so it draws the empty pane
-// colour, and its SIZE is the whole of its current job, because that size
-// is what makes the scrollbars and the ruler agree about how wide the image
-// is.
+// What lives inside the scroll: the picture. Its SIZE is what makes the
+// scrollbars and the ruler agree about how wide the image is, and since
+// session 23 it also has pixels — a copy of the engine's display image,
+// taken on the GUI thread under the engine's image lock and then drawn
+// with nothing held [engine.hpp: `copy_image`].
+//
+// The copy is not a waste. Rows arrive at two a second on a 120 lpm
+// chart, and the alternative — drawing straight out of the live decode
+// thread's buffer — is holding a lock across an FLTK blit, which is the
+// one thing §2 says thread 4 must not do.
 class ImageView : public Fl_Widget {
 public:
     ImageView(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+
+    // Takes the new picture. Returns true when the geometry changed, so
+    // the caller knows to re-run layout rather than only redraw.
+    bool set_image(const nova::Image& img) {
+        const bool resized = img.width != img_.width ||
+                             img.height != img_.height;
+        img_ = img;
+        // Fl_RGB_Image does not own the buffer it is given, so it is
+        // rebuilt whenever `img_.px` may have moved.
+        rgb_.reset(img_.width > 0 && img_.height > 0
+                       ? new Fl_RGB_Image(img_.px.data(), img_.width,
+                                          img_.height, 1)
+                       : nullptr);
+        redraw();
+        return resized;
+    }
+
+    bool has_image() const { return img_.width > 0 && img_.height > 0; }
+    int image_rows() const { return img_.height; }
+    int image_cols() const { return img_.width; }
+
     void draw() override {
         fl_color(FL_BACKGROUND2_COLOR);
         fl_rectf(x(), y(), w(), h());
+        if (!rgb_) return;
+        // Scaled by the widget's own size, which layout_view() has already
+        // set from the zoom. FLTK 1.4 scales on draw when told the target
+        // size; the aspect flag is off because the two axes are not the
+        // same thing — columns are IOC-derived, rows are lines received.
+        const int dh = std::min(h(), static_cast<int>(std::lround(
+                                         img_.height * scale_y())));
+        rgb_->scale(w(), dh, 0, 1);
+        rgb_->draw(x(), y());
     }
+
+    // One image row is one received line, and one image column is
+    // 1/(IOC*pi) of a line. The pane draws a row at the same scale as a
+    // column so the chart is not stretched; `scale_y` is that scale.
+    void set_scale_y(double s) { scale_y_ = s; }
+    double scale_y() const { return scale_y_; }
+
+private:
+    nova::Image img_;
+    std::unique_ptr<Fl_RGB_Image> rgb_;
+    double scale_y_ = 1.0;
 };
 
 // ---------------------------------------------------------------------------
@@ -492,15 +542,46 @@ class LevelMeter : public Fl_Widget {
 public:
     LevelMeter(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
 
+    // -120 dBFS means "no capture running", which is not the same as
+    // silence and must not look like it.
+    void set_level(double dbfs, bool live) {
+        dbfs_ = dbfs;
+        live_ = live;
+        redraw();
+    }
+
     void draw() override {
         fl_draw_box(FL_DOWN_BOX, x(), y(), w(), h(), FL_BACKGROUND_COLOR);
+        const int bx = x() + 90, bw = w() - 90 - 90;
+        if (live_ && bw > 0) {
+            // -60 dBFS to 0, which is the range an HF receiver's line
+            // output actually occupies; below that the diagnosis is "no
+            // signal" and the bar has nothing useful to say.
+            const double f = std::min(1.0, std::max(0.0, (dbfs_ + 60.0) / 60.0));
+            const int fill = static_cast<int>(std::lround(bw * f));
+            // Clipping is the failure the meter exists to catch, so the
+            // top of the range is coloured rather than merely long.
+            fl_color(dbfs_ >= -1.0 ? FL_RED
+                                   : (dbfs_ >= -6.0 ? FL_DARK_YELLOW
+                                                    : FL_DARK_GREEN));
+            fl_rectf(bx, y() + 4, fill, h() - 8);
+        }
         fl_font(FL_HELVETICA, kFontSize);
-        fl_color(FL_INACTIVE_COLOR);
+        fl_color(live_ ? FL_FOREGROUND_COLOR : FL_INACTIVE_COLOR);
         fl_draw("input level", x() + kPad, y(), w(), h(),
                 FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
-        fl_draw("-- dBFS", x(), y(), w() - kPad, h(),
+        char buf[32];
+        if (live_ && dbfs_ > -119.0)
+            std::snprintf(buf, sizeof buf, "%.0f dBFS", dbfs_);
+        else
+            std::snprintf(buf, sizeof buf, "-- dBFS");
+        fl_draw(buf, x(), y(), w() - kPad, h(),
                 FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
     }
+
+private:
+    double dbfs_ = -120.0;
+    bool live_ = false;
 };
 
 constexpr int kFields = 6;  // Mode, IOC, Rate, State, Quality, Started
@@ -549,13 +630,50 @@ struct Shell {
     std::string image_folder;
 
     LiveState state = LiveState::kIdle;
-    // Whether anything is behind the transport. False until nova-live can
-    // capture; --state sets it, so the §8.3/§8.4 rules are inspectable
-    // without the shell pretending on a plain run.
+    // Whether anything is behind the transport. Under --metrics there is
+    // no engine and no device, and --state sets this so the §8.3/§8.4
+    // rules stay inspectable without the shell pretending; in a real
+    // window it is true once an engine exists.
     bool capture = false;
     // The measured image width, once a decode has produced one. Zero means
     // "not measured", and then only an explicit IOC gives the ruler a width.
     int measured_cols = 0;
+
+    // --- the live half [docs/05 §2] ----------------------------------------
+    // Created only when a window is actually shown: an inspection run
+    // (--metrics, --devices) must not open a sound card, and the two GUI
+    // screamers depend on that staying true.
+    std::unique_ptr<nova::LiveEngine> engine;
+    std::unique_ptr<RtAudio> audio;
+    bool audio_open = false;
+    std::string audio_error;
+    unsigned int audio_rate = 0;
+    // What the drained messages last said, for the status panel.
+    double level_dbfs = -120.0;
+    unsigned long long overruns = 0;
+    int rows_drawn = 0;
+    std::string last_saved;
+    std::string last_error;
+    // Fl_Widget::label stores the POINTER, not the text, so every
+    // formatted label needs storage that outlives the call.
+    char quality_buf[64] = "--";
+    char lines_buf[32] = "line --";
+    char status_buf[160] = "IDLE";
+
+    // The RtAudio callback [thread 1, realtime]. It does exactly one
+    // thing, which is §2's whole rule for this thread: no allocation, no
+    // lock, no log, no throw.
+    static int audio_cb(void*, void* in, unsigned int frames, double,
+                        RtAudioStreamStatus status, void* user) {
+        Shell* s = static_cast<Shell*>(user);
+        if (in && s->engine)
+            s->engine->push_audio(static_cast<const float*>(in), frames);
+        // An RtAudio overflow is the same species of loss as a ring
+        // overrun and is counted the same way — by pushing nothing and
+        // letting the sample accounting show the gap.
+        (void)status;
+        return 0;
+    }
 
     void note(const char* name, Fl_Widget* w) { named.emplace_back(name, w); }
 
@@ -610,6 +728,14 @@ struct Shell {
             default: return 0;
         }
     }
+    double rate_value() const {
+        switch (rate->value()) {
+            case 1: return 60.0;
+            case 2: return 90.0;
+            case 3: return 120.0;
+            default: return 0.0;
+        }
+    }
 
     // The image width in columns, or 0 while it is unknown. A measured
     // width wins; an operator-set IOC is a declaration, not a guess, so it
@@ -649,11 +775,19 @@ struct Shell {
     // uses: a bar appears exactly when the image exceeds the pane [§8.3
     // item 3].
     //
-    // Vertically, never yet: with no rows to draw, the scrolled child is
-    // sized to the pane, so there is nothing below the fold. That changes
-    // when the provisional renderer arrives and a ten-minute chart is
-    // ~1200 rows against a 613 px pane.
-    bool vscroll_visible() const { return false; }
+    // Vertically, once a chart is taller than the pane — which session 23
+    // made possible and session 20's version of this function said would
+    // come: a ten-minute chart is ~1200 rows against a 613 px pane. With
+    // no picture the answer is still no, because the scrolled child is
+    // then sized to the pane.
+    bool vscroll_visible() const {
+        if (!view || !view->has_image()) return false;
+        const int cols = image_cols();
+        if (cols <= 0) return false;
+        const double scale = nova::zoom_scale(zoom_value(), cols,
+                                              pane->w() - 2 * kFrame);
+        return view->image_rows() * scale > pane->h() - 2 * kFrame;
+    }
     // Horizontally, whenever a known image width at a FIXED zoom exceeds
     // the pane. Fit cannot scroll by construction — its scale is defined
     // as pane / cols — which is also why this cannot recurse through
@@ -742,10 +876,12 @@ struct Shell {
         // something folded into a menu.
         start = new Fl_Button(0, 0, 0, 0, "Start");
         start->labelsize(kFontSize);
+        start->callback(cb_start, this);
         start->deactivate();
         note("start_button", start);
         force = new Fl_Button(0, 0, 0, 0, "Force Start");
         force->labelsize(kFontSize);
+        force->callback(cb_force, this);
         force->deactivate();
         note("force_start_button", force);
 
@@ -821,6 +957,7 @@ struct Shell {
 
         apply = new Fl_Button(0, 0, 0, 0, "Apply");
         apply->labelsize(kFontSize);
+        apply->callback(cb_apply, this);
         apply->deactivate();
         note("apply_button", apply);
         autob = new Fl_Button(0, 0, 0, 0, "Auto");
@@ -933,8 +1070,17 @@ struct Shell {
         const int iw = v.image_cols > 0
                            ? static_cast<int>(std::lround(v.image_cols * v.scale))
                            : pane_interior_w();
-        view->resize(pane->x() + kFrame, pane->y() + kFrame, iw,
-                     pane_interior_h());
+        // Rows are drawn at the same scale as columns, so the chart is not
+        // stretched. With no picture the child is the pane, so nothing
+        // scrolls over an empty pane [§8.3 item 3].
+        view->set_scale_y(v.scale);
+        int ih = pane_interior_h();
+        if (view->has_image()) {
+            const int drawn = static_cast<int>(
+                std::lround(view->image_rows() * v.scale));
+            ih = std::max(drawn, pane_interior_h());
+        }
+        view->resize(pane->x() + kFrame, pane->y() + kFrame, iw, ih);
         const double keep = std::min(static_cast<double>(pane->xposition()),
                                      nova::max_scroll_px(v));
         pane->scroll_to(static_cast<int>(std::lround(keep)), pane->yposition());
@@ -951,6 +1097,32 @@ struct Shell {
 
         status_state->label(state_text(state));
         field_val[3]->label(state_text(state));
+
+        // The two manual corrections go live exactly where they have a
+        // picture to correct [docs/05 §7]: while the preview is being
+        // drawn. PHASE reports where the dead sector IS, as a column;
+        // SYNC trims the line rate in ppm. Both apply FORWARD from the
+        // next row — drawn rows are never revised — which is the whole
+        // contract of the provisional renderer.
+        //
+        // What is still NOT here, and is deactivated rather than
+        // pretended: correcting a picture that has already been decoded
+        // and saved. That needs DecodeOptions::phase_anchor_hint and
+        // clock_ppm_fallback [§7.1], which do not exist yet, so Auto —
+        // which means "put the measured values back and re-render" —
+        // stays grey. An image with no re-render behind it shows the
+        // control visibly disabled rather than silently inert [§3].
+        const bool overrides_live = capture && state ==
+                                                   LiveState::kDrawingPreview;
+        if (overrides_live) {
+            phase_input->activate();
+            sync_input->activate();
+            apply->activate();
+        } else {
+            phase_input->deactivate();
+            sync_input->deactivate();
+            apply->deactivate();
+        }
         // The progress bar is populated ONLY during DECODING, from the nine
         // decode stages [docs/05 §8, §4]. Elsewhere it is empty and dead.
         if (state == LiveState::kDecoding) progress->activate();
@@ -965,6 +1137,174 @@ struct Shell {
         field_val[0]->label(ioc_explicit() && rate_explicit() ? "FORCED"
                                                              : "AUTO");
         if (win) win->redraw();
+    }
+
+    // --- the live half: bring it up, drive it, take it down -----------------
+
+    // Called once, after the window is shown. A machine with no input
+    // device gets no engine and keeps the honest grey transport of the
+    // pre-wiring shell.
+    void start_live() {
+        if (devices.empty()) return;
+        const InputDevice& d = devices[static_cast<std::size_t>(
+            std::max(0, device->value()))];
+        audio_rate = d.preferred_rate ? d.preferred_rate : 48000;
+
+        nova::EngineOptions opt;
+        opt.image_folder = image_folder;
+        engine.reset(new nova::LiveEngine(static_cast<int>(audio_rate), opt));
+        engine->run();
+
+        RtAudio::StreamParameters p;
+        p.deviceId = d.id;
+        // One channel. §2 says "deinterleave, pick channel"; asking
+        // RtAudio for one input channel is that, done by the library, and
+        // it keeps the realtime callback down to a single memcpy-shaped
+        // loop.
+        p.nChannels = 1;
+        p.firstChannel = 0;
+        unsigned int frames = 1024;
+        audio.reset(new RtAudio());
+        audio->showWarnings(false);
+        const RtAudioErrorType err =
+            audio->openStream(nullptr, &p, RTAUDIO_FLOAT32, audio_rate,
+                              &frames, &Shell::audio_cb, this);
+        if (err != RTAUDIO_NO_ERROR) {
+            audio_error = audio->getErrorText();
+            audio.reset();
+            engine.reset();
+            return;
+        }
+        if (audio->startStream() != RTAUDIO_NO_ERROR) {
+            audio_error = audio->getErrorText();
+            audio->closeStream();
+            audio.reset();
+            engine.reset();
+            return;
+        }
+        audio_open = true;
+        capture = true;
+        Fl::add_timeout(kTickSec, cb_tick, this);
+        apply_state();
+    }
+
+    void stop_live() {
+        Fl::remove_timeout(cb_tick, this);
+        if (audio && audio_open) {
+            audio->stopStream();
+            audio->closeStream();
+            audio_open = false;
+        }
+        audio.reset();
+        // The engine's shutdown flushes the session, so a transmission in
+        // progress when the window closes is still decoded and saved
+        // rather than dropped [§8.3 item 6].
+        engine.reset();
+    }
+
+    // Thread 4's one drain point [§2.3]: everything the worker threads
+    // have to say arrives here, on a timer, and the window repaints at
+    // most once per tick.
+    static void cb_tick(void* p) {
+        static_cast<Shell*>(p)->drain();
+        Fl::repeat_timeout(kTickSec, cb_tick, p);
+    }
+
+    void drain() {
+        if (!engine) return;
+        bool state_changed = false;
+        bool rows_changed = false;
+        for (const nova::EngineMessage& m : engine->drain()) {
+            switch (m.kind) {
+                case nova::EngineMsg::kStateChanged:
+                    state = m.state;
+                    state_changed = true;
+                    if (m.ioc > 0)
+                        measured_cols =
+                            static_cast<int>(std::lround(m.ioc * kPi));
+                    break;
+                case nova::EngineMsg::kRowsDrawn:
+                    rows_drawn = m.rows_total;
+                    rows_changed = true;
+                    break;
+                case nova::EngineMsg::kStats:
+                    level_dbfs = m.level_dbfs;
+                    overruns = m.overruns;
+                    meter->set_level(level_dbfs, true);
+                    break;
+                case nova::EngineMsg::kBatchProgress:
+                    progress->value(static_cast<float>(m.fraction));
+                    progress->redraw();
+                    break;
+                case nova::EngineMsg::kBatchDone:
+                    if (m.result) {
+                        measured_cols = m.result->img.width;
+                        // The clock and timebase readouts stay blank until
+                        // the batch decode produces them [§4] — this is
+                        // where they stop being blank.
+                        set_quality(*m.result);
+                        rows_changed = true;
+                    }
+                    break;
+                case nova::EngineMsg::kBatchFailed:
+                    last_error = "decode failed";
+                    break;
+                case nova::EngineMsg::kSaved: last_saved = m.path; break;
+                case nova::EngineMsg::kSaveFailed:
+                    last_error = "not saved: " + m.detail;
+                    break;
+            }
+        }
+        if (rows_changed) {
+            nova::Image img;
+            if (engine->copy_image(&img)) {
+                const bool resized = view->set_image(img);
+                if (resized) {
+                    layout(win->w(), win->h());
+                    ruler->redraw();
+                }
+            }
+        }
+        if (state_changed || rows_changed) {
+            apply_state();
+            update_status();
+        }
+    }
+
+    void set_quality(const nova::DecodeResult& r) {
+        std::snprintf(quality_buf, sizeof quality_buf, "%d/%d, %+.0f ppm",
+                      r.locked_lines, r.lines, r.clock_ppm);
+        field_val[4]->label(quality_buf);
+    }
+
+    void update_status() {
+        if (rows_drawn > 0)
+            std::snprintf(lines_buf, sizeof lines_buf, "line %d", rows_drawn);
+        else
+            std::snprintf(lines_buf, sizeof lines_buf, "line --");
+        status_lines->label(lines_buf);
+        // The overrun count is shown, never hidden [§2.1]: a picture with
+        // our own dropped samples in it must say so.
+        if (!last_error.empty())
+            std::snprintf(status_buf, sizeof status_buf, "%s \xe2\x80\x94 %s",
+                          state_text(state), last_error.c_str());
+        else if (overruns > 0)
+            std::snprintf(status_buf, sizeof status_buf,
+                          "%s \xe2\x80\x94 %llu samples dropped",
+                          state_text(state), overruns);
+        else if (!last_saved.empty() && state == LiveState::kSaved)
+            std::snprintf(status_buf, sizeof status_buf, "%s \xe2\x80\x94 %s",
+                          state_text(state), basename_of(last_saved).c_str());
+        else
+            std::snprintf(status_buf, sizeof status_buf, "%s",
+                          state_text(state));
+        status_state->label(status_buf);
+        win->redraw();
+    }
+
+    static std::string basename_of(const std::string& p) {
+        const size_t slash = p.find_last_of('/');
+        return slash == std::string::npos ? p : p.substr(slash + 1);
     }
 
     void populate_devices() {
@@ -985,7 +1325,9 @@ struct Shell {
 
     // --- callbacks ----------------------------------------------------------
     static void cb_quit(Fl_Widget*, void* p) {
-        static_cast<Shell*>(p)->win->hide();
+        Shell* s = static_cast<Shell*>(p);
+        s->stop_live();
+        s->win->hide();
     }
 
     // Settings sets the folder; the file type is not a choice [§8.3 item 7 —
@@ -1003,6 +1345,10 @@ struct Shell {
         if (!picked || !*picked) return;
         s->image_folder = picked;
         s->prefs.set("image_folder", s->image_folder);
+        // The folder is where the NEXT completed decode writes [§8.5
+        // item 1]; files already written keep the name they were written
+        // with, and Nova never renames one.
+        if (s->engine) s->engine->set_image_folder(s->image_folder);
     }
 
     static void cb_about(Fl_Widget*, void* p) {
@@ -1032,6 +1378,63 @@ struct Shell {
 
     static void cb_about_close(Fl_Widget*, void* p) {
         static_cast<Shell*>(p)->about->hide();
+    }
+
+    // --- the transport [§8.3 item 4, §8.4 items 3-4] ------------------------
+    // One button. Its meaning is the state's, so it asks `transport_for`
+    // what it currently is rather than keeping a flag of its own.
+    static void cb_start(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine) return;
+        const Transport t = transport_for(s->state, s->ioc_explicit(),
+                                          s->rate_explicit(), s->capture);
+        s->last_error.clear();
+        if (!std::strcmp(t.label, "Stop")) {
+            // Stop HOLDS the image; it never discards it [docs/04
+            // Finding 6, the SR-97 precedent]. The session takes it down
+            // the same freeze-decode-save path a stop tone takes.
+            s->engine->stop_capture();
+        } else {
+            s->engine->set_label(s->label_input->value()
+                                     ? s->label_input->value()
+                                     : "");
+            s->engine->start_capture();
+        }
+    }
+
+    // Forced start [docs/04 Finding 2]: on every one of the sixteen
+    // receivers surveyed, without exception. Gated on both dropdowns
+    // being explicit, which `transport_for` decides and this only reads.
+    static void cb_force(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine || !s->ioc_explicit() || !s->rate_explicit()) return;
+        s->last_error.clear();
+        s->engine->set_label(s->label_input->value() ? s->label_input->value()
+                                                     : "");
+        s->engine->start_capture();
+        s->engine->force_start(s->ioc_value(), s->rate_value());
+    }
+
+    // Apply sends the two live overrides to the renderer [§7]. It is the
+    // "touch once and wait several lines before judging" affordance: the
+    // row where each takes effect is marked, so the operator can see
+    // where their correction began rather than guessing.
+    static void cb_apply(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine) return;
+        const int cols = s->image_cols();
+        const char* pv = s->phase_input->value();
+        if (pv && *pv && cols > 0) {
+            const double col = std::atof(pv);
+            // PHASE is typed as an image COLUMN, because that is what the
+            // ruler above the pane names [§8.3 item 1] and what the
+            // operator can read off the picture. The renderer wants a
+            // fraction of the line.
+            const double frac = std::min(0.999, std::max(0.0, col / cols));
+            s->engine->set_phase(frac);
+        }
+        const char* sv = s->sync_input->value();
+        if (sv && *sv) s->engine->set_sync(std::atof(sv));
     }
 
     // IOC or Rate changed: the transport gating and the ruler's width both
@@ -1248,5 +1651,16 @@ int main(int argc, char** argv) {
     if (metrics_only) return print_metrics(shell);
 
     shell.win->show();
-    return Fl::run();
+    // The live half comes up only now — after the window exists and after
+    // every inspection path has already returned. --metrics and --devices
+    // never reach this line, which is what keeps them runnable on a
+    // machine with no sound card and is what the two GUI screamers rest
+    // on.
+    shell.start_live();
+    const int rc = Fl::run();
+    // Closing the window ends the capture through the same path an
+    // operator Stop takes, so a transmission in progress is decoded and
+    // saved rather than dropped [§8.3 item 6].
+    shell.stop_live();
+    return rc;
 }

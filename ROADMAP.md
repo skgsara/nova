@@ -595,6 +595,51 @@ Pending:
   no shared code), container and pixels, three sizes, skipping (77) when
   python3 is absent; three writer mutations all rejected. `sips` reads
   the files too.
+- **The audio ring [built session 23]** — `live/ring.hpp`: the SPSC
+  lock-free ring of docs/05 §2.1, the only structure two threads touch
+  at once and the only one a REALTIME thread writes. Capacity 4 s at the
+  capture rate; a full ring drops the NEW samples and counts them in
+  samples, because manufacturing a capture-chain loss inside our own
+  buffer while reporting a clean timebase would be dishonest. `live_ring`
+  pins order across ~19 wraps at 35 block-size pairs, exact overrun
+  accounting, a real producer/consumer pair over four million samples,
+  and zero allocations on the realtime side (counted with a thread-local
+  `operator new`). Four mutations killed. **One of them survived the
+  first version:** relaxing every release/acquire passed on the shipping
+  4 s ring, because two threads are never on the same slot in a
+  192000-sample buffer. A 16-sample ring with both threads spinning
+  kills it — 2067 slots read before their write was published, against 0
+  on the baseline's nine million.
+- **The wiring, and it lives in `nova-live` [built session 23]** —
+  `live/engine.{hpp,cpp}`: ring → StreamResampler → StreamDemod →
+  LiveSession on thread 2, `decode_fax` on thread 3, the GUI queue, and
+  the save path writing PNG with the decode QA in tEXt chunks. In
+  `nova-live` rather than in the GUI because everything on that path can
+  be wrong about a signal, and §1 says such things must be drivable by a
+  fixture instead of a sound card. `live_engine` makes the one claim
+  worth making about concurrency in a decoder: **threading changes
+  nothing about the picture** — same states, same rows at the same
+  sample positions, same saved pixels as the single-threaded path, at
+  five audio block sizes. docs/05 §2.3's "SPSC" was wrong by one
+  producer (thread 2 AND thread 3 push), fixed by removing the second
+  producer rather than relaxing the queue. Five mutations killed, two
+  having first survived: dropping the resampler tail (every fixture is
+  8 kHz, so the resampler was in passthrough — the test now feeds 48 kHz)
+  and entering SAVED before the file was written (invisible until the
+  test recorded the message ORDER, which is what §8.5 item 1 is about).
+  Suite count 32 (+2 GUI).
+- **The shell is wired [built session 23]** — `gui/nova-gui.cpp`: the
+  RtAudio input stream feeding `push_audio`, the 50 ms timer draining
+  the queue, a real picture in the pane, the level meter live, the
+  transport and Force Start working, and PHASE/SYNC/Apply active while
+  the preview is being drawn. `LiveState` is gone: it was a byte-for-byte
+  twin of `SessionState`, and two enums that must stay in the same order
+  is a bug waiting for someone to insert a state in one of them. The
+  live half comes up only after the window is shown, so `--metrics` and
+  `--devices` still open no sound card — which is what keeps the suite
+  runnable on a machine with no audio device, and what stops inspecting
+  Nova from switching on somebody's microphone. Still grey, and honestly
+  so: `Auto`, which means re-rendering a decoded picture, needs §7.1.
 - **`nova-preview` [built session 22]** — the CLI that drives the real
   session machine over a recording and writes the PREVIEW, so the
   provisional picture can be looked at by eye (`--force IOC LPM` for

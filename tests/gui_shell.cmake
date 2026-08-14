@@ -179,10 +179,18 @@ foreach(row IN LISTS bars)
     "gui_shell PASS scrollbar: ioc=${b_ioc} zoom=${b_zoom} -> h=${want_h}")
 endforeach()
 
-# --- nothing is behind the transport yet, and the window says so -----------
-# Without --state there is no capture, so both buttons are insensitive
-# even with the dropdowns explicit. A Start that greys itself is honest;
-# a Start that does nothing when pressed is not [§3, file header].
+# --- an inspection run brings up no capture, and the window says so --------
+# Until session 23 this passed because nothing in the program COULD
+# capture. It now can — nova-gui opens a real input stream and runs the
+# live decode — and the claim has changed rather than disappeared: the
+# live half comes up only after the window is shown, so --metrics and
+# --devices never open a sound card. That is what keeps this suite
+# runnable on a machine with no audio device, and it is also the reason
+# inspecting Nova cannot switch on somebody's microphone.
+#
+# So both buttons are still insensitive here even with the dropdowns
+# explicit. A Start that greys itself is honest; a Start that does
+# nothing when pressed is not [§3, file header].
 run_metrics(out --ioc 576 --rate 120)
 expect("no capture" "${out}" start_active "0")
 expect("no capture" "${out}" force_active "0")

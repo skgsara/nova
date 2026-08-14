@@ -14,20 +14,28 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(30 test suites (+2 with the GUI): three synthetic matrices + 21
+(32 test suites (+2 with the GUI): three synthetic matrices + 21
 real-fixture screamers + the ruler mapping + the live/batch equivalence
-of the front end, of the tone detector, of the picture itself and of the
-whole session state machine + the PNG round-trip under an independent
+of the front end, of the tone detector, of the picture itself, of the
+whole session state machine and of the WIRING with the threads actually
+running + the audio ring + the PNG round-trip under an independent
 decoder; `gui_layout` and `gui_shell` join when FLTK and RtAudio are
 installed.)
-See the M4 shell, if FLTK and RtAudio are installed — the full window
-with no decode behind it yet: `./build/nova-gui`
+See the M4 shell, if FLTK and RtAudio are installed — the full window,
+and since session 23 with the live decode behind it: `./build/nova-gui`
+It opens the default input device, so feed it a receiver (or a virtual
+cable) and press Start; Force Start needs IOC and Rate both explicit and
+is how you begin mid-transmission. Rows appear in the pane as they are
+drawn, the level meter moves, and a completed transmission is decoded and
+saved to the folder in Settings → Image folder, named by UTC timestamp.
+PHASE and SYNC go live while the preview is drawing.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
-column at the left edge stays put. Help → About, Settings → Image folder.
-It also answers without opening anything: `./build/nova-gui --devices` lists
-the input devices, `--metrics` prints the real geometry of every region and
-the shell's state, and `--state decoding` shows the transport rules
-(the button greys, still reading "Start").
+column at the left edge stays put. Help → About.
+It also answers without opening anything — and opens no sound card when
+it does: `./build/nova-gui --devices` lists the input devices, `--metrics`
+prints the real geometry of every region and the shell's state, and
+`--state decoding` shows the transport rules (the button greys, still
+reading "Start").
 No FLTK or RtAudio? The build says `nova-gui: SKIPPED` and everything else
 builds and passes as before.
 Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav out.pgm`

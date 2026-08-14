@@ -200,9 +200,20 @@ default. If either library is absent the configure step prints
 through `fltk-config` and RtAudio through `pkg-config`, since neither
 ships a CMake config package.
 
-The GUI is a shell at present — the window, the device menu and the
-layout, with no decode behind them yet (M4). It answers two questions
-without opening anything:
+The GUI decodes live: pick an input device, press Start, and rows appear
+in the pane as they are drawn while the chart arrives. A completed
+transmission — ended by its stop tone, by Stop, or by closing the window
+— is decoded from the retained audio and saved as a greyscale PNG named
+by UTC timestamp, with the decode QA in the file's text chunks. Force
+Start begins mid-transmission with an operator-supplied IOC and rate; the
+PHASE and SYNC controls correct the picture forward while it draws.
+
+Everything between the sound card and the saved file lives in the
+dependency-free `nova-live` library and is covered by the test suite; the
+GUI binary is widgets, one audio callback and a timer.
+
+It also answers two questions without opening anything — and opens no
+audio device when it does:
 
 ```
 ./build/nova-gui --devices

@@ -7,6 +7,140 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 23: the shell is wired, and two mutation harnesses lied before any verdict meant anything
+
+Agent: Claude. Code changed: `live/ring.hpp` (new — the SPSC audio ring),
+`live/engine.{hpp,cpp}` (new — `LiveEngine`, the whole of docs/05 §2),
+`gui/nova-gui.cpp` (the RtAudio stream, the drain tick, a picture in the
+pane, the live meter, the transport and the override controls; `LiveState`
+deleted), `tests/test_ring.cpp` (new), `tests/test_live_engine.cpp` (new),
+`tests/gui_shell.cmake` (the "nothing can capture" comment, which had
+stopped being the reason), `CMakeLists.txt` (`Threads`, `nova-live` gains
+engine, the `live_ring` and `live_engine` targets). Files changed:
+`docs/05-m4-shell-design.md` (§2, §2.1, §2.3, §3, §8.5 items 1/3/5, §9
+items 11-12, §10's fifth contradiction, §13, the suite count), `ROADMAP.md`,
+`START-HERE.md`, `SESSION-LOG.md`. Session 22 was committed first,
+unchanged and green, as `512cf01`.
+
+**Task as accepted:** the next step as written last entry — wire the
+session into the shell: the capture thread, the GUI queue, thread 3
+running `decode_fax`, and the save path writing PNG with the decode QA.
+
+**The wiring is in `nova-live`, not in the GUI, and that is the decision
+this session actually made.** Everything between the sound card and the
+saved PNG can be wrong about a signal, and §1 says such things must be
+drivable by a test with a fixture instead of a sound card. So
+`LiveEngine` owns the ring, the front end, the session, the batch handoff
+and the save path, and `gui/nova-gui.cpp` is left with widgets, one
+RtAudio callback and a 50 ms timer. The payoff is `live_engine`, which
+makes the only claim worth making about concurrency in a decoder:
+**threading changes nothing about the picture** — same state sequence,
+same rows at the same sample positions, same saved pixels as a
+single-threaded `LiveSession` with no ring at all, at five audio block
+sizes from 1 sample to 65536. Without it, every number the rest of the
+suite measures was measured on a path the operator does not use.
+
+**Before any of that could be trusted, two mutation harnesses had to be
+fixed, and both had been reporting the answer I wanted.** The first
+`touch`ed the test's .cpp and rebuilt — but `make` compares mtimes at
+one-second granularity, so a header edited in the same second as the
+previous object file was silently not recompiled, and every mutation
+"survived". The second used `timeout`, which does not exist on this
+machine: `command not found` is exit 127, which is non-zero, so every
+mutation "was killed". Neither harness ever ran a mutated binary. The
+fix is `rm` the object file outright and `perl -e 'alarm N; exec @ARGV'`,
+plus an unmutated BASELINE run every time — a harness that cannot show
+its baseline surviving is not evidence of anything. **The lesson is not
+about make or about coreutils: a verification tool that has never been
+seen to fail is not a verification tool, and mutation testing is the one
+place where the instrument reports success by default.**
+
+**With honest instruments, three mutations survived, and each was a real
+hole.**
+
+1. **The ring's memory ordering.** Turning every release/acquire in
+   `ring.hpp` into relaxed passed the test — on arm64, where that is a
+   genuine bug that reaches the operator as noise in the picture. The
+   producer/consumer test ran over the shipping 4-second ring, where two
+   threads are never on the same slot, so the publish is never observed
+   early. A 16-sample ring with 4-sample blocks and neither side
+   sleeping kills it at once: **2067 slots read before their write was
+   published, against 0 on the baseline's nine million**. The size of
+   the buffer decides whether the test can see the bug at all.
+2. **The engine's resampler was never running.** Dropping its
+   end-of-stream tail changed nothing, because every fixture is at 8 kHz
+   and 8 kHz in / 8 kHz out is passthrough — so the resampling path,
+   which every real capture uses, was untested by a test written to
+   cover exactly that. `live_engine` now upsamples a fixture to 48 kHz
+   and feeds it at 48 kHz, the rate a sound card actually offers; the
+   streaming resample matches the whole-file resample row for row and
+   pixel for pixel. §13's capture-rate gap is narrowed, not closed: real
+   content, real resampler, still not a real 48 kHz capture.
+3. **SAVED could be entered before the file was written.** §8.5 item 1
+   says the decode completing writes the image and THEN the status line
+   reads SAVED, and swapping those two lines was invisible to every
+   check — because the test recorded what happened, not in what order.
+   It records the message order now, which is what the claim was about.
+
+**docs/05 §2.3 was wrong by one producer.** It names thread 2 and thread
+3 as pushing onto the GUI queue and then calls the queue SPSC. Fixed by
+removing the second producer rather than by relaxing the queue: thread 3
+posts its `DecodeResult` to a one-slot inbox and thread 2 does all the
+emitting. That also gives `LiveSession` exactly one owner, which its own
+header asks for, and keeps the observable event order the session's own
+— the property session 22 had to fix a re-entrant `batch_done` to get,
+and which a second queue producer would have broken again one layer up.
+Recorded as §10's fifth contradiction; like the first, it pooled two
+things living on different timelines, and like the first the fix was to
+keep them apart rather than soften the claim.
+
+**`LiveState` is gone.** It was a byte-for-byte display twin of
+`SessionState` — same eight states, same strings — written when there
+was no session to display. Two enums that must stay in the same order is
+a bug waiting for someone to insert a state in one of them.
+
+**What the shell does now.** Opens the default input device, drives the
+real session machine, draws rows into the pane as they arrive, moves the
+level meter, fills the progress bar from the nine decode stages, and
+writes a timestamped PNG with the QA header when a transmission ends —
+by stop tone, by operator Stop, or by closing the window, which takes the
+same path rather than dropping the chart. PHASE and SYNC go live while
+the preview is drawing. `Auto` stays grey and honestly so: it means
+re-rendering a decoded picture, which needs §7.1. The live half comes up
+only after the window is shown, so `--metrics` and `--devices` still open
+no sound card — which is what keeps the suite runnable without an audio
+device, and what stops inspecting Nova from switching on a microphone.
+`gui_shell` passes unchanged; its comment about why did not, and was
+corrected.
+
+**Validation.** 34/34 pass (186 s), zero warnings. Suite count **32 (+2
+with the GUI)**.
+
+**Not verified, and it is the largest untested thing in M4: nothing has
+looked at a pixel of the wired window.** `live_engine` covers the ring to
+the PNG with no window open; `gui_layout` and `gui_shell` cover the
+regions and the transport. The blit into the pane at a zoom, the meter's
+bar, the progress bar and the status line's saved-file name are checked
+by running the program and looking, and this session did not run it —
+starting it opens Sara's microphone, which is not mine to do unasked.
+Registered in §13.
+
+**Next step: run `nova-gui` against a real signal and look at it.** That
+is the one thing left that no test can do, and the fastest route on this
+machine is the BlackHole 2ch virtual device already installed: route a
+fixture or a recording into it, select it as Nova's input, and watch a
+chart arrive — Start, the rows appearing, the meter, the save, and the
+file on disk. Then the two smaller things, in this order because the
+second depends on the first: §7.1's `DecodeOptions::phase_anchor_hint`
+and `clock_ppm_fallback`, whose screamers are §9 items 5 and 6 and whose
+asymmetry is pinned live already (PHASE seeds the anchor search, SYNC is
+only a fallback — writing SYNC as a plain override is the quiet bug); and
+then §3's second retained snapshot plus the post-decode Apply/Auto
+lifecycle of §8.5 items 2-4, which is what those two fields exist to
+make possible.
+
+---
+
 ## 2026-08-14 — Session 22: the session machine, and the stop tone was being drawn into the picture
 
 Agent: Claude. Code changed: `live/session.{hpp,cpp}` (new —

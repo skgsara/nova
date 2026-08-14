@@ -11,6 +11,12 @@ endif()
 
 add_compile_options(-Wall -Wextra)
 
+# M4 is the first milestone with threads [docs/05 §2]: the RtAudio
+# callback, the live decode, the batch decode and FLTK's main loop. Only
+# the targets that actually start a thread link this.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 add_library(nova-core STATIC
   core/wav.cpp
   core/resample.cpp
@@ -51,9 +57,12 @@ add_library(nova-live STATIC
   live/preview.cpp
   live/session.cpp
   live/png.cpp
+  live/engine.cpp
 )
 target_include_directories(nova-live PUBLIC live)
-target_link_libraries(nova-live PUBLIC nova-core)
+# live/engine.cpp starts threads 2 and 3 [docs/05 §2]; nova-live is
+# otherwise still free of every dependency, FLTK and RtAudio included.
+target_link_libraries(nova-live PUBLIC nova-core Threads::Threads)
 
 add_executable(nova-decode cli/nova-decode.cpp)
 target_link_libraries(nova-decode PRIVATE nova-core)
@@ -422,6 +431,31 @@ add_executable(nova-test-png tests/test_png.cpp)
 target_link_libraries(nova-test-png PRIVATE nova-live)
 add_test(NAME png_roundtrip COMMAND nova-test-png)
 set_tests_properties(png_roundtrip PROPERTIES SKIP_RETURN_CODE 77)
+
+# §9 screamer 11 [docs/05]: the audio ring of §2.1 — the project's first
+# lock-free structure and the only one a REALTIME thread writes. Runs a
+# real producer thread against a real consumer thread over four million
+# samples, and counts the producer's allocations with a global operator
+# new, because "no allocation in the callback" is a rule that fails as an
+# audio glitch nobody traces back to this file. Header-only, so nothing
+# but the test links it; unguarded, no window and no audio device.
+# §9 screamer 12 [docs/05]: the wiring of §2 — ring, front end, session
+# and batch decode with the threads actually running. The claim is that
+# threading changes NOTHING: same states, same rows in the same places,
+# same saved pixels as the single-threaded path, at five audio block
+# sizes. Fixture 1 is tone-driven (the whole walk with no operator
+# input); the rest are forced-started. Unguarded: no window, no audio
+# device, and the only file it writes is under the build tree.
+add_executable(nova-test-live-engine tests/test_live_engine.cpp)
+target_link_libraries(nova-test-live-engine PRIVATE nova-live)
+add_test(NAME live_engine COMMAND nova-test-live-engine
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav)
+
+add_executable(nova-test-ring tests/test_ring.cpp)
+target_link_libraries(nova-test-ring PRIVATE nova-live Threads::Threads)
+add_test(NAME live_ring COMMAND nova-test-ring)
 
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an

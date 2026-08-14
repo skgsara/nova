@@ -100,6 +100,26 @@ this is the first concurrency in the project.
             (thread 3, existing batch core, DecodeHooks progress/cancel)
 ```
 
+**BUILT session 23 as `live/engine.{hpp,cpp}` — and the whole of it is
+in `nova-live`, not in the GUI.** Everything on the diagram above can be
+wrong about a signal, and §1's rule is that anything which can be wrong
+about a signal must be drivable by a test with a fixture instead of a
+sound card. `LiveEngine` therefore owns the ring, the front end, the
+session, the batch handoff and the save path, and `gui/nova-gui.cpp` is
+left with what §1 asks of it: widgets, the RtAudio stream that calls
+`push_audio`, and the 50 ms timer that drains the queue. No DSP, no
+state machine and no file naming is written inside a widget.
+
+**The claim `live_engine` makes, and it is the only one worth making
+about concurrency in a decoder: threading changes nothing about the
+picture.** A recording driven through the engine — real producer thread,
+real ring, real batch thread — produces the same state sequence, the
+same rows at the same sample positions, and the same saved pixels as the
+same recording driven through `LiveSession` on one thread with no ring
+at all, at five audio block sizes from 1 sample to 65536. Without that,
+every number the rest of the suite measures was measured on a path the
+operator does not use.
+
 **2.1 The audio ring.** Single producer, single consumer, fixed capacity,
 no allocation. Capacity 4 s at the capture rate — orders of magnitude
 more than a callback period, so an overrun means thread 2 is wedged, not
@@ -108,6 +128,27 @@ silently dropped: a dropped block is exactly the kind of capture-chain
 sample loss the decoder spent sessions 9–12 learning to detect, and
 manufacturing it in our own buffer while reporting a clean timebase would
 be dishonest.
+
+**BUILT session 23 (`live/ring.hpp`), and the ordering needed a test the
+obvious one was not.** Header-only, capacity+1 slots so full and empty
+are distinguishable without a count, each index written by exactly one
+thread so no CAS appears anywhere. `live_ring` pins order and values
+across ~19 wraps at 35 write/read block-size pairs, exact overrun
+accounting in samples, and — with `operator new` counted on the
+producer's own thread — **zero allocations across four million samples**
+on the realtime side.
+
+The lesson is in the fourth check. A producer and a consumer racing over
+the shipping 4-second ring **did not notice** when every release/acquire
+in the file was turned into relaxed: on a 192000-sample buffer the two
+threads are never on the same slot, so the publish is never observed
+early. Turning the memory ordering into a test needed a ring small
+enough that they are always on top of each other — 16 samples, blocks of
+four, neither side sleeping — and then the mutation fails immediately:
+**2067 slots read before their write was published, against 0 on the
+baseline's nine million.** On a weak memory model this is the difference
+between a correct decoder and one that puts noise in the picture, and
+the size of the buffer is what decides whether a test can see it.
 
 **2.2 Streaming `fm_demod`.** `fm_demod` is a pure batch function over a
 vector. The live path needs it over a growing stream, and the two must
@@ -176,6 +217,41 @@ SPSC queue; the FLTK main thread drains it on a 50 ms timeout and
 repaints at most once per tick. No `Fl::lock()`/`awake()` from worker
 threads — one drain point is simpler to reason about, and 20 Hz is well
 past what a 120 lpm picture (2 rows/second) can justify.
+
+**BUILT session 23 (`live/engine.{hpp,cpp}`), and this paragraph was
+wrong by one producer.** It names thread 2 *and* thread 3 as pushing
+onto the queue, and then calls the queue SPSC. Two producers is not
+single-producer, and the choice was between building a multi-producer
+queue and removing the second producer. The second producer is removed:
+thread 3 posts its finished `DecodeResult` into a one-slot inbox, and
+thread 2 picks it up, writes the file, calls `batch_done` and emits the
+messages. Three things fall out of that, and the third is the reason to
+prefer it:
+
+1. the GUI queue really is single-producer;
+2. `LiveSession` has exactly one owner, which is what `session.hpp`
+   asks for in as many words;
+3. **the observable event order is the session's own.** Session 22 had
+   to fix a re-entrant `batch_done` to make the machine's history
+   independent of the caller's callback discipline; letting thread 3
+   post GUI messages directly would have reintroduced the same class of
+   problem one layer up, with the order now depending on which thread
+   reached the mutex first.
+
+The progress reports are the one exception and they are handled the same
+way: thread 3 writes a *slot* (stage, fraction), thread 2 turns whatever
+it last saw into a message. Progress is a level, not an event, so
+coalescing nine stages down to what a 20 Hz bar can show is exactly
+right rather than a compromise.
+
+The three queues are mutex-guarded, and that is not a violation of the
+"never block" rule: that rule is about thread 1, the realtime one, which
+touches only the lock-free ring. Threads 2, 3 and 4 may take an
+uncontended mutex for the length of a vector append. Thread 2 **polls**
+the ring rather than waiting on a condition variable, because the only
+thing that could signal it is thread 1 and a realtime callback may not
+touch a condvar; the poll interval is a latency floor, not a throughput
+limit, since one wake drains everything the ring holds.
 
 ---
 
@@ -972,6 +1048,15 @@ because an unsaved chart is the one failure an operator cannot undo
 item 5]. By the time a corrected image is on screen, the automatic
 version is already on disk.
 
+**[BUILT session 23 (`LiveEngine::collect_batch`), and the ORDER is the
+part that needed pinning.** Thread 2 writes the PNG and then calls
+`batch_done`, which is what enters SAVED — never the other way round, or
+the status line would read SAVED over a file that is not there. Swapping
+those two lines was invisible to every check `live_engine` made until the
+test began recording the message order, and it is now the claim that
+kills it. A save that fails does not suppress SAVED (the decode did
+succeed) but posts the reason, which the status line shows.]**
+
 **2. What does a re-render after an edit do to that file? It overwrites
 it — one transmission, one file.** [DECIDED 2026-08-13, Sara.] The
 corrected image is the same transmission, and the image folder *is* the
@@ -1057,6 +1142,16 @@ Rule: anything in `\ / : * ? " < > |` and every run of whitespace becomes
 a single `-`, the result is trimmed and capped at 32 characters, and if
 nothing survives it is treated as blank. The full label goes into the PNG
 text chunks regardless, so a conservative filename loses nothing.
+
+**[BUILT session 23 (`nova::sanitize_label` / `nova::image_filename`),
+as free functions rather than as private members — a rule about a dozen
+awkward strings is cheapest to defend by calling it with a dozen awkward
+strings, and `live_engine` does.** One reading had to be chosen where
+the sentence above is ambiguous: a RUN of bad characters collapses to a
+single `-`, so `a///b` is `a-b` rather than `a---b`, which is the same
+treatment the sentence gives explicitly to a run of whitespace and the
+only reading under which `///` reduces to blank as the next clause
+requires.]**
 
 **Nova never renames a saved file.** The name is fixed at the automatic
 save. A label typed or changed afterwards reaches the PNG metadata on the
@@ -1307,8 +1402,40 @@ One more, added session 22 with the component it covers:
     second transmission into DECODING and never exercised the SAVED edge.
     Both cases are driven now.]**
 
-The suite count is now **"30 (+2 with the GUI)"** — session 22 adds
-`live_session` and `png_roundtrip`, both unguarded `nova-live` tests.
+Two more, added session 23 with the wiring they cover:
+
+11. **`live_ring`** — the audio ring of §2.1: order and values preserved
+    across many wraps at 35 block-size pairs, exact overrun accounting
+    in samples, a real producer racing a real consumer over four million
+    samples, and **zero allocations on the realtime side**, counted with
+    a thread-local `operator new`.
+    **[BUILT session 23: `live/ring.hpp` + `tests/test_ring.cpp`,
+    unguarded, 0.5 s. Verified by mutation, four: relaxing every
+    release/acquire, giving away the reserved empty slot, dropping the
+    overrun count, and letting the consumer read past the producer. The
+    ORDERING mutation survived the first version of the test and needed a
+    tight-handoff case to kill — see §2.1 and §10.]**
+12. **`live_engine`** — the wiring of §2: the same recording through the
+    engine and through a single-threaded `LiveSession` produces the same
+    states, the same rows and the same saved pixels, at five audio block
+    sizes; the save is named by §8.5 item 5's rule and its bytes are a
+    real PNG; the tEXt QA records PHASE/SYNC provenance [§8.5 item 3];
+    the file is written **before** the state reads SAVED [§8.5 item 1];
+    and a ring too small for the feed counts what it dropped.
+    **[BUILT session 23: `live/engine.{hpp,cpp}` +
+    `tests/test_live_engine.cpp`, unguarded, 18 s. Verified by mutation,
+    five, all killed. TWO survived earlier versions and both were holes
+    worth the finding: dropping the resampler's end-of-stream tail
+    changed nothing, because every fixture is at 8 kHz and the engine's
+    resampler was in passthrough — the test now upsamples a fixture to
+    48 kHz and feeds it at 48 kHz, which is the rate a sound card
+    actually offers; and entering SAVED before writing the file was
+    invisible until the test recorded the message ORDER, which is what
+    §8.5 item 1's claim is actually about.]**
+
+The suite count is now **"32 (+2 with the GUI)"** — session 22 added
+`live_session` and `png_roundtrip`, session 23 adds `live_ring` and
+`live_engine`, all four unguarded `nova-live` tests.
 
 **The block-size sweep is now the suite's dominant cost, and it is worth
 seeing the whole bill in one place.** `live_tones` runs 25 s and
@@ -1348,6 +1475,26 @@ three-layer split in §1 is drawn to make small.
 ---
 
 ## 10. Contradictions found
+
+**A fifth, found session 23 by building §2, and it is a one-word error
+with a real consequence.** §2.3 calls the GUI queue SPSC — single
+producer, single consumer — in a paragraph whose own first sentence
+names **two** producers, thread 2 and thread 3. Written down, the
+contradiction is obvious; it survived four readings of this document
+because "the workers push, the GUI drains" reads as one-to-one until you
+count the workers.
+
+Resolved by removing the second producer rather than by relaxing the
+queue: thread 3 posts to a one-slot inbox and thread 2 does all the
+emitting. The full argument, including why that is better than a
+multi-producer queue and not merely cheaper, is in §2.3. Worth noting
+alongside contradiction 1: both are cases where a sentence pooled two
+things that live on different timelines — there the receivers' protocol
+states with the nine batch stages, here the live decode thread with the
+batch decode thread — and in both the fix was to keep the two apart
+rather than to soften the claim.
+
+---
 
 **One, and it matters.** `docs/04` Finding 3 states that the receivers'
 protocol narration is "a one-to-one match with Nova's nine decode
@@ -1653,6 +1800,16 @@ It is worth expecting a third instance somewhere in this document.
   cannot surprise the resampler the way a real capture chain might, and
   no fixture can close this, because every recording in the library
   reached us through someone else's resampler already.
+  **NARROWED session 23, and the narrowing was forced by a surviving
+  mutation.** Dropping the engine's end-of-stream resampler tail changed
+  nothing, because at 8 kHz in and 8 kHz out the resampler is a
+  passthrough with no tail — which means the engine's whole resampling
+  path, the one every real capture uses, was untested. `live_engine` now
+  upsamples a fixture to 48 kHz and feeds it at 48 kHz, and the streaming
+  resample matches the whole-file resample of the same audio row for row
+  and pixel for pixel. That is real recorded CONTENT through a real
+  resampler, which is more than a generated tone; it is still not a real
+  48 kHz capture, and that half of the gap stays open.
 - ~~**No fixture in the library carries a STOP tone**~~ and ~~**nothing
   in the library fades mid-tone**~~ (both registered session 20).
   **CLOSED session 21 by one fixture, as predicted.**
@@ -1706,3 +1863,18 @@ It is worth expecting a third instance somewhere in this document.
   image is correct; the preview cannot be, and a forward-only preview
   that waited to find out would not be a preview. Not to be "fixed" by
   holding rows back.
+- **Nothing has looked at a pixel of the wired window** (session 23).
+  `live_engine` pins everything from the ring to the saved PNG, and it
+  does it with no window open; `gui_layout` and `gui_shell` pin where the
+  regions are and what the transport does. Between them sits the code
+  this session added to `gui/nova-gui.cpp` — the picture blitted into
+  the pane at a zoom, the level meter's bar, the progress bar filling,
+  the status line's saved-file name — and none of that is checked by
+  anything but running the program and looking. The §1 split is what
+  keeps that surface small, and it is now the largest untested thing in
+  M4.
+- **The second retained snapshot is not built** (§3, session 23). One
+  snapshot exists at a time, so a decoded image has no raw stream behind
+  it and the post-decode correction controls stay visibly disabled. It
+  lands with §7.1's two `DecodeOptions` fields, because those are what
+  would give it something to do.
