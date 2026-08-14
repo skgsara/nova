@@ -189,6 +189,17 @@ other, because the toolkit's own resize logic stretched it back off. The
 layout is therefore computed rather than scaled, and a window built at a
 size is now provably identical to one dragged to it.
 
+And proven on the air the same day: two live broadcasts decoded
+unattended through a KiwiSDR browser feed, start tone to saved PNG. The
+catches paid for the effort immediately — a Device menu that had never
+had a callback, a Start button that was swallowed in SAVED — and one
+finding that took three tries to read right: a chart whose dead-sector
+edges jogged turned out to be false per-line locks on a faded signal
+(dark picture content crowding the sync template's white window), not
+the internet drops that were also present. A level move that returns
+within the vouching distance is a lock error, not a stream event, and is
+no longer followed [docs/01 §5 item 3].
+
 Synthetic tests cover the full {IOC 288, 576} × {60, 90, 120 lpm} matrix
 with automatic selection, ±150/±400 Hz deviation, a two-order-of-magnitude
 input-amplitude span, dead-sector tolerance edges, the eight-tone gray

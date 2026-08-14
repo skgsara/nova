@@ -266,6 +266,23 @@ more likely right than one that agrees only with its own reasoning.
   a decoder that draws it correctly, and only the picture can tell you
   which one you have.** The suite had no picture-domain check at all
   until this session; it has one now (`--expect-straight-strip`).
+- False per-line locks on a faded signal whose picture crowds the white
+  gap (session 26, HLL 2147Z): the pulse template's white window is
+  polluted, a position ~60 samples late out-scores the true one (0.72 vs
+  0.44 measured), and the hop returns 1–3 lines later with a dipped lock
+  score. **The lesson for the next agent: a seam count counts decoder
+  moves, not proven audio drops** — the two coincided until they didn't,
+  and the raggedness Sara sent back twice was the tracker, not the
+  network. The picture is straightened by seam ADMISSION (a move that
+  returns within the vouching distance is cancelled; `docs/01` §5 item 3,
+  `fixture_false_locks`); the template itself is untouched — the white-
+  window robustness fix is registered for the day the library shows the
+  need, and the admission rule's blind spot (a real drop compensated by a
+  real insertion within three lines would be cancelled too) is written
+  down in the same place. The porch-edge check (`--expect-straight-porch`)
+  exists because the strip statistic is unmeasurable on this chart — the
+  same coastline that causes the false locks crowds the strip — and
+  because a percentile is blind to a two-row jog by design.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

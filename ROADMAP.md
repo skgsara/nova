@@ -713,12 +713,15 @@ one feature with several parts, plus one verification no test can do.
    whether anyone is looking — but it is the last piece of the "edit
    holds the pane" decision.
 7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
-8. **The KiwiSDR browser hop** (found by item 1, session 25; scope set by
-   Sara: **the browser stays the audio source**). The live HLL catch saved
-   a chart with 221 seams in 802 lines — a sample-skip every 3–4 lines,
-   dead-sector edges ragged to ±20 px — where the library norm is
-   placement RMS under 1 px and dead-straight edges. The decoder followed
-   the steps honestly; the steps are in the audio BlackHole delivered.
+8. ~~**The KiwiSDR browser hop**~~ **Done (session 26)** (found by item 1,
+   session 25; scope set by Sara: **the browser stays the audio source**).
+   The live HLL catch saved a chart with 221 seams in 802 lines — a
+   sample-skip every 3–4 lines, dead-sector edges ragged to ±20 px — where
+   the library norm is placement RMS under 1 px and dead-straight edges.
+   Session 26 amended what that meant, twice: the steps are real in the
+   audio BlackHole delivered (the parallel-capture proof below), AND the
+   raggedness the eye objects to turned out to be false per-line locks,
+   not the drops (the (b) paragraph).
    With the browser as a fixture of the setup, the work is three parts:
    (a) *isolate* — record BlackHole in parallel (QuickTime audio
    recording, source BlackHole 2ch) on the next broadcast and decode that

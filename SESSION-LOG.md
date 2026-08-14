@@ -7,7 +7,23 @@ anything as our develop history").
 
 ---
 
-## 2026-08-14 — Session 26 (cont 2): seam admission — a move that returns was never a move
+## 2026-08-14 — Session 26 (cont 3): the documentation sweep
+
+Agent: Kimi. Files changed: `ROADMAP.md` (item 8 marked done in the
+established style, and its session-25 opening claim — "the steps are in
+the audio" — amended where it now reads incomplete: the steps are real,
+and the visible raggedness was false locks), `README.md` (the M4 section
+gains the on-air day and the three-tries finding), `AGENTS.md` (the
+false-lock mechanism registered as a gap, with its lesson: a seam count
+counts decoder moves, not proven audio drops). No code; no test counts
+moved (37/37 stands from cont 2). Sara's close-out request for the
+session.
+
+**Next step: ROADMAP M4 items 3–4** (the retained snapshot and the
+post-decode edit lifecycle), the build order Sara set — unchanged from
+cont 2.
+
+---
 
 Agent: Kimi. Code changed: `core/fax.cpp` (`stage_change_points` cancels a
 step/return pair), `tests/test_fixture.cpp` (`porch_edges` /
