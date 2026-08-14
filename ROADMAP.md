@@ -663,12 +663,18 @@ Audio in one end and a saved chart out the other works as of session 23.
 What remains is **correcting a chart after it has been decoded**, which is
 one feature with several parts, plus one verification no test can do.
 
-1. **Run `nova-gui` against a real signal and look at it** (no code).
-   The only thing no screamer can do, and the largest untested surface in
-   M4 [docs/05 §13]: the blit into the pane at a zoom, the level meter's
-   bar, the progress bar, the status line. The BlackHole 2ch virtual
-   device on this machine is the quickest route — route a recording into
-   it and select it as Nova's input.
+1. ~~**Run `nova-gui` against a real signal and look at it**~~ **Done
+   (session 25)**, against HLL live via a KiwiSDR through BlackHole 2ch.
+   The blit at zoom, the level meter, the progress bar and the status
+   line's saved-file name all verified by eye; a full auto cycle (start
+   tone → phasing → preview rows → stop tone → decode → save) produced a
+   correct 802-line chart. The run caught one real bug no screamer could:
+   the Device menu had no callback, so the stream opened once at
+   window-show on the system default and the selection relabelled without
+   effect — the meter answered the operator's voice with BlackHole
+   selected. Fixed [docs/05 §8.3 item 9]: the menu now reopens the stream
+   on change, is greyed while a chart is live, and persists by name. It
+   also surfaced the open item 8 below.
 2. ~~**`DecodeOptions::phase_anchor_hint` and `clock_ppm_fallback`**~~
    **Done (session 24)** [docs/05 §7.1], with §9 screamers 5 and 6 built
    as `override_phase_seed` / `override_sync_fallback`. Both fields are
@@ -707,10 +713,24 @@ one feature with several parts, plus one verification no test can do.
    whether anyone is looking — but it is the last piece of the "edit
    holds the pane" decision.
 7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
+8. **The KiwiSDR browser hop** (found by item 1, session 25). The live
+   HLL catch saved a chart with 221 seams in 802 lines — a sample-skip
+   every 3–4 lines, dead-sector edges ragged to ±20 px — where the
+   library norm is placement RMS under 1 px and dead-straight edges. The
+   decoder followed the steps honestly; the steps are in the audio the
+   browser delivered to BlackHole (SDR → network → WebAudio resample →
+   BlackHole → Nova). First move is isolation, not adaptation: a paired
+   capture (KiwiSDR's own record button + Nova live on the same
+   broadcast) convicts or clears the hop. If convicted, the adaptation is
+   capture-side — pipe `kiwirecorder` straight into BlackHole and skip
+   the browser — not decoder-side: the samples are gone, and no smoother
+   invents them. Note the session-25 catch is also the standing argument
+   for item 3: with the raw stream retained, this diagnosis would not
+   have to wait for another broadcast.
 
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
-next. Items 5, 6 and 7 are independent and can be taken in any order.
+next. Items 5, 6, 7 and 8 are independent and can be taken in any order.
 
 ## M4.5 — tuning aids  [pending; created session 17]
 - Spectrum / waterfall display [DECIDED 2026-08-13, Sara, session 17:

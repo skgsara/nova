@@ -7,7 +7,94 @@ anything as our develop history").
 
 ---
 
-## 2026-08-14 — Session 24: the operator's two corrections reach the batch decode, and one of them had to be defended twice
+## 2026-08-14 — Session 25: the wired window meets the air, and the Device menu had never had a callback
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`cb_device` — the Device
+menu's first callback; `open_device` guard; `stop_live` now clears
+`capture`; `populate_devices` restores the remembered device by NAME;
+`apply_state` greys the menu from Start until the transmission ends;
+`print_metrics` exposes `device_active`), `tests/gui_shell.cmake` (the
+state table gains the device-menu column). Files changed:
+`docs/05-m4-shell-design.md` (§8.3 item 9 — the device-menu decision;
+§8.4 item 1 — the prefs file now holds the device name too; §13 — the
+"nothing has looked at a pixel" gap closed, what remains named),
+`ROADMAP.md` (M4 item 1 done, item 8 registered), `START-HERE.md`,
+`SESSION-LOG.md`.
+
+**Task as accepted:** ROADMAP M4 item 1 — run `nova-gui` against a real
+signal and look at it. Sara at the keyboard, a KiwiSDR in the browser
+routed through BlackHole 2ch.
+
+**The run caught the bug it existed to catch before any fax arrived.**
+Sara selected BlackHole 2ch, said "test test test", and the level meter
+answered her voice. The cause was not subtle once looked for: the Device
+menu had NO callback — the only control on its row without one. The
+stream opened once, at window-show, on the system default input, and the
+menu afterwards relabelled without effect. `gui_shell` pins the menu's
+geometry and `live_engine` pins the audio path; "the menu choice reaches
+`openStream`" lived between them, in the one place only a running window
+covers. Every prior run, including the first KiwiSDR attempt that sat in
+READY through a whole transmission, was Nova listening to the MacBook's
+microphone.
+
+**The fix, both halves decided by Sara.** Changing the menu reopens the
+stream on the new device at once; the menu is insensitive from Start
+until the transmission ends (IDLE and SAVED are the states with nothing
+to lose — a misclick can never kill a live chart); and the choice
+persists in `nova.conf`, matched back by NAME because CoreAudio's
+enumerated ids are per-boot and a persisted id would be a dice roll that
+can open somebody's microphone. The greying is pinned in `gui_shell`'s
+state table; the reopen itself needs a real card and stays under §13's
+RtAudio gap, now narrowed to exactly that.
+
+**Then the air part worked, all of it.** HLL's typhoon-forecast
+broadcast, live: start tone → phasing → preview rows → stop tone → decode
+→ save, with no operator intervention. `20260814T200737Z-JMH.png`: IOC
+576 and 120 lpm auto-detected, clock −77.7 ppm measured, 764 of 802 lines
+locked. The four things no test can check, verified by Sara's eye: rows
+blitting into the pane at a zoom (left-edge column stays put), the meter
+breathing with the signal and idling in fades, the progress bar filling
+during DECODING, the status line naming the saved file. The
+device-persistence half verified itself: the second probeDeviceInfo noise
+line in the log is the reopen from her re-selection, and `nova.conf`
+carried the BlackHole name on the next launch.
+
+**And it found item 8.** The saved chart's dead-sector bands — signal-
+level black at both edges, Nova's longstanding full-line convention, same
+on every library decode — made a misalignment visible: their edges are
+ragged to ±20 px with 36 px single-row jumps, where the library JMH norm
+is stdev 0.87 px. The QA header says why: **221 seams in 802 lines**, a
+sample-skip every 3–4 lines. The decoder followed the steps honestly; the
+steps are IN the audio the browser delivered. The capture chain was SDR →
+network → WebAudio resample → BlackHole → Nova, and the signature matches
+what the six JSC library files carry from their own lossy capture chain.
+Whether the hop is convicted or the station/SKR stream itself steps is
+not yet known — the audio was not retained, which is itself the standing
+argument for item 3's second snapshot, the feature whose absence made
+this diagnosis wait for another broadcast.
+
+**Contradictions found:** docs/05 §8.4 item 1 said the prefs file holds
+"the image folder, and that is all" — amended; it now also holds the
+input device's name. START-HERE said "opens the default input device" —
+amended to remembered-or-default. docs/05 §13's "nothing has looked at a
+pixel of the wired window" — closed, with the untestable remainder named
+rather than dropped.
+
+**Validation.** 36/36 pass (224 s), zero warnings; `gui_shell` includes
+the new device-menu pins. The live catch itself is the other validation:
+one real broadcast, one correct chart.
+
+**Next step: isolate the KiwiSDR browser hop (ROADMAP M4 item 8).** On
+the next suitable broadcast, paired capture: KiwiSDR's own record button
+AND Nova live via BlackHole on the same signal. Decode the KiwiSDR WAV
+offline afterwards — if it is straight where the live catch was ragged,
+the browser hop is convicted and the adaptation is capture-side (pipe
+`kiwirecorder` into BlackHole, skip the browser), not decoder-side: the
+samples are gone and no smoother invents them. Items 3–4 (the retained
+snapshot and the post-decode edit lifecycle) remain next in the build
+order afterwards.
+
+---
 
 Agent: Claude. Code changed: `core/fax.hpp` (`DecodeOptions::
 phase_anchor_hint` / `clock_ppm_fallback`; `DecodeResult::

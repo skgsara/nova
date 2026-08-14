@@ -1052,6 +1052,23 @@ costs about 120 px there, so the minimum window width rises from 740 px
 to roughly 880. The picture still does not set the floor; the control row
 does, now more than before.
 
+**9. The Device menu moves the sound card the moment it changes, and it
+is insensitive while there is a chart to kill — DECIDED 2026-08-14 (Sara,
+session 25).** The M4 item-1 run found the menu had never had a callback:
+the stream opened once at window-show on the system default, and picking
+BlackHole 2ch afterwards relabelled the menu while the meter kept
+answering the operator's voice — the largest untested surface in M4
+caught exactly the bug it existed to catch. So: changing the selection
+reopens the stream on the new device at once; the menu is insensitive
+from Start until the transmission ends (IDLE and SAVED are the states
+with nothing to lose, the same deactivate-never-prompt idiom as Force
+Start); and the choice persists in the preference file, matched back by
+NAME — CoreAudio's enumerated ids are per-boot, so a persisted id would
+be a dice roll that can open somebody's microphone. A remembered device
+that is unplugged falls back to the default, not to an error. The greying
+is pinned by `gui_shell`; the reopen itself needs a real card and stays
+under §13's RtAudio gap.
+
 ### 8.4 Settings persistence, zoom-scroll, and the transport cycle
 
 **Five questions raised by Sara while looking at the skeleton (session
@@ -1065,11 +1082,11 @@ Recorded consequence: if that directory is not writable (a system-wide
 install), Nova runs without persistence for the session rather than
 failing — settings are a convenience, never a precondition.
 
-What it holds is **the image folder** [§8.3 item 7], and that is all. As
-first written this item also gave it the per-station PHASE/SYNC memory of
-§7; **session 20 removed that** — the folder is a path the operator
-chose, while PHASE and SYNC are measurements of a signal, and only the
-first is a preference. See §8.5 item 6.
+What it holds is **the image folder** [§8.3 item 7] and, since session
+25, **the input device's name** [§8.3 item 9] — both things the operator
+chose. As first written this item also gave it the per-station PHASE/SYNC
+memory of §7; **session 20 removed that** — PHASE and SYNC are
+measurements of a signal, not preferences. See §8.5 item 6.
 
 **2. Zoom keeps the left edge.** On a zoom change, the image column at
 the pane's left edge stays where it was; the scroll position is
@@ -1973,16 +1990,19 @@ It is worth expecting a third instance somewhere in this document.
   image is correct; the preview cannot be, and a forward-only preview
   that waited to find out would not be a preview. Not to be "fixed" by
   holding rows back.
-- **Nothing has looked at a pixel of the wired window** (session 23).
-  `live_engine` pins everything from the ring to the saved PNG, and it
-  does it with no window open; `gui_layout` and `gui_shell` pin where the
-  regions are and what the transport does. Between them sits the code
-  this session added to `gui/nova-gui.cpp` — the picture blitted into
-  the pane at a zoom, the level meter's bar, the progress bar filling,
-  the status line's saved-file name — and none of that is checked by
-  anything but running the program and looking. The §1 split is what
-  keeps that surface small, and it is now the largest untested thing in
-  M4.
+- ~~**Nothing has looked at a pixel of the wired window**~~ — **CLOSED
+  session 25 by the M4 item-1 run, and it caught exactly the bug it
+  existed to catch.** Sara ran the wired window against a live station
+  (HLL, via a KiwiSDR through BlackHole 2ch): the blit into the pane, the
+  level meter, the progress bar and the status line's saved-file name all
+  verified by eye, and a full start→phasing→draw→stop→decode→save cycle
+  produced `20260814T200737Z-JMH.png` (802 lines, 764 locked, −77.7 ppm).
+  The run also found that the Device menu had never had a callback — the
+  stream opened once at window-show on the system default and the meter
+  answered the operator's voice with BlackHole selected. Fixed (§8.3 item
+  9): the menu now reopens the stream on change, is insensitive while a
+  chart is live, and persists by device NAME. What no screamer can reach
+  stays open: the reopen callback itself, and RtAudio generally.
 - **The second retained snapshot is not built** (§3, session 23). One
   snapshot exists at a time, so a decoded image has no raw stream behind
   it and the post-decode correction controls stay visibly disabled. It

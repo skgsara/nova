@@ -45,16 +45,20 @@ endfunction()
 # --- the transport, state by state [§8.3 item 4, §8.4 item 4] ---------------
 # Both dropdowns are explicit here so that Force Start's gating is
 # satisfied and what is left under test is the STATE's effect on it.
+# The device column is §8.3 item 9: the Device menu reopens the stream,
+# so it is insensitive from READY through DECODING — the two states with
+# nothing to lose are IDLE and SAVED.
 # Fields: state | button label | start active | force active | progress active
+#         | device menu active
 set(rows
-  "idle|Start|1|1|0"
-  "ready|Stop|1|0|0"
-  "start-tone|Stop|1|0|0"
-  "phasing|Stop|1|0|0"
-  "drawing|Stop|1|0|0"
-  "stop-tone|Stop|1|0|0"
-  "decoding|Start|0|0|1"
-  "saved|Start|1|1|0")
+  "idle|Start|1|1|0|1"
+  "ready|Stop|1|0|0|0"
+  "start-tone|Stop|1|0|0|0"
+  "phasing|Stop|1|0|0|0"
+  "drawing|Stop|1|0|0|0"
+  "stop-tone|Stop|1|0|0|0"
+  "decoding|Start|0|0|1|0"
+  "saved|Start|1|1|0|1")
 
 foreach(row IN LISTS rows)
   string(REPLACE "|" ";" f "${row}")
@@ -63,6 +67,7 @@ foreach(row IN LISTS rows)
   list(GET f 2 want_start)
   list(GET f 3 want_force)
   list(GET f 4 want_progress)
+  list(GET f 5 want_device)
 
   run_metrics(out --state ${st} --ioc 576 --rate 120)
   expect("state ${st}" "${out}" start_label "${want_label}")
@@ -71,6 +76,7 @@ foreach(row IN LISTS rows)
   # The progress bar is populated ONLY during DECODING, from the nine
   # decode stages — it is not a general busy indicator [§4, §8].
   expect("state ${st}" "${out}" progress_active "${want_progress}")
+  expect("state ${st}" "${out}" device_active "${want_device}")
 
   # The button never reads a state name: states live in the status line
   # [docs/04 Finding 3], and a button that narrates is a fake control.

@@ -646,6 +646,9 @@ struct Shell {
     std::unique_ptr<nova::LiveEngine> engine;
     std::unique_ptr<RtAudio> audio;
     bool audio_open = false;
+    // Index into `devices` of the device the stream is open on, so picking
+    // the entry that is already live does not tear down a healthy stream.
+    int open_device = -1;
     std::string audio_error;
     unsigned int audio_rate = 0;
     // What the drained messages last said, for the status panel.
@@ -828,6 +831,9 @@ struct Shell {
         cap_device = caption("Device");
         device = new Fl_Choice(0, 0, 0, 0);
         device->textsize(kFontSize);
+        // The only control on this row whose choice moves a sound card:
+        // switching reopens the stream on the new device [§8.3 item 9].
+        device->callback(cb_device, this);
         note("device_choice", device);
 
         cap_ioc = caption("IOC");
@@ -1095,6 +1101,17 @@ struct Shell {
         if (t.start_active) start->activate(); else start->deactivate();
         if (t.force_active) force->activate(); else force->deactivate();
 
+        // The Device menu reopens the stream, which would kill a live
+        // chart, so it is insensitive from Start until the transmission
+        // ends — IDLE and SAVED are the two states with nothing to lose
+        // [§8.3 item 9, decided session 25]. Same deactivate-never-prompt
+        // idiom as Force Start.
+        if (!devices.empty() &&
+            (state == LiveState::kIdle || state == LiveState::kSaved))
+            device->activate();
+        else
+            device->deactivate();
+
         status_state->label(state_text(state));
         field_val[3]->label(state_text(state));
 
@@ -1183,6 +1200,7 @@ struct Shell {
             return;
         }
         audio_open = true;
+        open_device = device->value();
         capture = true;
         Fl::add_timeout(kTickSec, cb_tick, this);
         apply_state();
@@ -1196,6 +1214,10 @@ struct Shell {
             audio_open = false;
         }
         audio.reset();
+        open_device = -1;
+        // After this there is nothing behind the buttons — not "paused",
+        // gone — and the transport should say so.
+        capture = false;
         // The engine's shutdown flushes the session, so a transmission in
         // progress when the window closes is still decoded and saved
         // rather than dropped [§8.3 item 6].
@@ -1315,10 +1337,17 @@ struct Shell {
             device->deactivate();
             return;
         }
+        // The remembered choice wins over the system default [§8.3 item 9].
+        // Matched by NAME, never by the enumerated id: CoreAudio ids are
+        // per-boot, and a persisted id would be a dice roll that opens
+        // somebody's microphone. A remembered device that is not plugged
+        // in falls back to the default, not to an error.
+        const std::string want = prefs.get("device");
         int def = 0;
         for (size_t i = 0; i < devices.size(); i++) {
             device->add(escape_menu_label(devices[i].name).c_str());
             if (devices[i].is_default) def = static_cast<int>(i);
+            if (devices[i].name == want) def = static_cast<int>(i);
         }
         device->value(def);
     }
@@ -1383,6 +1412,29 @@ struct Shell {
     // --- the transport [§8.3 item 4, §8.4 items 3-4] ------------------------
     // One button. Its meaning is the state's, so it asks `transport_for`
     // what it currently is rather than keeping a flag of its own.
+    // The Device menu is the one control whose choice moves a sound card
+    // [§8.3 item 9]. Changing it reopens the stream on the new device —
+    // until session 25 it had no callback at all, so the menu relabelled
+    // and the stream stayed on whatever was default at window-show (found
+    // by the M4 item-1 run: the meter answered the operator's voice with
+    // BlackHole selected). It is insensitive from Start until the
+    // transmission ends, so this can only fire while monitoring or after a
+    // save: there is never a live chart for the reopen to kill.
+    static void cb_device(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        const int v = s->device->value();
+        if (v < 0 || v >= static_cast<int>(s->devices.size())) return;
+        if (v == s->open_device && s->audio_open) return;  // re-picked live one
+        s->prefs.set("device", s->devices[static_cast<size_t>(v)].name);
+        s->stop_live();
+        // The new engine posts no initial state, so without this the shell
+        // would sit in SAVED — and keep the menu grey — until a tone moved
+        // it. The restart IS a new session: idle, listening, nothing drawn.
+        s->state = LiveState::kIdle;
+        s->start_live();
+        s->apply_state();  // start_live's failure paths return before theirs
+    }
+
     static void cb_start(Fl_Widget*, void* p) {
         Shell* s = static_cast<Shell*>(p);
         if (!s->engine) return;
@@ -1541,6 +1593,10 @@ int print_metrics(const Shell& s) {
     std::printf("  start_label          \"%s\"\n", s.start->label());
     std::printf("  start_active         \"%d\"\n", s.start->active() ? 1 : 0);
     std::printf("  force_active         \"%d\"\n", s.force->active() ? 1 : 0);
+    // Whether the Device menu can be touched in this state — the widget's
+    // own sensitivity, so the §8.3 item 9 greying is pinned the same way
+    // the transport's is.
+    std::printf("  device_active        \"%d\"\n", s.device->active() ? 1 : 0);
     std::printf("  progress_active      \"%d\"\n", s.progress->active() ? 1 : 0);
     std::printf("  ruler_active         \"%d\"\n", s.ruler->active() ? 1 : 0);
     std::printf("  zoom                 \"%s\"\n", s.zoom->text());

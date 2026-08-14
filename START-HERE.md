@@ -23,9 +23,10 @@ decoder + the two operator corrections behaving asymmetrically;
 `gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 See the M4 shell, if FLTK and RtAudio are installed — the full window,
 and since session 23 with the live decode behind it: `./build/nova-gui`
-It opens the default input device, so feed it a receiver (or a virtual
-cable) and press Start; Force Start needs IOC and Rate both explicit and
-is how you begin mid-transmission. Rows appear in the pane as they are
+It opens the remembered input device (the default on first run); the
+Device menu takes effect the moment it changes and persists, so feed it a
+receiver (or a virtual cable) and press Start; Force Start needs IOC and
+Rate both explicit and is how you begin mid-transmission. Rows appear in the pane as they are
 drawn, the level meter moves, and a completed transmission is decoded and
 saved to the folder in Settings → Image folder, named by UTC timestamp.
 PHASE and SYNC go live while the preview is drawing.
