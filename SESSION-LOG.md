@@ -7,7 +7,95 @@ anything as our develop history").
 
 ---
 
-## 2026-08-14 — Session 25: the wired window meets the air, and the Device menu had never had a callback
+## 2026-08-14 — Session 26: the operator's four findings, and the hop is convicted
+
+Agent: Kimi. Code changed: `live/session.cpp` (`start_capture` re-arms
+from SAVED — the operator half of §4's exit rule), `gui/nova-gui.cpp`
+(`drain` follows the newest row while DRAWING; `set_quality` says the
+seam count), `tests/test_live_session.cpp` (T13 + the header claim).
+Files changed: `docs/05-m4-shell-design.md` (§4 built-note for Start in
+SAVED; §8.3 item 3 gains the follow-the-newest-row decision),
+`ROADMAP.md` (item 8: (a) ran twice — control and conviction; (c)
+built), `SESSION-LOG.md`.
+
+**Task as accepted:** Sara ran the GUI against two live broadcasts (JMH
+2120Z, then HLL 2147Z) with QuickTime recording BlackHole 2ch in
+parallel — ROADMAP M4 item 8(a) — and reported four operator findings.
+
+**Finding 2 was a real bug, and the only kind this project must not
+have: an active button that does nothing.** After the auto-save, the
+shell sat in SAVED; Start was active, read "Start", and was swallowed,
+because `LiveSession::start_capture` only listened in IDLE. docs/05 §4
+always said SAVED leaves on "next transmission, or operator action" —
+the tone half was built and pinned (T10), the operator half was nobody's
+code path. One line of gate widened, T13 pins the click. (SAVED was
+never actually deaf — the next start tone would have opened from it —
+but the button lied, and now it doesn't.)
+
+**Finding 1 was a missing decision, now taken by Sara:** once the chart
+outgrew the pane nothing scrolled, and watching the newest line meant
+dragging the scrollbar against a picture that moved under it. While
+DRAWING — PREVIEW the pane now follows: the bottom of the pane is the
+newest line, every row. A manual scroll up is corrected on the next
+row — the price of a promise that cannot be misunderstood. After SAVED
+the scroll is the operator's again.
+
+**Findings 3 and 4 were the design doing what it says, answered not
+changed.** The progress bar lives only in DECODING and counts the nine
+batch-decode stages; "pure yellow vs light yellow" is one widget, active
+vs deactivated — FLTK dims inactive ones, and the dimmed full bar in
+SAVED is the finished decode's 100% frozen, not something pending. Force
+Start is grey until IOC and Rate are BOTH explicit (§8.4 item 3, Sara,
+session 19) — with Auto/Auto it never lights, which is why it was dead
+after the mid-session device switch. The recovery for a missed start
+tone exists and needs no code: pick 576 + 120 and Force Start fires from
+IDLE or SAVED.
+
+**Item 8(a) ran twice in one afternoon, and the second run convicted the
+hop.** JMH 2120Z, paired capture: the QuickTime m4a decoded offline and
+the live PNG agree to the digit — 2106/2114 locked, −85.7 ppm, placement
+RMS 0.07 px, **1 seam each**. The whole chain, browser included, can be
+clean, and Nova's 48 kHz capture and resample are cleared for it. HLL
+2147Z, an hour later: Nova never saw it (the wrong-device restart),
+so the QuickTime file is the ONLY capture — and it decodes with **55
+seams, largest a 107.8 px jump, placement RMS 2.88 px**, with dropouts
+Sara could hear as it recorded. The steps are in the audio the browser
+puts into BlackHole, with Nova nowhere in the loop. Same machine, same
+chain, same afternoon as the clean pair. What remains open is WHICH hop
+steps (SDR, network, WebAudio) — no longer Nova's question. The m4a
+needed afconvert plus a WAV-header rewrite (afconvert emits
+WAVE_FORMAT_EXTENSIBLE, which `read_wav` rejects): one more argument for
+item 7.
+
+**Item 8(c) is built:** the Quality field now reads e.g. "2106/2114,
+−86 ppm, 1 seams" — zero is said too, because zero is what cleared the
+capture chain.
+
+**Contradictions found:** docs/05 §4 said SAVED leaves on "operator
+action" and no code path implemented it — fixed, and that is the entry's
+bug. gui_shell's state table pinned "Start active in SAVED" while the
+machine ignored the click — the shell pin and the machine pin now cover
+the same fact (T13). None else.
+
+**Validation.** 36/36 pass (232 s) with both fixes in; gui_shell /
+live_session / live_engine re-run after the Quality change, green. The
+two GUI-behaviour changes (follow-scroll, Start re-arm) are pinned at
+the machine level (T13) and the state-table level; the pixel-level
+following needs a running window and joins docs/05 §13's named gap
+honestly — Sara's eye at the next broadcast is the check. The two
+offline decodes (JMH pair, HLL) ARE the item-8(a) evidence, numbers
+above.
+
+**Next step: ROADMAP M4 item 8(b) — Sara's decision on how a seam is
+drawn** (ramp, hold, or interpolate across a skip; the honest one-line
+step reads ragged at 55–221 seams per chart). HLL 2147Z
+(`../HLL 2147Z.m4a`, 55 real seams with audible dropouts) is the audio
+to judge it against — the fixture this class of defect never had. If it
+helps, a throwaway flag on `nova-decode` can render the same file each
+way for comparison before docs/01 moves. Then items 3–4 (retained
+snapshot, post-decode edit lifecycle) in the build order.
+
+---
 
 Agent: Claude. Code changed: `gui/nova-gui.cpp` (`cb_device` — the Device
 menu's first callback; `open_device` guard; `stop_live` now clears

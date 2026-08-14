@@ -360,6 +360,14 @@ Forced start [docs/04 Finding 2 — every receiver has one, without
 exception] jumps `READY → DRAWING — PREVIEW` with operator-supplied IOC
 and rate, skipping tone detection entirely.
 
+**Start in `SAVED` re-arms to `READY`** [BUILT session 26
+(`LiveSession::start_capture`, `live_session` T13)]. The table always
+said SAVED leaves on "next transmission, or operator action", but the
+machine only listened for Start in IDLE — so the button, active and
+reading "Start" in SAVED, swallowed the click (found by Sara at the
+keyboard, session 26). T13 pins the operator half of the exit rule; T10
+pins the tone half.
+
 **Operator stop [DECIDED 2026-08-13, Sara, session 18; §8.3 item 4].**
 The Start button reads `Stop` from `READY` onwards, and pressing it takes
 `DRAWING — PREVIEW → DECODING` by exactly the path a stop tone takes:
@@ -965,6 +973,16 @@ scroll the real invariant is
 which holds at every zoom, every scroll offset and both IOCs, and which
 is testable without a window from the same mapping function the click
 handler uses. That is the M4 screamer this whole area needs [§9].
+
+**The pane follows the newest row while drawing** [DECIDED 2026-08-14,
+Sara, session 26 — found by the second live broadcast: once the chart
+outgrew the pane, nothing scrolled, and watching the newest line meant
+dragging the scrollbar by hand against a picture that moved under it].
+While `DRAWING — PREVIEW` the bottom of the pane is the newest received
+line, every row; a manual scroll up is corrected on the next row, which
+is the price of a promise that cannot be misunderstood. Once the state
+leaves DRAWING the scroll is the operator's again — the save taking the
+pane does not move it.
 
 **4. Start becomes Stop while receiving**, one button relabelled by
 state, with Force Start insensitive during reception. What Stop *means*

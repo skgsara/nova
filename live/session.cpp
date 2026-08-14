@@ -50,7 +50,13 @@ void LiveSession::enter(SessionState s, SessionOutput& out) {
 SessionOutput LiveSession::start_capture() {
     SessionOutput out;
     active_out_ = &out;
-    if (state_ == SessionState::kIdle) {
+    // SAVED is the other door back to READY [docs/05 §4: SAVED leaves on
+    // "next transmission, or operator action" — Start IS that action].
+    // Without it the button was active and labelled and did nothing, which
+    // is the one thing a control must never be (found by Sara at the
+    // keyboard, session 26: she clicked Start after a save and the shell
+    // sat in SAVED until a tone happened to move it).
+    if (state_ == SessionState::kIdle || state_ == SessionState::kSaved) {
         flushed_ = false;
         enter(SessionState::kReady, out);
     }

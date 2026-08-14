@@ -1285,6 +1285,19 @@ struct Shell {
                     layout(win->w(), win->h());
                     ruler->redraw();
                 }
+                // While rows arrive the pane follows them [Sara, session
+                // 26]: the bottom of the pane IS the newest line, so the
+                // operator never chases the scrollbar to watch the chart
+                // come in. A manual scroll up is corrected on the next
+                // row — the price of a promise that cannot be
+                // misunderstood. Once the state leaves DRAWING the scroll
+                // is the operator's again: nothing moves it after SAVED.
+                if (state == LiveState::kDrawingPreview) {
+                    const int max_y =
+                        std::max(0, view->h() - pane_interior_h());
+                    if (pane->yposition() != max_y)
+                        pane->scroll_to(pane->xposition(), max_y);
+                }
             }
         }
         if (state_changed || rows_changed) {
@@ -1294,8 +1307,15 @@ struct Shell {
     }
 
     void set_quality(const nova::DecodeResult& r) {
-        std::snprintf(quality_buf, sizeof quality_buf, "%d/%d, %+.0f ppm",
-                      r.locked_lines, r.lines, r.clock_ppm);
+        // The seam count is said out loud [ROADMAP M4 item 8(c), session
+        // 26]: seams are skips in the delivered AUDIO, not decode quality,
+        // and a stepping capture chain (the KiwiSDR browser hop, twice
+        // caught) is exactly what the operator can still act on — switch
+        // SDRs — while the broadcast is on. Zero is information too: it
+        // is what cleared Nova's own capture on the clean JMH pair.
+        std::snprintf(quality_buf, sizeof quality_buf,
+                      "%d/%d, %+.0f ppm, %d seams", r.locked_lines, r.lines,
+                      r.clock_ppm, r.seams);
         field_val[4]->label(quality_buf);
     }
 

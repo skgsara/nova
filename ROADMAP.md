@@ -734,6 +734,32 @@ one feature with several parts, plus one verification no test can do.
    still time to switch SDRs. Note the session-25 catch is also the
    standing argument for item 3: with the raw stream retained, none of
    this has to wait for another broadcast.
+   **(a) ran session 26 on JMH 2120Z — the control measurement, not the
+   conviction.** QuickTime (source BlackHole 2ch) and Nova live captured
+   the same broadcast; the QuickTime m4a, decoded offline, and the live
+   PNG agree to the digit: 2106/2114 locked, −85.7 ppm, placement RMS
+   0.07 px, **1 seam** in both. So the paired-capture protocol works and
+   the whole chain — browser hop included — CAN be clean; session 25's
+   221 seams were a bad day on that path, not its constant state. Nova's
+   48 kHz capture and resample are cleared for the clean case; what made
+   the HLL catch step is still unconvicted, and the paired capture stays
+   the instrument for the next ragged chart. The m4a was converted by
+   afconvert + a header rewrite (afconvert emits WAVE_FORMAT_EXTENSIBLE,
+   which `read_wav` rejects) — one more argument for item 7.
+   **(a) ran its second half the same afternoon on HLL 2147Z — and THAT
+   is the conviction.** The QuickTime recording of HLL's next broadcast
+   (which never passed through Nova's capture at all) decodes offline
+   with **55 seams, the largest a 107.8 px jump, placement RMS 2.88 px**,
+   with audible internet dropouts Sara could hear as it recorded. Same
+   machine, same chain, same afternoon as the clean JMH pair: the steps
+   are in the audio the browser puts into BlackHole, and Nova is cleared
+   on both sides — clean audio in, clean chart out; stepping audio in,
+   honestly-followed steps out (live in session 25, offline in 26). What
+   remains open is only WHICH hop steps (SDR, network, WebAudio), and
+   that is no longer Nova's question. **(c) is built** (session 26): the
+   Quality field now reads e.g. "2106/2114, −86 ppm, 1 seams" — zero is
+   said too, since zero is what clears the capture chain. **(b) is still
+   Sara's**, and HLL 2147Z is the real audio to judge it against.
 
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the

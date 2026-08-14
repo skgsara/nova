@@ -46,7 +46,13 @@
 //   - **one recording, one transmission, take the first** — the second
 //     opening of faxsignal-two-openings is ignored while drawing, and a
 //     second TRANSMISSION after SAVED starts a new session cycle
-//     (synthetic, two generated transmissions back to back).
+//     (synthetic, two generated transmissions back to back);
+//   - **operator Start is the other way out of SAVED** [docs/05 §4:
+//     "next transmission, or operator action"] — the tone half is T10,
+//     the operator half T13, and between sessions 23 and 25 neither the
+//     shell (which had the button active and reading "Start") nor the
+//     machine (which only listened in IDLE) covered it, so the click was
+//     swallowed. Found by Sara at the keyboard, session 26.
 //
 // Explicitly NOT claimed: preview picture quality (that is live_preview's
 // brief, per fixture), and the FAXSignal two-openings case is drawn from
@@ -784,6 +790,63 @@ void test_operator_values_reach_the_decode(const std::string& path) {
           "PHASE alone does not invent a SYNC fallback");
 }
 
+// --------------------------------------------------------------------------
+// T13: the operator's way out of SAVED [docs/05 §4: "next transmission, or
+// operator action"]. T10 pins the tone half; this pins the click. The
+// machine is driven to SAVED, Start is clicked BEFORE the next tone, and a
+// full second cycle must still run from READY.
+// --------------------------------------------------------------------------
+void test_start_rearms_from_saved() {
+    std::printf("\n== T13 operator Start in SAVED re-arms to READY [§4]\n");
+    const nova::Image content = nova::gen_test_pattern(600, 120);
+    const std::vector<float> one =
+        nova::fm_demod(nova::gen_fax_signal(content, 120, nova::GenOptions()),
+                       8000);
+    std::vector<float> video = one;
+    video.insert(video.end(), one.begin(), one.end());
+
+    nova::LiveSession s(8000, nova::SessionOptions());
+    std::vector<nova::SessionState> seq;
+    int decode_requests = 0;
+    s.set_decode_callback(
+        [&](std::shared_ptr<const std::vector<float>> snap, long long,
+            const nova::DecodeOptions&) {
+            decode_requests++;
+            for (nova::SessionState st :
+                     s.batch_done(nova::decode_fax(*snap, 8000,
+                                                   nova::DecodeOptions()))
+                         .entered)
+                seq.push_back(st);
+        });
+    auto collect = [&](const nova::SessionOutput& out) {
+        for (nova::SessionState st : out.entered) seq.push_back(st);
+    };
+
+    collect(s.start_capture());
+    bool clicked = false;
+    for (std::size_t i = 0; i < video.size(); i += 1000) {
+        collect(s.push(video.data() + i,
+                       std::min<std::size_t>(1000, video.size() - i)));
+        if (!clicked && s.state() == SS::kSaved) {
+            clicked = true;
+            collect(s.start_capture());  // the operator's way out of SAVED
+        }
+    }
+    collect(s.flush());
+    print_seq(seq);
+
+    check(clicked, "the first transmission reached SAVED before the click");
+    check(seq == std::vector<nova::SessionState>(
+                     {SS::kReady, SS::kStartTone, SS::kPhasing,
+                      SS::kDrawingPreview, SS::kStopTone, SS::kDecoding,
+                      SS::kSaved, SS::kReady, SS::kStartTone, SS::kPhasing,
+                      SS::kDrawingPreview, SS::kStopTone, SS::kDecoding,
+                      SS::kSaved}),
+          "SAVED -> READY on Start, then a full second cycle");
+    check(decode_requests == 2 && s.state() == SS::kSaved,
+          "two transmissions, two decodes, two saves");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -803,6 +866,7 @@ int main(int argc, char** argv) {
     test_no_opening(argv[5]);
     test_no_phasing_giveup();
     test_two_transmissions();
+    test_start_rearms_from_saved();
     test_page_cap(argv[5]);
     test_operator_values_reach_the_decode(argv[5]);
 
