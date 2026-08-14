@@ -272,7 +272,7 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [pending; core seams done session 14, design decided session 15, shell designed session 17, skeleton built session 18]
+## M4 — GUI + live audio  [live end to end session 23; the edit lifecycle remains]
 - Core seams (session 14, done): log/progress callback, cooperative
   cancellation, structured DecodeError kinds, decode_fax split into nine
   named stages (core/hooks.hpp; screamers in `hooks`).
@@ -647,6 +647,51 @@ Pending:
   overrides). Checked by eye on VMW (phased from its phasing interval,
   live) and on the unanchored GYA cut with one `--phase` value.
 - m4a input via runtime ffmpeg; WAV native.
+
+### What is left in M4, in the order it should be built
+
+Audio in one end and a saved chart out the other works as of session 23.
+What remains is **correcting a chart after it has been decoded**, which is
+one feature with several parts, plus one verification no test can do.
+
+1. **Run `nova-gui` against a real signal and look at it** (no code).
+   The only thing no screamer can do, and the largest untested surface in
+   M4 [docs/05 §13]: the blit into the pane at a zoom, the level meter's
+   bar, the progress bar, the status line. The BlackHole 2ch virtual
+   device on this machine is the quickest route — route a recording into
+   it and select it as Nova's input.
+2. **`DecodeOptions::phase_anchor_hint` and `clock_ppm_fallback`**
+   [docs/05 §7.1], with §9 screamers 5 and 6. They board at
+   `LiveEngine`'s decode callback. The asymmetry is decided and already
+   pinned one stage earlier in `StreamPreview`: PHASE **seeds** the
+   anchor search, SYNC is only a **fallback** where the batch fit has no
+   baseline. Writing SYNC as a plain override is the quiet bug, and
+   `override_sync_fallback` is the screamer that exists to catch it.
+3. **The second retained snapshot** [docs/05 §3]. Nothing to retain one
+   *for* until item 2 exists; with it, the displayed image keeps a raw
+   stream behind it and the correction controls stop being grey.
+4. **The post-decode edit lifecycle** [docs/05 §8.5 items 2–4]: Apply
+   re-renders AND overwrites the same file (one transmission, one file);
+   Auto restores the measured values and re-renders; an edit begins at
+   the first dirty control and ends at Apply, at Auto, or at a switch to
+   the live view. This is what makes `Auto` stop being grey.
+5. **Click-to-set-PHASE on the image** [docs/05 §8.3 item 1, docs/04's
+   ruler/coordinate pattern]. PHASE is currently *typed* as an image
+   column; the surveyed affordance is clicking the dead sector. The
+   arithmetic is already built and pinned — `live/ruler.hpp`,
+   `ruler_mapping` — so this is an `FL_PUSH` handler calling functions
+   that exist, not new geometry.
+6. **A transmission arriving mid-edit** [docs/05 §8.2]: the background
+   buffer plus the compact receiving indicator (state, line count,
+   thumbnail) that switches the pane when clicked. Cheap by construction
+   — the renderer already pushes rows through the queue and does not know
+   whether anyone is looking — but it is the last piece of the "edit
+   holds the pane" decision.
+7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
+
+Items 2–4 are one story told in three commits and should not be split
+across sessions if it can be helped: each is nearly useless without the
+next. Items 5, 6 and 7 are independent and can be taken in any order.
 
 ## M4.5 — tuning aids  [pending; created session 17]
 - Spectrum / waterfall display [DECIDED 2026-08-13, Sara, session 17:

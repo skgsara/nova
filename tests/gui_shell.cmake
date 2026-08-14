@@ -1,7 +1,7 @@
 # gui_shell.cmake — §9 screamer 9 [docs/05], run as
 #   cmake -DNOVA_GUI=<path to nova-gui> -P tests/gui_shell.cmake
 # Added as a ctest target only when the GUI target was built
-# (NOVA_BUILD_GUI), so it is one of the two in "24 (+2 with the GUI)".
+# (NOVA_BUILD_GUI), so it is one of the two in "32 (+2 with the GUI)".
 #
 # gui_layout pins where the shell's regions ARE; this pins what the shell
 # DOES — the §8.3 and §8.4 behaviour rules, which are the ones a widget
@@ -16,8 +16,11 @@
 #   - the ruler blank and disabled while the image width is unknown, lit
 #     with the right width and tick step when it is known [§8.3 item 1,
 #     §8.4 item 5];
-#   - the transport inert on a plain run, because nothing can capture yet
-#     and a window must not claim to do what it cannot [§3];
+#   - the transport inert on an INSPECTION run: --metrics brings up no
+#     capture, so a window must not claim to do what it cannot [§3].
+#     Session 23 changed the reason (the program can capture now) but not
+#     the check — it is also what keeps this suite runnable with no audio
+#     device, and what stops inspecting Nova from opening a microphone;
 #   - the preference file next to the executable is read at startup, and
 #     merely inspecting the shell leaves no file behind [§8.4 item 1].
 #

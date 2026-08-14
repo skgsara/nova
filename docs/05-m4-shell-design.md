@@ -39,9 +39,23 @@ installed via Homebrew. Neither has been linked against yet.
 
 ```
 core/      nova-core    no dependencies, batch, untouched by M4 except §7
-live/      nova-live    no FLTK, no RtAudio, no threads of its own
-gui/       nova-gui     FLTK + RtAudio; owns threads; contains no DSP
+live/      nova-live    no FLTK, no RtAudio, no real clock; owns threads 2-3
+gui/       nova-gui     FLTK + RtAudio; owns thread 1 and thread 4; no DSP
 ```
+
+**The thread column changed in session 23, and the rule above is what
+changed it.** This table first said `nova-live` had "no threads of its
+own" and `nova-gui` "owns threads". Building §2 showed those two
+sentences pulling against the load-bearing rule directly below them: the
+capture thread is where the ring is drained, the front end is run, the
+session is pushed and the batch decode is launched — every one of which
+can be wrong about a signal — so putting the thread in `nova-gui` would
+have put all of that behind FLTK and RtAudio, where no screamer could
+reach it. The threads `nova-live` owns are therefore threads 2 and 3
+(`LiveEngine`), and what stayed in `nova-gui` is thread 1, which is
+RtAudio's own callback, and thread 4, which is FLTK's main loop. Both of
+those belong to a library the GUI links and neither runs a line of DSP.
+The rule won; the table was wrong.
 
 **The load-bearing rule: `nova-live` must not depend on FLTK, RtAudio, or
 a real clock.** Everything M4 adds that can be wrong about a signal —
@@ -51,13 +65,21 @@ in tests by feeding it a fixture WAV in blocks, faster than realtime,
 with no audio device and no window.
 
 This is not architecture for its own sake. This project's entire quality
-argument is its 23 screamers, and a live path that can only be exercised
-by a human with a radio has no screamers at all. §9 is what this rule
-buys.
+argument is its screamers, and a live path that can only be exercised by
+a human with a radio has no screamers at all. §9 is what this rule buys.
 
 `nova-gui` is then genuinely thin: device enumeration, widget layout,
-event plumbing, and the three queues in §2. If a bug is in `nova-gui`, it
-is a wiring bug, and a wiring bug is visible on screen in seconds.
+event plumbing, the RtAudio callback and the timer that drains the queue.
+If a bug is in `nova-gui`, it is a wiring bug, and a wiring bug is
+visible on screen in seconds.
+
+**Measured after the wiring landed (session 23), because a rule like this
+is only worth stating if it can be checked:** `nova-live` is 3,378 lines
+across seven translation units and their headers, all of it reachable
+from a test with a fixture and no window; `gui/nova-gui.cpp` is 1,666
+lines of widgets, one audio callback and a timer. The split held under
+the one change most likely to break it — two thirds of the live path by
+volume stayed on the testable side of the line.
 
 ---
 
@@ -1370,7 +1392,10 @@ widget edit can break without moving a pixel:
    DECODING and active again at SAVED; Force Start gated on IOC *and*
    rate being explicit; the ruler blank and disabled until the image
    width is known, and lit with the right width and tick step when it is;
-   the transport inert on a plain run, because nothing can capture yet;
+   the transport inert on an INSPECTION run, because --metrics brings up
+   no capture — the reason changed in session 23 (the program can capture
+   now) but the check did not, and it is now also what stops inspecting
+   Nova from opening a microphone;
    and the preference file beside the program read at startup without an
    inspection run creating one. Guarded by `NOVA_BUILD_GUI`.
    **[BUILT session 20: `tests/gui_shell.cmake`, sharing its `--metrics`

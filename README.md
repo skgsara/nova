@@ -152,22 +152,33 @@ trim, both applying forward from the next row so that rows already drawn
 never move. What is left is wiring them to the ruler and the numeric
 fields (M4), and carrying them into the batch re-decode.
 
-**M4 has started (2026-08-13): the shell exists, with nothing behind it.**
-The design was settled first, against a survey of sixteen commercial
-weather-fax receiver manuals — which is where Nova's two picture
-corrections, its named protocol states and its refusal to show a progress
-percentage all come from — and the first code is a walking skeleton: the
-window laid out in real FLTK widgets, RtAudio device enumeration, and the
-dependency wiring that keeps FLTK and RtAudio out of everything except
-the GUI binary. No decode, no threads, no audio stream yet.
+**M4 decodes live (2026-08-14): audio in one end, a saved chart out the
+other.** The design was settled first, against a survey of sixteen
+commercial weather-fax receiver manuals — which is where Nova's two
+picture corrections, its named protocol states and its refusal to show a
+progress percentage all come from. Since then: a streaming front end that
+agrees with the batch path sample for sample, a tone detector that
+commits a verdict seconds before a run ends, a forward-only renderer that
+draws the picture as it arrives, the session state machine that turns
+those into a protocol, and the four-thread wiring that connects a sound
+card to a PNG.
 
-Two things it was built to find, it found. The image pane's ruler is the
-surface the operator sets the picture phase on, and it has to name the
-image column beneath it exactly; drawn from the mockup it was six pixels
-out, and fixing that at one window size did not fix it at any other,
-because the toolkit's own resize logic stretched it back off. The layout
-is therefore computed rather than scaled, and a window built at a size is
-now provably identical to one dragged to it.
+Everything on that path lives in a library with no GUI dependencies and
+no clock of its own, so all of it is driven in tests by feeding a
+recorded fixture through it faster than realtime. The claim that buys is
+that **threading changes nothing about the picture**: the same recording
+through the live path and through a single-threaded one produces the same
+states, the same rows in the same places and the same saved pixels, at
+audio block sizes from one sample to 65536. What is left in the GUI
+binary is widgets, one audio callback and a timer.
+
+Things the window was built to find, it found. The image pane's ruler is
+the surface the operator sets the picture phase on, and it has to name
+the image column beneath it exactly; drawn from the mockup it was six
+pixels out, and fixing that at one window size did not fix it at any
+other, because the toolkit's own resize logic stretched it back off. The
+layout is therefore computed rather than scaled, and a window built at a
+size is now provably identical to one dragged to it.
 
 Synthetic tests cover the full {IOC 288, 576} × {60, 90, 120 lpm} matrix
 with automatic selection, ±150/±400 Hz deviation, a two-order-of-magnitude

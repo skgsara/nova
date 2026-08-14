@@ -125,6 +125,31 @@ by running the program and looking, and this session did not run it —
 starting it opens Sara's microphone, which is not mine to do unasked.
 Registered in §13.
 
+**Documentation swept (session 23, closing).** Every current-state claim
+that the wiring falsified was found and corrected rather than left for
+the next reader: `README.md`'s "the shell exists, with nothing behind
+it"; docs/05 §1's layer table, which said `nova-live` had "no threads of
+its own" — the rule immediately below it is what forced the change, since
+putting the capture thread in `nova-gui` would have put the ring, the
+front end, the session and the batch launch behind FLTK where no screamer
+could reach them, so `nova-live` owns threads 2–3 and the GUI owns only
+RtAudio's callback and FLTK's main loop; the stale "24 (+n with the GUI)"
+counts in `CMakeLists.txt` and `tests/gui_shell.cmake`; and two comments
+in `gui_shell.cmake` whose REASONS had expired while their checks stayed
+correct — "the transport is inert because nothing can capture yet" is now
+"because an inspection run brings up no capture", and "nothing scrolls
+vertically because there are no rows" is now "because an inspection run
+draws no picture". `ROADMAP.md`'s M4 heading stops saying "pending" and
+gains an ordered list of what actually remains. Session-tagged history in
+`ROADMAP.md` and this file was left alone: it was true when written, and
+this log is append-only.
+
+The split was measured rather than asserted, since §1 is only worth
+stating if it can be checked: `nova-live` is 3,378 lines over seven
+translation units and their headers, all reachable from a fixture with no
+window; `gui/nova-gui.cpp` is 1,666 lines of widgets, one audio callback
+and a timer.
+
 **Next step: run `nova-gui` against a real signal and look at it.** That
 is the one thing left that no test can do, and the fastest route on this
 machine is the BlackHole 2ch virtual device already installed: route a
