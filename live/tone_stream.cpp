@@ -89,6 +89,7 @@ void StreamToneDetector::update(Cand& c, double purity, double freq,
         if (!hot) return;
         c.open = true;
         c.emitted = false;
+        c.seen = true;
         c.first = frame_index_;
         c.last_hot = frame_index_;
         c.cold = 0;
@@ -137,6 +138,35 @@ void StreamToneDetector::update(Cand& c, double purity, double freq,
          "purity=%.3f spread=%.4f hot=%.2f",
          tone_name(c.kind), t0, t1, dur, e.freq_hz, e.purity, sp, hot_frac);
     out.push_back(e);
+}
+
+bool StreamToneDetector::run_open(ToneKind k) const {
+    for (const Cand& c : cands_)
+        if (c.kind == k) return c.open;
+    return false;  // unreachable: the three kinds are fixed at construction
+}
+
+double StreamToneDetector::run_last_hot_sec(ToneKind k) const {
+    for (const Cand& c : cands_)
+        if (c.kind == k) {
+            if (!c.seen) return -1.0;
+            // End of the last hot frame — the same expression as a run's
+            // `t_end`. After the run has closed this is the tone's end.
+            return static_cast<double>(c.last_hot * hop_ + win_) / fs_;
+        }
+    return -1.0;
+}
+
+long long StreamToneDetector::safe_horizon_samples() const {
+    // Frames with start < frame_start_ are classified. Stay win + hop
+    // behind the frontier: a stop run opens within one hot frame of the
+    // tone's start, so at this horizon either no tone has begun or its
+    // run already exists.
+    long long h = frame_start_ - win_ - hop_;
+    for (const Cand& c : cands_)
+        if (c.kind == ToneKind::kStop && c.open)
+            h = std::min(h, c.first * hop_);
+    return std::max(h, 0LL);
 }
 
 }  // namespace nova

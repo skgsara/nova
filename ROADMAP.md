@@ -565,6 +565,42 @@ Pending:
   false of the GUI binary alone, which links FLTK and RtAudio behind
   `option(NOVA_BUILD_GUI)`. Tests and CLIs must build with it OFF.
   M5's tier-1/tier-2 matrix is only affected for that one target.
+- **The live session state machine [built session 22]** —
+  `live/session.{hpp,cpp}`: the eight states of docs/05 §4 as code, on
+  top of the three streaming stages. Owns the retained store and its
+  freeze (§3), the phasing watcher that re-runs `detect_phasing` once a
+  second at all three nominal rates and hands the preview its anchor and
+  rate seed on a CLOSED run (the §6-item-1 handoff; `PhasingResult`
+  gained the measured `period` for it), the forced start, and the
+  operator Stop that is the stop-tone path minus the tone. Two bugs the
+  screamer caught: the preview was fed to the stream end, so the 2 s of
+  stop tone before detection were drawn into the picture by a
+  block-size-dependent amount — fixed by the tone detector's new
+  `safe_horizon_samples()`, an absolute position the feed never crosses
+  into an undetected tone; and a re-entrant `batch_done` from an inline
+  decode callback inverted DECODING/SAVED in the event history. Measured:
+  drawing starts within 0.12 s of the batch segmentation's picture start
+  on all three tone-driven fixtures, the rate seed is −14 ppm from the
+  batch fit on VMW, preview dead sector +6/+1/+0 px against the saved
+  image. `live_session` runs it all unguarded; seven mutations killed,
+  one having first survived a version of the test that never exercised
+  the SAVED → START TONE edge. Registered, not fixed: two openings before
+  one picture are drawn from the FIRST one live (the batch "last opening"
+  rule needs the stop tone, which has not happened yet). Suite count
+  30 (+2 GUI).
+- **The PNG writer and `png_roundtrip` [built session 22]** —
+  `live/png.{hpp,cpp}`: 8-bit greyscale, stored deflate blocks, tEXt
+  chunks, no dependency, as decided session 16. The screamer verifies
+  against an INDEPENDENT decoder (python3 stdlib zlib/struct/binascii —
+  no shared code), container and pixels, three sizes, skipping (77) when
+  python3 is absent; three writer mutations all rejected. `sips` reads
+  the files too.
+- **`nova-preview` [built session 22]** — the CLI that drives the real
+  session machine over a recording and writes the PREVIEW, so the
+  provisional picture can be looked at by eye (`--force IOC LPM` for
+  recordings with no opening, `--phase/--sync` for the operator
+  overrides). Checked by eye on VMW (phased from its phasing interval,
+  live) and on the unanchored GYA cut with one `--phase` value.
 - m4a input via runtime ffmpeg; WAV native.
 
 ## M4.5 — tuning aids  [pending; created session 17]

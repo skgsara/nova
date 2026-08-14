@@ -39,11 +39,18 @@ target_include_directories(nova-core PUBLIC core)
 # same sync template core/fax.cpp locks onto (promoted to core/fax.hpp in
 # session 21 so the two paths cannot disagree about which feature is the
 # line start).
+# live/session.cpp is the piece that turns those stages into a session:
+# the eight states of docs/05 §4, the retained store and its freeze [§3],
+# and the phasing watcher that hands the preview its anchor [§6 item 1].
+# live/png.cpp is the save format: hand-rolled greyscale PNG, stored
+# deflate blocks, no dependency [ROADMAP M4, decided session 16].
 add_library(nova-live STATIC
   live/ruler.cpp
   live/stream.cpp
   live/tone_stream.cpp
   live/preview.cpp
+  live/session.cpp
+  live/png.cpp
 )
 target_include_directories(nova-live PUBLIC live)
 target_link_libraries(nova-live PUBLIC nova-core)
@@ -56,6 +63,13 @@ target_link_libraries(nova-gen PRIVATE nova-core)
 
 add_executable(nova-tones cli/nova-tones.cpp)
 target_link_libraries(nova-tones PRIVATE nova-core)
+
+# The live preview, drivable by hand: the one way to LOOK at the
+# provisional renderer's picture rather than read the screamer's account
+# of it. Runs the real session machine, so a recording with no opening
+# needs --force, exactly as the operator will.
+add_executable(nova-preview cli/nova-preview.cpp)
+target_link_libraries(nova-preview PRIVATE nova-live)
 
 enable_testing()
 add_executable(nova-test tests/test_roundtrip.cpp)
@@ -382,6 +396,32 @@ add_test(NAME live_tones COMMAND nova-test-live-tones
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav)
+
+add_executable(nova-test-live-session tests/test_live_session.cpp)
+target_link_libraries(nova-test-live-session PRIVATE nova-live)
+# §9 screamer 10 [docs/05]: the live session state machine. The fixture
+# arguments are chosen for coverage, in order: a tone-driven WHITE-ONLY
+# station with phasing (the anchor handoff), two tone-driven pulse
+# stations on the two phasing waveforms WMO §5.2.3.1-.2 permits, the
+# two-openings case, and the library's only real stop tone, which carries
+# the forced-start, operator-stop, no-opening and page-cap cases too.
+# Unguarded: no window, no audio device.
+add_test(NAME live_session COMMAND nova-test-live-session
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav)
+
+# §9 screamer 4 [docs/05]: the hand-rolled PNG writer decodes back to the
+# source pixels under an INDEPENDENT decoder — python3's stdlib zlib,
+# struct and binascii, which share no code with live/png.cpp. Needs
+# python3, nothing else: absent, the test reports SKIP (77) rather than
+# FAIL, one dependency lighter than the GUI tests' FLTK.
+add_executable(nova-test-png tests/test_png.cpp)
+target_link_libraries(nova-test-png PRIVATE nova-live)
+add_test(NAME png_roundtrip COMMAND nova-test-png)
+set_tests_properties(png_roundtrip PROPERTIES SKIP_RETURN_CODE 77)
 
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an

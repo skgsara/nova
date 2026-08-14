@@ -344,6 +344,7 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
         // — and therefore a residual — that no clock explains.
         double nonlin = 0.0;
         int n_steps = 0;
+        double meas_period = 0.0;
         std::vector<double> resid, smoothed;
         if (len >= 8) {
             const size_t k = len / 2;
@@ -352,6 +353,10 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
                 sl.push_back((p[m + k] - p[m]) /
                              static_cast<double>(mem[m + k] - mem[m]));
             const double slope = median_of(sl);
+            // The white edge drifts by (true period - truncated period)
+            // per line inside its window, so the slope IS the rate
+            // measurement the live path seeds from [PhasingResult::period].
+            meas_period = plen + slope;
             std::vector<double> icpt;
             for (size_t m = 0; m < len; m++)
                 icpt.push_back(p[m] - slope * static_cast<double>(mem[m]));
@@ -458,6 +463,7 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
             res.line_start = std::fmod(med + period, period);
             res.anchor = anchor;
             res.spread = sp;
+            res.period = meas_period;
             res.nonlinearity = nonlin;
             res.roughness = rough;
             res.steps = n_steps;

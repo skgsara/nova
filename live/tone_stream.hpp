@@ -93,6 +93,28 @@ public:
     int window_samples() const { return win_; }
     int hop_samples() const { return hop_; }
 
+    // --- run-state queries, for the live session state machine -----------
+    // [docs/05 §4]: the machine's START TONE and STOP TONE states leave
+    // when the tone ENDS, which the one-event-per-run emission rule
+    // deliberately never says. These report the run assembly's raw state
+    // without touching it: whether a run on `k` is open right now, and
+    // when the most recent run was last hot — which, once the run has
+    // closed, is the tone's end. -1 when no run on `k` has ever opened.
+    bool run_open(ToneKind k) const;
+    double run_last_hot_sec(ToneKind k) const;
+
+    // How far a consumer may read the stream without risking reading into
+    // a stop tone that has not qualified yet — the question the live
+    // preview's feed needs answered [docs/05 §4]. A stop run opens within
+    // one hot frame of the tone's first classified frame, so a consumer
+    // that stays `win + hop` behind the classification frontier never
+    // crosses a tone start before the run for it exists; and once the run
+    // IS open, the horizon drops to the run's first frame and holds there
+    // until the run qualifies or dies. Both ends of this are absolute
+    // stream positions, so a consumer fed to this horizon draws the same
+    // rows whatever the block size.
+    long long safe_horizon_samples() const;
+
 private:
     // One candidate tone, and the run currently open on it.
     struct Cand {
@@ -102,6 +124,7 @@ private:
         // The open run, or `open == false`.
         bool open = false;
         bool emitted = false;   // one event per run, at the earliest moment
+        bool seen = false;      // a run on this candidate has opened at least once
         long long first = 0;    // frame index the run started at
         long long last_hot = 0;
         long long cold = 0;     // consecutive cold frames since last_hot

@@ -231,6 +231,15 @@ inert. Manual adjustment [ISO §4.2.6, §5.4.3] is satisfied for the
 transmission you are looking at, which is when an operator actually does
 it; it is not offered and then found not to work.
 
+**[PARTIALLY BUILT session 22: the store and the freeze live in
+`LiveSession` (`live/session.cpp`).** The append-only vector, the
+pre-roll bound while monitoring, and the freeze into
+`shared_ptr<const vector<float>>` at the end of the transmission are all
+as written here, and the screamer pins the snapshot's bounds (the tone's
+true start to the stop tone's start). What is NOT built: the second
+snapshot — "the image currently displayed" is the caller's shared_ptr by
+construction, so the two-role rule lands with the GUI wiring, not here.]
+
 ---
 
 ## 4. The live session state machine
@@ -269,6 +278,56 @@ returns to `IDLE` with nothing to save.
 produces them [docs/04 answer 4]. The preview's own working period is an
 internal number; the +261 ppm that a short baseline produces is never
 displayed as a figure.
+
+**[BUILT session 22: `live/session.{hpp,cpp}` +
+`tests/test_live_session.cpp`, running unguarded in every build.]** Four
+things this section did not say, in the order they matter:
+
+1. **How PHASING is detected at all.** The section names the states and
+   is silent on who watches the phasing interval — and the answer is new
+   code, because `detect_phasing` is a whole-recording function. The
+   machine re-runs it once per second of new signal over the video since
+   the start tone, at all three nominal line rates (the start tone names
+   the IOC [WMO §5.2.2] but nothing in the opening names the rate, and
+   the live path has no comb scan). PHASING is entered on a qualifying
+   run; DRAWING is entered only on a CLOSED run — one the buffer outlasts
+   by more than the run-assembly gap — because an open run's `t_end` is
+   still moving and a decision taken on it would depend on when the scan
+   happened to run, i.e. on the block size. The run's `t_end` is where
+   drawing starts, its `anchor` is the preview's `phase_anchor` (the §6
+   item-1 handoff, now real), and its measured `period` — a field added
+   to `PhasingResult` for exactly this — is the rate seed. Measured on
+   VMW: the seed sits **−14 ppm** from the batch fit, and the preview's
+   dead sector lands **+6 px** from the saved image's column.
+2. **What the preview may be fed.** First version: to the end of the
+   received stream. That drew the stop tone into the picture, by a
+   block-size-dependent amount — a stop tone qualifies `min_stop_sec`
+   after it begins [§5], and the rows fed past the tone start in the
+   meantime had already been drawn: 226 rows at 1000-sample blocks, 222
+   at 65536, the last four being 450 Hz alternations. The fix lives in
+   the tone detector, which now reports a `safe_horizon_samples()`: win +
+   hop behind its classification frontier, capped at an open stop run's
+   start. The preview is fed to the horizon and the drawn rows are
+   identical at every block size; the cost is 0.375 s of preview latency.
+3. **How the operator's Stop composes with a fast decode.** The decode
+   callback may run inline and report from inside the same call that
+   fired it; a re-entrant `batch_done` then recorded SAVED into its own
+   return value before the outer call's DECODING, and the observable
+   history read `DRAWING → SAVED → DECODING`. Re-entrant state changes
+   now record into the outer call's output.
+4. **Which opening, when there are two before one picture.** The batch
+   rule "the LAST opening inside a known transmission" needs the stop
+   tone, which has not happened yet live. The machine draws from the
+   FIRST opening's phasing end (FAXSignal: 22.0 s, where the batch
+   picture starts at 64.5), and the second opening passes through the
+   preview as picture rows until the real picture arrives. Registered in
+   §13, not fixed: a forward-only preview that waited to find out would
+   not be a preview.
+
+The §12-item-3 page cap is a `SessionOptions` duration (default 90
+minutes — past the library's longest transmission, so it can only fire on
+a missed stop tone), and its path is the operator stop's: freeze, decode,
+DECODING, no invented STOP TONE.
 
 ---
 
@@ -1165,6 +1224,16 @@ existing 20 fixtures:
 4. **`png_roundtrip`** — the hand-rolled writer's output decodes back to
    the source pixels (checked against an independent decoder, e.g.
    Python/`sips`, in the test), and the file is a valid PNG.
+   **[BUILT session 22: `live/png.{hpp,cpp}` + `tests/test_png.cpp`. The
+   independent decoder is python3's stdlib — zlib, struct, binascii,
+   sharing no code with the writer — and it asserts the container, not
+   just the pixels: every chunk's CRC, IHDR's fields, every row's filter
+   byte, IEND last with nothing after it. Sizes: 1810×300, 1810×2400 (67
+   stored deflate blocks) and 3×2. The tEXt chunks round-trip, and two
+   writes of one image are byte-identical. Absent python3 the test skips
+   (77) rather than fails. Verified by mutation: wrong adler32, filter
+   byte 1, CRC over the payload alone — each rejected by the independent
+   side.]**
 5. **`override_phase_seed`** — a `phase_anchor_hint` set near but not
    exactly on the true anchor lands the picture on the *true* anchor,
    not on the hint; and a hint pointing at the wrong candidate feature
@@ -1214,9 +1283,32 @@ widget edit can break without moving a pixel:
    mutation: making Start sensitive during DECODING, and lighting the
    ruler with the width unknown, each fail it.]**
 
-The suite count is now **"28 (+2 with the GUI)"** — session 21 adds
-`live_preview`, the fourth unguarded `nova-live` test, and
-`tones_fixture_nmc_stop` on the new stop-tone fixture.
+One more, added session 22 with the component it covers:
+
+10. **`live_session`** — drive the state machine with whole fixtures and
+    assert the §4 sequence: tone-driven openings walk IDLE → READY →
+    START TONE → PHASING → DRAWING — PREVIEW, `nmc-image-stop-tone-120s`
+    reaches STOP TONE on real audio and leaves it only after the tone has
+    actually ended, and the frozen snapshot's batch decode carries the
+    machine to SAVED. Also the drawing point against the batch
+    segmentation's picture start, the snapshot's bounds (pre-roll to
+    tone-start, picture to tone-end), the operator stop being the
+    stop-tone path minus the tone, the give-up on a tone with no phasing,
+    two transmissions back to back, the page cap, and — the claim the
+    component screamers cannot make — the whole session's outcome
+    identical at block sizes 1, 1000 and 65536.
+    **[BUILT session 22: `live/session.{hpp,cpp}` +
+    `tests/test_live_session.cpp`, running unguarded. Measured: drawing
+    starts within 0.12 s of the batch path's picture start on all three
+    tone-driven fixtures; the phasing rate seed is −14 ppm from the batch
+    fit on VMW; preview dead sector +6/+1/+0 px against the saved image.
+    Verified by mutation, seven, all killed — one survived an earlier
+    version: ignoring start tones in SAVED, because the test drove its
+    second transmission into DECODING and never exercised the SAVED edge.
+    Both cases are driven now.]**
+
+The suite count is now **"30 (+2 with the GUI)"** — session 22 adds
+`live_session` and `png_roundtrip`, both unguarded `nova-live` tests.
 
 **The block-size sweep is now the suite's dominant cost, and it is worth
 seeing the whole bill in one place.** `live_tones` runs 25 s and
@@ -1604,3 +1696,13 @@ It is worth expecting a third instance somewhere in this document.
   *spread* on the two warp fixtures — which is a precise statement that
   their edge takes one step and stays there, rather than jittering. A
   target number would have to be stated in those terms.
+- **Two openings before one picture are drawn from the FIRST one, live**
+  (session 22, measured and pinned by `live_session` T4). The batch rule
+  "the last opening inside a known transmission" needs the stop tone to
+  bound the transmission, and the stop tone has not happened yet when the
+  live machine must commit. So FAXSignal's preview starts at 22.0 s (the
+  first phasing's end) where the saved image starts at 64.5, and the
+  second opening passes through the preview as picture rows. The saved
+  image is correct; the preview cannot be, and a forward-only preview
+  that waited to find out would not be a preview. Not to be "fixed" by
+  holding rows back.

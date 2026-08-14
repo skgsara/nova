@@ -7,6 +7,130 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 22: the session machine, and the stop tone was being drawn into the picture
+
+Agent: Claude. Code changed: `live/session.{hpp,cpp}` (new —
+`LiveSession`), `live/tone_stream.{hpp,cpp}` (run-state queries:
+`run_open` / `run_last_hot_sec` / `safe_horizon_samples`; event semantics
+untouched), `core/phasing.{hpp,cpp}` (`PhasingResult` gains `period`, the
+run's own rate measurement — additive, nothing else moved, 30/30 green
+across the move), `live/png.{hpp,cpp}` (new — the hand-rolled greyscale
+PNG writer), `cli/nova-preview.cpp` (new), `tests/test_live_session.cpp`
+(new), `tests/test_png.cpp` (new), `CMakeLists.txt` (`nova-live` gains
+session+png; `live_session` and `png_roundtrip` targets; the
+`nova-preview` CLI). Files changed: `docs/05-m4-shell-design.md` (§3
+built-note, §4 built-note, §9 items 4 and 10, the suite count, §13),
+`ROADMAP.md`, `START-HERE.md`, `SESSION-LOG.md`.
+
+**Task as accepted:** the next step as written last entry — the live
+session state machine [docs/05 §4] — then, at Sara's direction, the
+`nova-preview` CLI and the `png_roundtrip` screamer.
+
+**The machine is built and the sequences are real audio, not hopes.** VMW
+(white-only, phasing) walks IDLE → READY → START TONE → PHASING →
+DRAWING — PREVIEW → DECODING → SAVED; both pulse-station phasing
+waveforms (JMH 5/95, XSG 50/50) walk it too; `nmc-image-stop-tone-120s`
+carries the session through STOP TONE on the library's only real stop
+tone, forced-started the way an operator would. The drawing point lands
+where the batch path's segmentation puts the picture start — 36.88 vs
+36.86 s on VMW, 34.50 vs 34.62 on JMH, 42.00 vs 42.05 on XSG — and the
+phasing-interval rate seed measures **−14 ppm** against the batch fit on
+VMW, the station where that seed is all the clock the preview ever gets.
+The preview's dead sector lands in the batch image's column: **+6, +1, +0
+px** on the three.
+
+**Two bugs found by the screamer, and both are the kind worth
+remembering.**
+
+1. **The preview was fed to the stream end, so the stop tone was drawn
+   into the picture — by a chunking-dependent amount.** A stop tone
+   qualifies `min_stop_sec` (2 s) after it begins; rows fed past the tone
+   start in the meantime had already been drawn, and how many depended on
+   where the push boundaries fell: **226 rows at 1000-sample blocks, 222
+   at 65536**, the last four rows of the small-block picture being 450 Hz
+   alternations. No renderer fix is possible — forward-only cannot un-draw
+   — so the answer is upstream: the tone detector now answers "how far may
+   a consumer read without risking an undetected stop tone" with an
+   ABSOLUTE position (`safe_horizon_samples`: win + hop behind the
+   classification frontier, capped at an open stop run's start), and the
+   session feeds the preview to it. The cost is 0.375 s of preview
+   latency; the gain is that the drawn rows are the same at every block
+   size, because every position in the decision is absolute. **The
+   lesson, same species as session 21's trim schedule: in a streaming
+   system, "when did component A learn what component B already knew" is
+   a chunking dependency unless every handoff is in absolute stream
+   positions.**
+2. **A re-entrant `batch_done` inverted the event order.** The decode
+   callback is allowed to run `decode_fax` inline and report from inside
+   `push()`, and when it did, the SAVED enter was recorded in the
+   callback's own return value before the outer call's DECODING — the
+   event stream read `DRAWING → SAVED → DECODING`. Re-entrant state
+   changes now record into the outer call's output. A machine whose
+   observable history depends on the caller's callback discipline is two
+   machines; now it is one.
+
+**What the machine decides that nothing else could.** The phasing watcher
+re-runs `detect_phasing` once per second of new signal at all three
+nominal rates (the start tone names the IOC but not the rate, and the
+live path has no comb scan), enters PHASING on a qualifying run, and acts
+only on a CLOSED run — one the buffer outlasts by more than the
+run-assembly gap — because an open run's `t_end` is still moving and a
+decision taken on it would depend on when the scan happened to run. If
+the tone has ended and nothing qualifies within `phasing_wait_sec`
+(default 70 s), the give-up draws from the tone's end on the nominal rate
+with no anchor — the phasing-less case, pinned synthetically since no
+library recording is one. The FAXSignal two-openings case is drawn from
+the FIRST opening, and the header says why that is registered rather than
+fixed: the batch "last opening" rule needs the stop tone, which has not
+happened yet live.
+
+**Mutation testing: seven breakages, all now killed; one survived the
+first version of the test.** Acting on an open phasing run, feeding the
+preview past the safe horizon, dropping the pre-roll (snapshot starts at
+the detection event, 2 s late), discarding on operator stop, entering
+DECODING before the tone has ended, and dropping the anchor handoff all
+fail it. The survivor: ignoring start tones in SAVED — T10 drove its
+second transmission into DECODING (the deferred-decode case), so the
+SAVED → START TONE edge was never exercised. Same hole as session 21's
+reclassified-anchor mutation: the test covered the hard case and skipped
+the easy one it sits on top of. T10 now runs both.
+
+**`nova-preview` exists.** The renderer is no longer reachable only
+through its screamer: `nova-preview in.wav out.pgm [--force IOC LPM]
+[--phase FRAC] [--sync PPM]` drives the real session machine, writes the
+preview, and runs the batch decode of the frozen snapshot for comparison.
+Checked by eye: VMW's chart reads "The Bureau of Meteorology", phased
+from its phasing interval live; `gya-weak-white-120s --force 576 120
+--phase 0.3` shows the unanchored page landing by one operator value, as
+advertised in §13.
+
+**`png_roundtrip` is built, and the decoder that checks it is not ours.**
+`live/png.{hpp,cpp}`: 8-bit greyscale, stored deflate blocks, tEXt chunks
+for the decode QA [§8.3 item 7]. The screamer decodes the output with
+python3's stdlib — zlib, struct, binascii, sharing no code with the
+writer — asserts signature, every chunk's CRC, IHDR, every row's filter
+byte, IEND last, pixel equality at 1810×300, 1810×2400 (67 stored
+blocks) and 3×2, and the tEXt round-trip; `sips` decodes it too. No
+python3 → SKIP (77), not FAIL. Three writer mutations (wrong adler32,
+filter byte 1, CRC over payload only) all fail it.
+
+**Validation.** 32/32 pass (163 s), zero warnings. Suite count **30 (+2
+with the GUI)**.
+
+**Next step: wire the session into the shell** — the capture thread
+(docs/05 §2: ring → StreamResampler → StreamDemod → `LiveSession::push`),
+the GUI queue draining SessionOutput into the widgets, thread 3 running
+`decode_fax` and reporting `batch_done`, and the save path writing PNG
+with the decode QA in tEXt chunks. `gui/nova-gui.cpp`'s LiveState enum is
+the display twin of `SessionState` and should go when the wiring lands.
+Two smaller things: §7.1's two DecodeOptions fields
+(`phase_anchor_hint` / `clock_ppm_fallback`) are still unbuilt, and the
+session's decode callback is exactly where they will board — its
+screamers are §9 items 5 and 6; and the shell's PHASE/SYNC controls are
+still inert, which the wiring makes live.
+
+---
+
 ## 2026-08-13 — Session 21: a picture in the pane, and the block-size claim was false for a reason nobody would have read
 
 Agent: Claude. Code changed: `live/preview.hpp`, `live/preview.cpp` (new —

@@ -111,6 +111,17 @@ struct PhasingResult {
     // fractional `period` passed in and is what decode_fax consumes.
     double anchor = 0.0;
     double spread = 0.0;    // 10-90% of per-line positions, in samples
+    // The line period measured across the run, in samples: the per-line
+    // drift of the white edge inside its truncated-period window, added
+    // back onto that window. 0 when the run had fewer than 8 members and
+    // no slope could be fitted. The batch decoder never reads this — it
+    // fits its own period over the whole recording, which is a longer
+    // baseline — but a FORWARD renderer cannot do that, and the phasing
+    // interval is the only baseline in the signal before the first picture
+    // line. This is the live state machine's rate seed on its way out of
+    // PHASING [docs/05 §4, §6 seed order item 2], and on a white-only
+    // station it is all the preview's clock ever gets.
+    double period = 0.0;
     // The same spread with the best straight line removed: what is left
     // after any constant clock error is accounted for. `spread` is
     // dominated by that clock (0.66 samples/line at -90 ppm), so it says

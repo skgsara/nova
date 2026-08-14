@@ -14,10 +14,12 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(28 test suites (+2 with the GUI): three synthetic matrices + 21
+(30 test suites (+2 with the GUI): three synthetic matrices + 21
 real-fixture screamers + the ruler mapping + the live/batch equivalence
-of the front end, of the tone detector and of the picture itself;
-`gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
+of the front end, of the tone detector, of the picture itself and of the
+whole session state machine + the PNG round-trip under an independent
+decoder; `gui_layout` and `gui_shell` join when FLTK and RtAudio are
+installed.)
 See the M4 shell, if FLTK and RtAudio are installed — the full window
 with no decode behind it yet: `./build/nova-gui`
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
@@ -37,10 +39,14 @@ See a white-only station phased from its phasing interval — the picture
 that was drawn rotated by 520 px until session 7:
 `./build/nova-decode fixtures/vmw-phasing-image-160s.wav vmw.pgm`
 See the LIVE picture — the forward-only preview, drawn row by row the way
-the pane will draw it, checked against the batch image on every fixture:
-`ctest --test-dir build -R live_preview -V`
-(There is no `nova-preview` CLI yet; the screamer is the only way to run
-the renderer. Worth 50 lines whenever someone wants to look at one by eye.)
+the pane will draw it, driven by the real session state machine (start
+tone, phasing watcher, anchor handoff and all):
+`./build/nova-preview fixtures/vmw-phasing-image-160s.wav vmw-prev.pgm`
+(Recordings that open mid-transmission have no opening for the machine to
+hear; give it the operator's answer: `--force 576 120`, and `--phase` /
+`--sync` exercise the overrides. The screamer form:
+`ctest --test-dir build -R live_preview -V` — and `live_session` for the
+machine itself.)
 Hear the library's only real stop tone — 450 Hz, fading 0.88 s mid-tone,
 cut session 21 so the signal that ENDS a transmission is in the library:
 `./build/nova-tones fixtures/nmc-image-stop-tone-120s.wav`
