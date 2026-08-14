@@ -689,6 +689,59 @@ true anchor, not on the hint; and a deliberately wrong
 exists, while being the value used on a white-only fixture where it does
 not.
 
+**[BUILT session 24.** Both fields are in `DecodeOptions` as written
+above, and `LiveSession` hands them to the batch decode of the
+transmission the operator corrected. Three things the writing of it
+turned out to need, none of which this section knew.
+
+**1. The section named three conditions and the code has one.** "A
+white-only station, a forced start, too few locked lines" all arrive at
+`stage_fit` as the same fact — no segment of locked lines long enough to
+pair a long baseline across — so the fallback is gated on the fit's own
+emptiness rather than on three proxies for it. `DecodeResult::
+clock_from_fallback` reports which way it went, and it has to exist: the
+QA header's `Nova:Sync` said "operator" whenever the operator had TYPED
+one, which under this decision is a claim the pixels usually cannot
+support. Supplying a value and having it used are different facts and
+the header now carries both.
+
+**2. PHASE reached the anchor and then died two stages later, and the
+reason is `stage_track`.** Setting `dead_start0` is not enough on a
+station that sends a pulse: the re-acquisition sweep looks over HALF A
+LINE, so it is free to walk the tracker back onto the feature the
+automatic scan preferred — the one the operator was overruling. Measured
+before the fix: a hint at half a line on JMH, and one 900 samples away
+on a synthetic decoy, each moved the anchor and left the saved page
+byte-identical. The sweep is now off when a hint is present. The cost is
+real and accepted: with a hint, a tracker that falls off a dropout can no
+longer sweep the line to find its way back. That is the right way round —
+the sweep decides WHICH feature the line starts on, and once the operator
+has answered that, a search free to answer differently is not a recovery.
+
+Line 0's own initial search was narrowed too, and then that change was
+**removed**: the mutation restoring it survived, on every fixture and on
+the synthetic. It would only bite where a stronger competing feature sits
+between `search_frac` and 5% of a line from the click, and nothing
+available can be made to show it. Code whose effect cannot be
+demonstrated does not stay, which is the same rule that deleted
+`LiveState` in session 23 — the difference being that this one looked
+principled, and being principled is not evidence.
+
+**3. The hint must also outrank the PHASING anchor**, which §7.1 did not
+say. `stage_phasing` overwrites the image anchor on a white-only station,
+and if it overwrites the operator's too, the field works on pulse
+stations and vanishes on exactly the recordings that need it — VMW and
+its 520 px rotation are the whole reason auto-phasing has a wrong answer
+to correct. The phasing delta is still measured and reported, so the two
+answers can still be compared.
+
+The refinement is a real measurement, not a formality: on
+`vmw-phasing-image-160s`, five clicks spread across 3.5% of a line all
+settle on ONE anchor, 13 px from what the phasing interval says
+independently — on a white-only station, where the note above warned
+there is no per-line phase to refine against at all. On a pulse station
+four hints ±1% off the anchor each produce a byte-identical page.**]**
+
 ---
 
 ## 8. Window layout
@@ -1355,11 +1408,37 @@ existing 20 fixtures:
    exactly on the true anchor lands the picture on the *true* anchor,
    not on the hint; and a hint pointing at the wrong candidate feature
    moves the picture to that feature. Pins §7.1's "seed, then refine".
+   **[BUILT session 24: `tests/test_overrides.cpp`, run as two ctest
+   targets over one binary. "Lands on the true anchor" is measured as a
+   BYTE-IDENTICAL page against the un-hinted decode — "close enough"
+   would pass an implementation that obeys the hint to within a pixel,
+   and a pixel is what the refinement is for. The wrong-candidate half
+   is generated, because nothing in the library holds a decoy of known
+   position: white paper with one black bar a fifth of the way across,
+   present on two rows in three, which is the wrong candidate as
+   `stage_dead_sector` itself describes it ("a chart border is dark on
+   many lines, never on all of them") and which therefore loses the
+   global scan while staying a feature the template can lock onto. The
+   hinted page comes out rotated onto it by 410 px, against a decoy
+   whose own measured column is 410. Four more claims the writing needed:
+   the default is not a value (an un-hinted decode reports none); the
+   hint outranks the phasing anchor; five clicks across 3.5% of a line
+   settle on one anchor 13 px from the independent phasing witness; and a
+   hint cannot flip the dead-sector STYLE, which would switch the
+   per-line tracker off as a side effect nobody clicked for.]**
 6. **`override_sync_fallback`** — a deliberately wrong
    `clock_ppm_fallback` changes nothing on a fixture whose baseline
    exists, and *is* the value used on a white-only fixture where it does
    not. Pins §7.1's "fallback, not winner", which is the half of the
    decision most likely to be quietly implemented as a plain override.
+   **[BUILT session 24: same file. Five wrong ppm values, ±2000
+   included, leave the pulse fixture's clock at −86.6 ppm and its page
+   byte-identical; four are each the reported clock, the drawn line
+   period AND a different page on the white-only one. Plus the claim the
+   NaN sentinel exists for: a SYNC of **exactly 0 ppm** is USED, not read
+   as "no value" — it replaces the −75.2 ppm the fold measured and
+   redraws the page. An implementation reaching for the usual
+   `if (ppm != 0)` idiom passes every other check in the file.]**
 
 Two more, added session 18. Both are cheap, and both exist because the
 skeleton found the same layout bug twice by two different mechanisms:
@@ -1425,7 +1504,13 @@ One more, added session 22 with the component it covers:
     Verified by mutation, seven, all killed — one survived an earlier
     version: ignoring start tones in SAVED, because the test drove its
     second transmission into DECODING and never exercised the SAVED edge.
-    Both cases are driven now.]**
+    Both cases are driven now. **Extended session 24 with T12**, the
+    live→batch link for §7.1's two fields: a PHASE and a SYNC set while
+    the preview is drawing arrive at the decode unchanged and
+    INDEPENDENTLY (one does not conjure the other), and an operator who
+    touched nothing hands over the two defaults rather than two zeroes —
+    which they have to, since 0 ppm is a legal clock and column 0 a legal
+    anchor.]**
 
 Two more, added session 23 with the wiring they cover:
 
@@ -1458,7 +1543,7 @@ Two more, added session 23 with the wiring they cover:
     invisible until the test recorded the message ORDER, which is what
     §8.5 item 1's claim is actually about.]**
 
-The suite count is now **"32 (+2 with the GUI)"** — session 22 added
+The suite count is now **"34 (+2 with the GUI)"** — session 22 added
 `live_session` and `png_roundtrip`, session 23 adds `live_ring` and
 `live_engine`, all four unguarded `nova-live` tests.
 
@@ -1901,5 +1986,14 @@ It is worth expecting a third instance somewhere in this document.
 - **The second retained snapshot is not built** (§3, session 23). One
   snapshot exists at a time, so a decoded image has no raw stream behind
   it and the post-decode correction controls stay visibly disabled. It
-  lands with §7.1's two `DecodeOptions` fields, because those are what
-  would give it something to do.
+  was waiting on §7.1's two `DecodeOptions` fields, because those are
+  what give it something to do; they landed in session 24, so this is
+  now merely unbuilt rather than blocked.
+- **The GUI's PHASE/SYNC fields are still not covered by a screamer**
+  (session 24). The live→batch link now is: `live_session` T12 drives a
+  whole session and checks the two values arrive at the decode unchanged,
+  separately, and that an untouched operator hands over the two DEFAULTS
+  rather than two zeroes. What no test reaches is the widget end — the
+  FLTK callbacks that read the text fields and call `set_phase` /
+  `set_sync` — which is on the far side of the same seam as everything
+  else in §13's first entry.

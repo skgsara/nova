@@ -1,7 +1,7 @@
 # gui_shell.cmake — §9 screamer 9 [docs/05], run as
 #   cmake -DNOVA_GUI=<path to nova-gui> -P tests/gui_shell.cmake
 # Added as a ctest target only when the GUI target was built
-# (NOVA_BUILD_GUI), so it is one of the two in "32 (+2 with the GUI)".
+# (NOVA_BUILD_GUI), so it is one of the two in "34 (+2 with the GUI)".
 #
 # gui_layout pins where the shell's regions ARE; this pins what the shell
 # DOES — the §8.3 and §8.4 behaviour rules, which are the ones a widget

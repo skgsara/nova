@@ -145,12 +145,21 @@ Six library recordings improved, fourteen unchanged, none worse. A station
 with no sync pulse still has no per-line phase to correct — VMW 2215Z's
 staircase is the open half of that milestone.
 
-Manual override [ISO §4.2.6] now exists in the decoder and not yet on
-screen (session 21): the live renderer takes an operator PHASE — where
-the dead sector is, as a fraction of the line — and an operator SYNC ppm
-trim, both applying forward from the next row so that rows already drawn
-never move. What is left is wiring them to the ruler and the numeric
-fields (M4), and carrying them into the batch re-decode.
+Manual override [ISO §4.2.6] works end to end as of session 24: the
+operator gives a PHASE — where the dead sector is, as a fraction of the
+line — and a SYNC ppm trim, both applying forward from the next row so
+that rows already drawn never move, and both carried into the batch
+re-decode of that transmission. **They are deliberately asymmetric
+there.** PHASE is a *seed*: auto-phasing fails by picking the wrong
+candidate for the dead sector, so the click says which feature, and the
+decoder refines where. SYNC is a *fallback*: a ppm eyeballed off thirty
+seconds of preview loses to one fitted over the whole transmission, so
+the measurement wins wherever it has a baseline, and the operator's value
+is used only where it has none — a white-only station, a forced start,
+too few locked lines. On a healthy recording the typed SYNC is therefore
+measured away from, and the file's QA header says so rather than
+recording it as the operator's. What is left is clicking PHASE on the
+image rather than typing it, and the post-decode re-render.
 
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen

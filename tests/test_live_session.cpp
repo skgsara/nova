@@ -62,6 +62,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -96,6 +97,12 @@ struct Action {
     int ioc = 576;
     double lpm = 120.0;
     bool done = false;
+    // ...or neither: an operator correction [docs/05 §7], which returns
+    // nothing and only shows up later, in what the session hands the batch
+    // decode. Set `correct` and one or both of the two below.
+    bool correct = false;
+    double phase = -1.0;
+    double sync = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct Run {
@@ -156,8 +163,13 @@ Run drive(const std::vector<float>& video, std::size_t block,
         for (Action& a : actions)
             if (!a.done && t >= a.at_sec) {
                 a.done = true;
-                collect(a.force ? s.force_start(a.ioc, a.lpm)
-                                : s.stop_capture());
+                if (a.correct) {
+                    if (a.phase >= 0.0) s.set_phase(a.phase);
+                    if (!std::isnan(a.sync)) s.set_sync(a.sync);
+                } else {
+                    collect(a.force ? s.force_start(a.ioc, a.lpm)
+                                    : s.stop_capture());
+                }
             }
         collect(s.push(video.data() + i,
                        std::min(block, video.size() - i)));
@@ -165,8 +177,13 @@ Run drive(const std::vector<float>& video, std::size_t block,
     for (Action& a : actions)
         if (!a.done) {
             a.done = true;
-            collect(a.force ? s.force_start(a.ioc, a.lpm)
-                            : s.stop_capture());
+            if (a.correct) {
+                if (a.phase >= 0.0) s.set_phase(a.phase);
+                if (!std::isnan(a.sync)) s.set_sync(a.sync);
+            } else {
+                collect(a.force ? s.force_start(a.ioc, a.lpm)
+                                : s.stop_capture());
+            }
         }
     collect(s.flush());
 
@@ -712,6 +729,61 @@ void test_page_cap(const std::string& path) {
           "and the decode runs on what was drawn");
 }
 
+// --- T12: the operator's corrections reach the batch decode ---------------
+// The link nothing else covers. `override_phase_seed` and
+// `override_sync_fallback` pin what `decode_fax` DOES with the two fields,
+// and `live_preview` pins what the renderer does with the live values, but
+// between them sits `LiveSession::begin_decode` copying one into the other
+// — three lines, both ends already pinned, which is exactly the shape of
+// thing that ships broken. A session whose operator touched nothing must
+// hand over the two DEFAULTS, not two zeroes: 0 ppm is a legal clock and
+// column 0 a legal anchor, so "untouched" and "typed zero" have to arrive
+// as different facts [docs/05 §7.1].
+void test_operator_values_reach_the_decode(const std::string& path) {
+    std::printf("\n== T12 PHASE and SYNC reach the batch decode [§7.1]\n");
+    const std::vector<float> video = load_video(path);
+    nova::SessionOptions sopt;
+
+    const Run untouched =
+        drive(video, 1000, {{0.0, true, 576, 120.0, false}}, sopt, false);
+    check(untouched.decode_requests == 1 &&
+              untouched.decode_opt.phase_anchor_hint < 0.0 &&
+              std::isnan(untouched.decode_opt.clock_ppm_fallback),
+          "an operator who touched nothing hands over NO hint and NO "
+          "fallback, not two zeroes");
+
+    Action phase{};
+    phase.at_sec = 20.0;
+    phase.correct = true;
+    phase.phase = 0.375;
+    Action sync{};
+    sync.at_sec = 20.0;
+    sync.correct = true;
+    sync.sync = -1234.0;
+    const Run corrected =
+        drive(video, 1000, {{0.0, true, 576, 120.0, false}, phase, sync},
+              sopt, false);
+    check(corrected.decode_requests == 1 &&
+              corrected.decode_opt.phase_anchor_hint == 0.375 &&
+              corrected.decode_opt.clock_ppm_fallback == -1234.0,
+          "a PHASE and a SYNC set while the preview was drawing arrive at "
+          "the decode unchanged");
+
+    // Each travels on its own. A single "the operator edited something"
+    // flag would pass the check above and quietly hand over a phantom
+    // second value here.
+    const Run only_sync = drive(
+        video, 1000, {{0.0, true, 576, 120.0, false}, sync}, sopt, false);
+    check(only_sync.decode_opt.phase_anchor_hint < 0.0 &&
+              only_sync.decode_opt.clock_ppm_fallback == -1234.0,
+          "SYNC alone does not invent a PHASE hint");
+    const Run only_phase = drive(
+        video, 1000, {{0.0, true, 576, 120.0, false}, phase}, sopt, false);
+    check(std::isnan(only_phase.decode_opt.clock_ppm_fallback) &&
+              only_phase.decode_opt.phase_anchor_hint == 0.375,
+          "PHASE alone does not invent a SYNC fallback");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -732,6 +804,7 @@ int main(int argc, char** argv) {
     test_no_phasing_giveup();
     test_two_transmissions();
     test_page_cap(argv[5]);
+    test_operator_values_reach_the_decode(argv[5]);
 
     std::printf("\n%s (%d failure(s))\n", failures ? "FAILED" : "OK",
                 failures);

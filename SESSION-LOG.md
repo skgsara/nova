@@ -7,6 +7,182 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 24: the operator's two corrections reach the batch decode, and one of them had to be defended twice
+
+Agent: Claude. Code changed: `core/fax.hpp` (`DecodeOptions::
+phase_anchor_hint` / `clock_ppm_fallback`; `DecodeResult::
+anchor_from_hint` / `clock_from_fallback`), `core/fax.cpp`
+(`stage_dead_sector` refines the hint locally, `stage_phasing` stands
+down for it, `stage_track` stops sweeping the line when it has one,
+`stage_fit` falls back to the operator's ppm where the fit had no
+baseline), `live/session.cpp` (the two values join the handoff),
+`live/engine.cpp` (`decode_qa` stops recording a typed-but-outranked
+SYNC as the operator's), `cli/nova-decode.cpp` (`--phase` / `--sync` and
+what they did), `tests/test_overrides.cpp` (new),
+`tests/test_live_session.cpp` (T12), `tests/test_live_engine.cpp` (the
+provenance test now covers supplied-and-outranked), `CMakeLists.txt`
+(the two new targets, suite count). Files changed:
+`docs/05-m4-shell-design.md` (§7.1 built-note, §9 items 5/6/10, §13, the
+suite count), `docs/02-compliance-matrix.md` (the §4.2.6 manual-adjustment
+row), `AGENTS.md` (the unanchored-white-only gap), `README.md`,
+`ROADMAP.md`, `START-HERE.md`, `SESSION-LOG.md`.
+
+**Task as accepted:** item 2 of ROADMAP's M4 list — §7.1's two
+`DecodeOptions` fields with §9 screamers 5 and 6. Item 1, running
+`nova-gui` against a real signal and looking at it, still needs Sara at
+the keyboard and is untouched.
+
+**The decision held, and implementing it honestly took three things it
+did not say.**
+
+1. **§7.1 names three conditions for the SYNC fallback and the code has
+   one.** "A white-only station, a forced start, too few locked lines"
+   all arrive at `stage_fit` as the same fact: no segment of locked lines
+   long enough to pair a long baseline across. So the gate is the fit's
+   own emptiness rather than three proxies for it — fewer places for the
+   three to drift apart, and it is the condition the section was
+   describing rather than a test for it.
+2. **PHASE reached the anchor and then died two stages later.** Setting
+   `dead_start0` is not enough on a station that sends a pulse: the
+   re-acquisition sweep in `stage_track` looks over HALF A LINE, so it
+   walks the tracker straight back onto the feature the automatic scan
+   preferred — which is the candidate the operator was overruling.
+   Measured before the fix: a hint at half a line on JMH, and one 900
+   samples away on a synthetic decoy, each moved the anchor and left the
+   saved page **byte-identical**. The field looked implemented and was
+   inert. The sweep is off when a hint is present, at an accepted cost: a
+   hinted decode of a recording with a dropout can tear where an
+   un-hinted one recovers. That is the right way round — the sweep's job
+   is to decide WHICH feature the line starts on, and once the operator
+   has answered that, a search free to answer differently is not a
+   recovery.
+3. **The hint had to outrank the PHASING anchor too.** `stage_phasing`
+   overwrites the image anchor on a white-only station, and would have
+   overwritten the operator's — leaving the field working on pulse
+   stations and silently dead on exactly the recordings that need it.
+   VMW's 520 px rotation is the whole reason auto-phasing has a wrong
+   answer worth correcting. The phasing delta is still measured and
+   reported, so the two answers can still be compared.
+
+**The refinement is a real measurement, not a formality.** On
+`vmw-phasing-image-160s` — white-only, where `live/preview.hpp` warned
+there is no per-line phase to refine against at all — five clicks spread
+across 3.5% of a line all settle on ONE anchor, and that anchor is 13 px
+of 1810 from what the phasing interval says independently. On a pulse
+station, four hints ±1% off the anchor each produce a byte-identical
+page. That is the shape §7.1 asked for: the operator's judgement about
+which feature, the decoder's precision about where.
+
+**`DecodeResult` gained two provenance flags, which is one more change to
+`core/` than §7.1 budgeted for, and the QA header is why.** `Nova:Sync`
+read "operator" whenever the operator had TYPED a value — but under this
+decision a typed ppm is usually outranked, so the file was claiming a
+provenance its pixels did not have, on every healthy recording, where
+nobody would notice. Supplying a value and having it used are different
+facts. `anchor_from_hint` and `clock_from_fallback` carry the second one,
+and `decode_qa` now writes "operator (no fit baseline)" or "measured
+(operator outranked)" rather than one word for both.
+
+**Two screamers, and a synthetic decoy because the library has none.**
+`override_phase_seed` measures "lands on the true anchor" as a
+BYTE-IDENTICAL page against the un-hinted decode — "close enough" would
+pass an implementation that obeys the hint to within a pixel, and a pixel
+is exactly what the refinement is for. The wrong-candidate half needed a
+decoy of known position, which no recording has, so it is generated:
+white paper with one black bar a fifth of the way across, present on two
+rows in three. That is the wrong candidate as `stage_dead_sector` itself
+describes it — "a chart border is dark on many lines, never on all of
+them" — so it loses the global scan while staying a feature the template
+can lock onto. Hinted, the page comes out rotated onto it by **410 px**,
+against a decoy whose own measured column is **410**.
+`override_sync_fallback` runs five wrong ppm values through a fitted
+fixture (clock unmoved at −86.6 ppm, page byte-identical) and four
+through a white-only one (each is the reported clock, the drawn line
+period AND a different page) — plus the claim the NaN sentinel exists
+for: **a SYNC of exactly 0 ppm is USED, not read as "no value"**. It
+replaces the −75.2 ppm the fold measured and redraws the page. An
+implementation reaching for the usual `if (ppm != 0)` idiom passes every
+other check in the file.
+
+**Ten mutations, and the two that survived said different things.** The
+harness was built to session 23's rules — `rm` the object file, `perl -e
+'alarm 120'` because this Mac has no `timeout`, the mutated line grepped
+back out of the file so a pattern that failed to match cannot masquerade
+as a survivor, and an unmutated BASELINE that had to SURVIVE first. Eight
+died at once. Of the two survivors:
+
+- one was an **equivalent mutant**. `res.per_line_sync = false` injected
+  inside the hint block is overwritten eight lines later by
+  `res.per_line_sync = has_pulse`, so nothing was mutated. Re-run at a
+  reachable point (`has_pulse && !res.anchor_from_hint`) it is killed by
+  two checks. A survivor that the harness cannot distinguish from a
+  no-op is not evidence either way, which is the same lesson as session
+  23's in a new costume: **look at what the mutation actually did to the
+  program, not at what the diff says it did**;
+- one was **real, and the answer was to delete the code**. Narrowing line
+  0's initial search to the hint window alongside the sweep survived on
+  every fixture and on the synthetic. It only bites where a stronger
+  competing feature sits between `search_frac` and 5% of a line from the
+  click, and nothing available can be made to show it. It was written
+  because it was principled — the two searches "should agree" about how
+  far the line start may be — and being principled is not evidence. Out.
+
+**T12 closes the live→batch link rather than registering it.** Nothing
+covered `LiveSession` copying `phase_frac_` / `sync_ppm_` into the
+`DecodeOptions` it hands over: `override_*` call `decode_fax` directly,
+`live_preview` covers the renderer, and the three lines between them were
+the classic shape of a thing that ships broken. `live_session` T12 now
+drives a whole session and checks the two values arrive unchanged and
+INDEPENDENTLY (one does not conjure the other), and that an operator who
+touched nothing hands over the two DEFAULTS rather than two zeroes —
+which they must, since 0 ppm is a legal clock and column 0 a legal
+anchor.
+
+**Validation.** 36/36 pass (237 s), zero warnings. Suite count **34 (+2
+with the GUI)**. Baseline before any change was 34/34 green, so nothing
+regressed: the tracker change fires only when a hint is present.
+
+**Not verified, and unchanged from last session: nothing has looked at a
+pixel of the wired window.** Also new this session and registered in §13:
+the GUI's PHASE and SYNC *widgets* — the FLTK callbacks that read the
+text fields — are still on the far side of that same seam, even though
+everything they call is now pinned end to end.
+
+**Documentation swept (session 24, closing).** Every current-state claim
+the two fields falsified, found rather than left for the next reader.
+`docs/02`'s ISO §4.2.6 row said "manual adj. built, GUI pending" — the
+GUI wiring landed session 23 and the re-decode session 24, so it reads
+"met end to end", with the asymmetry spelled out beside it so the matrix
+is not read as saying the two corrections behave alike, and with what
+actually remains named as the *affordance* rather than the capability:
+PHASE is typed as a column instead of clicked on the picture, and ISO
+§5.4.3's re-render-after-the-fact item still needs the Apply/Auto
+lifecycle. `AGENTS.md`'s registered gap for a white-only station with no
+phasing interval now says the operator's click reaches the SAVED image
+and not only the preview. `README.md`'s "exists in the decoder and not
+yet on screen" is replaced by what the pair actually does, asymmetry
+included — it is the first thing in Nova whose behaviour would surprise
+someone who read only the button labels. Session-tagged history in
+`ROADMAP.md` and this file was left alone: it was true when written, and
+this log is append-only.
+
+**Next step: run `nova-gui` against a real signal and look at it.** That
+is still item 1 of the M4 list and still the one thing no test can do —
+the blit into the pane at a zoom, the level meter's bar, the progress
+bar, the status line's saved-file name. It needs Sara at the keyboard,
+because starting it opens an audio input: the BlackHole 2ch virtual
+device already on this machine is the quickest route — route a recording
+into it, select it as Nova's input, press Start. After that, items 3 and
+4 are now unblocked and are one story: §3's second retained snapshot (a
+decoded image keeping a raw stream behind it, which is what the two new
+fields give a purpose to), then §8.5 items 2–4's post-decode lifecycle —
+Apply re-renders AND overwrites the same file, Auto restores the measured
+values, an edit begins at the first dirty control and ends at Apply, at
+Auto, or at a switch to the live view. That is what finally makes the
+grey `Auto` button stop being grey.
+
+---
+
 ## 2026-08-14 — Session 23: the shell is wired, and two mutation harnesses lied before any verdict meant anything
 
 Agent: Claude. Code changed: `live/ring.hpp` (new — the SPSC audio ring),

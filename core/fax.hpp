@@ -17,6 +17,7 @@
 #pragma once
 #include "hooks.hpp"
 #include "image.hpp"
+#include <limits>
 #include <vector>
 
 namespace nova {
@@ -139,6 +140,40 @@ struct DecodeOptions {
     // draws every line from onset to EOF, which is what Nova did before
     // session 7.
     bool segment = true;
+    // --- the operator's two corrections [docs/05 §7.1] --------------------
+    // The only change M4 asks of core/, and the two do NOT behave the same
+    // way. Both follow the existing auto-as-a-value idiom above (`lpm = 0`,
+    // `ioc = 0` already mean "measure it"), so neither needs a mode toggle.
+    //
+    // PHASE — a SEED the search refines. Where the operator says the dead
+    // sector is, as a fraction of the line width; negative (the default)
+    // means no hint. Auto-phasing fails by picking the WRONG CANDIDATE for
+    // the dead sector, and the click is what disambiguates which feature is
+    // which — but it was made through a preview drawn on a possibly-wrong
+    // period, so it is approximate in position. So the anchor search starts
+    // here and settles on the best feature within `search_frac` of it: the
+    // operator's judgement about WHICH, the decoder's precision about
+    // WHERE. It does not decide which of the two dead-sector styles the
+    // station sends — that is a property of the transmission, measured
+    // across all the lines, and a click cannot turn a pulse station into a
+    // white-only one [stage_dead_sector].
+    double phase_anchor_hint = -1.0;
+    // SYNC — a FALLBACK the measurement outranks. A line-rate trim in ppm,
+    // used ONLY where the period fit has no baseline to measure over: a
+    // white-only station, a forced start, too few locked lines to fit.
+    // Where a baseline exists the fit wins, because a ppm eyeballed off
+    // thirty seconds of preview is worse than one fitted over the whole
+    // transmission — sessions 5, 8 and 9 are entirely about long baselines
+    // beating short ones. The consequence, stated so it is not a surprise:
+    // on a healthy recording the operator's value is measured away from,
+    // and the saved image can differ from the preview they just corrected
+    // by hand, in the direction of correct. `DecodeResult::
+    // clock_from_fallback` reports which of the two happened.
+    //
+    // NaN = none, and it has to be: zero cannot mean auto here, because a
+    // perfect clock IS 0 ppm. Any other sentinel would make some legal
+    // measurement unrepresentable.
+    double clock_ppm_fallback = std::numeric_limits<double>::quiet_NaN();
     // Log/progress/cancellation seams (core/hooks.hpp). All three null is
     // the batch default: silent, uninterruptible.
     DecodeHooks hooks;
@@ -182,6 +217,14 @@ struct DecodeResult {
     int ioc = 576;
     double line_period_s = 0.0;  // measured, fractional
     double clock_ppm = 0.0;      // measured vs nominal
+    // ...except when it is not measured at all: true when the fit had no
+    // baseline and `DecodeOptions::clock_ppm_fallback` was used instead, so
+    // `clock_ppm` above is the OPERATOR's number. Reported because a
+    // provenance field that says "operator" whenever the operator typed
+    // something would be wrong on every healthy recording — the fit
+    // outranks the typed value there, and the file must not claim
+    // otherwise [live/engine.cpp `decode_qa`].
+    bool clock_from_fallback = false;
     int lines = 0;
     int locked_lines = 0;
     int clamped_corrections = 0;
@@ -260,6 +303,12 @@ struct DecodeResult {
     // True when the drawn picture is phased from the phasing interval
     // rather than from the image lines.
     bool anchor_from_phasing = false;
+    // True when it is phased from the operator's `phase_anchor_hint`
+    // instead — refined locally, so this says which FEATURE was chosen by
+    // hand, not that the position was. Exclusive with the flag above: the
+    // hint is the operator overruling exactly the automatic choice that
+    // one represents.
+    bool anchor_from_hint = false;
 
     // --- timebase linearity -----------------------------------------------
     // `clock_ppm` above is one number for the whole recording, which is only

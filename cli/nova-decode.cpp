@@ -5,6 +5,7 @@
 #include "../core/resample.hpp"
 #include "../core/wav.hpp"
 #include "env_hooks.hpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,7 +37,8 @@ void usage() {
     std::fprintf(stderr,
                  "usage: nova-decode in.wav out.pgm [--lpm 60|90|120] "
                  "[--ioc 288|576] [--dev 150|400] [--start SEC] "
-                 "[--no-autolock] [--no-phasing] [--no-segment]\n");
+                 "[--no-autolock] [--no-phasing] [--no-segment] "
+                 "[--phase FRAC] [--sync PPM]\n");
 }
 }  // namespace
 
@@ -62,6 +64,15 @@ int main(int argc, char** argv) {
             opt.use_phasing = false;
         else if (!std::strcmp(argv[i], "--no-segment"))
             opt.segment = false;
+        // The operator's two corrections [docs/05 §7.1], on the command
+        // line for the same reason `nova-preview` carries them: they are
+        // asymmetric, and the difference is only visible by running the
+        // same recording both ways. --phase is a fraction of the line;
+        // --sync is ppm, and is used only where the fit has no baseline.
+        else if (!std::strcmp(argv[i], "--phase") && i + 1 < argc)
+            opt.phase_anchor_hint = std::atof(argv[++i]);
+        else if (!std::strcmp(argv[i], "--sync") && i + 1 < argc)
+            opt.clock_ppm_fallback = std::atof(argv[++i]);
         else {
             usage();
             return 2;
@@ -110,13 +121,29 @@ int main(int argc, char** argv) {
                             r.relocked_lines);
             std::printf("\n");
         }
+        // What the operator's corrections actually did [docs/05 §7.1].
+        // Printed only when one was given, and printed even when it was
+        // ignored — a value that vanished silently is the whole failure
+        // mode this pair is designed around.
+        if (r.anchor_from_hint || opt.phase_anchor_hint >= 0.0)
+            std::printf("  PHASE hint %.4f of a line: %s\n",
+                        opt.phase_anchor_hint,
+                        r.anchor_from_hint ? "seeded the anchor search"
+                                           : "NOT USED");
+        if (!std::isnan(opt.clock_ppm_fallback))
+            std::printf("  SYNC %+.1f ppm: %s\n", opt.clock_ppm_fallback,
+                        r.clock_from_fallback
+                            ? "used — the fit had no baseline"
+                            : "outranked by the fit, as designed");
         if (r.phasing_found)
             std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp vs "
                         "image  (%s)\n",
                         r.phasing_t_start, r.phasing_t_end,
                         r.phasing_anchor_delta,
-                        r.anchor_from_phasing ? "PHASING anchor used"
-                                              : "image anchor used");
+                        r.anchor_from_hint
+                            ? "OPERATOR hint used"
+                            : (r.anchor_from_phasing ? "PHASING anchor used"
+                                                     : "image anchor used"));
         else
             std::printf("  phasing none\n");
         switch (r.timebase) {

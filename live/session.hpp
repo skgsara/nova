@@ -149,10 +149,9 @@ public:
     // stream (the offset that relates a PreviewRow's renderer-local
     // positions to the saved image's raw stream), plus the DecodeOptions
     // to run with (IOC filled in when the operator forced it; otherwise
-    // auto — the snapshot carries the start tone). §7.1's
-    // phase_anchor_hint / clock_ppm_fallback join this handoff when those
-    // fields exist; the live overrides that produced them are kept here
-    // meanwhile (phase_set_/sync_ppm_).
+    // auto — the snapshot carries the start tone), plus §7.1's
+    // phase_anchor_hint / clock_ppm_fallback when the operator touched
+    // PHASE or SYNC while the preview was drawing (phase_set_/sync_set_).
     using DecodeCallback =
         std::function<void(std::shared_ptr<const std::vector<float>>,
                            long long snapshot_start, const DecodeOptions&)>;
@@ -176,8 +175,9 @@ public:
     // tone entirely. Ignored in every other state, as §4 specifies.
     SessionOutput force_start(int ioc, double lpm);
     // The live override surface, forwarded to the preview when drawing
-    // [docs/05 §7]; remembered either way, because these values seed the
-    // batch re-decode of THIS transmission once §7.1's fields exist.
+    // [docs/05 §7]; remembered either way, because these values also reach
+    // the batch re-decode of THIS transmission — as §7.1's asymmetric pair,
+    // not as two overrides.
     void set_phase(double frac);
     void set_sync(double ppm);
 

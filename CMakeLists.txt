@@ -457,6 +457,24 @@ add_executable(nova-test-ring tests/test_ring.cpp)
 target_link_libraries(nova-test-ring PRIVATE nova-live Threads::Threads)
 add_test(NAME live_ring COMMAND nova-test-ring)
 
+# §9 screamers 5 and 6 [docs/05 §7.1]: the operator's two corrections reach
+# the batch decode, and they behave ASYMMETRICALLY when they get there —
+# PHASE seeds the anchor search and is refined off, SYNC is used only where
+# the period fit had no baseline. Two ctest targets over one binary, for the
+# same reason `gui_layout` and `gui_shell` are two: they are two decisions,
+# and a run that says "overrides FAILED" would not say which one broke.
+# Unguarded: no window, no audio device; the decoy fixture is generated.
+add_executable(nova-test-overrides tests/test_overrides.cpp)
+target_link_libraries(nova-test-overrides PRIVATE nova-core)
+add_test(NAME override_phase_seed COMMAND nova-test-overrides phase
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav)
+add_test(NAME override_sync_fallback COMMAND nova-test-overrides sync
+  ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
+  ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav)
+
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an
 # external dependency [docs/05 §11]. The rule that shapes this block: a
@@ -511,7 +529,7 @@ if(NOVA_BUILD_GUI)
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
     # output identical to one dragged to it. The first test in the
-    # project to cover FLTK at all, and one of the two in "32 (+2 with the
+    # project to cover FLTK at all, and one of the two in "34 (+2 with the
     # GUI)".
     # It drives the built binary through a CMake script so it stays
     # portable; it exists only when nova-gui does.
@@ -524,7 +542,7 @@ if(NOVA_BUILD_GUI)
     # until the image width is known, and the preference file beside the
     # program. Driven through --state/--metrics, so it needs no window
     # and no audio device; guarded with nova-gui, the second of the two
-    # in "32 (+2 with the GUI)".
+    # in "34 (+2 with the GUI)".
     add_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
       -DNOVA_GUI=$<TARGET_FILE:nova-gui>
       -P ${CMAKE_SOURCE_DIR}/tests/gui_shell.cmake)

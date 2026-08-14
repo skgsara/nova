@@ -605,6 +605,7 @@ void stage_onset(DecodeState& st) {
 
 // --- 2. coarse phase + dead-sector style, from across-line consistency ----
 void stage_dead_sector(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
     DecodeResult& res = st.res;
     const std::vector<float>& video = st.video;
     const double period0 = st.period0;
@@ -710,6 +711,62 @@ void stage_dead_sector(DecodeState& st) {
         has_pulse ? DeadSector::kBlackPulse : DeadSector::kWhiteOnly;
     res.dead_consistency = has_pulse ? pulse_cons : white_cons;
     double dead_start0 = has_pulse ? pulse_at : white_at;
+
+    // --- the operator's PHASE: seed the search, then refine [docs/05 §7.1]
+    // The scan above is global, and that is exactly what fails when it
+    // fails: it takes the strongest candidate in the whole line, and on the
+    // recordings that need this field the strongest candidate is not the
+    // dead sector. So run the SAME score again over a window around the
+    // operator's hint and take the best position there. What that buys is
+    // the split the decision is built on — the operator says which feature,
+    // the profile says where in it — and it costs nothing when the hint is
+    // already right, because the same score has the same maximum.
+    //
+    // The window is `search_frac` (±3% of a line, ±120 samples on a 4000-
+    // sample line), which is not a new constant: it is the same latitude
+    // the per-line tracker is given below for the same quantity, how far
+    // from where we think it is the line start may actually be. A wider one
+    // would let the global winner back in and swallow the hint, which is
+    // the one thing this field exists to prevent.
+    //
+    // The STYLE decision above is deliberately left upstream of this, on
+    // the global scan. Which of the two dead-sector styles a station sends
+    // [WMO §5.1.3.3] is a property of the transmission measured across
+    // every line; a click is about position. Refining the style here too
+    // would let a hint pointed at a white feature on a pulse station turn
+    // `per_line_sync` off and silently disable the tracker — a click with a
+    // consequence the operator did not ask for and cannot see.
+    if (opt.phase_anchor_hint >= 0.0) {
+        const double frac = std::fmod(opt.phase_anchor_hint, 1.0);
+        const int hint_at = static_cast<int>(frac * plen);
+        const int win = std::max(2, static_cast<int>(opt.search_frac * plen));
+        auto score_at = [&](int i) {
+            return has_pulse
+                       ? std::min(win_mean(dark_frac, i, pulse_w),
+                                  win_mean(white_frac, i + pulse_w, pulse_w))
+                       : win_mean(white_frac, i, dead_w) -
+                             win_mean(white_frac, i - dead_w, dead_w);
+        };
+        double best = -2.0;
+        int best_at = hint_at;
+        for (int i = hint_at - win; i <= hint_at + win; i++) {
+            const double s = score_at(i);
+            if (s > best) {
+                best = s;
+                best_at = i;
+            }
+        }
+        dead_start0 = ((best_at % plen) + plen) % plen;
+        res.dead_consistency =
+            has_pulse ? win_mean(dark_frac, best_at, pulse_w)
+                      : win_mean(white_frac, best_at, dead_w);
+        res.anchor_from_hint = true;
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: phase hint %.4f -> %d, refined to %.0f (%+d samples), "
+             "cons %.2f",
+             opt.phase_anchor_hint, hint_at, dead_start0, best_at - hint_at,
+             res.dead_consistency);
+    }
     // Only a black pulse gives per-line phase. See the note on white_score
     // above: a white-only dead sector is decoded on the measured clock.
     res.per_line_sync = has_pulse;
@@ -810,7 +867,15 @@ void stage_phasing(DecodeState& st) {
         // 30 s in, would trade a tracked reference for a fixed one.
         // The delta is reported either way, so the day a pulse station
         // disagrees by more than a porch, it will be in the output.
-        if (opt.use_phasing && !st.has_pulse) {
+        //
+        // ...and only where the OPERATOR has nothing to offer either. The
+        // phasing anchor is one of the two automatic answers `phase_anchor
+        // _hint` exists to overrule [docs/05 §7.1]; letting it win here
+        // would make the hint work on pulse stations and vanish on
+        // white-only ones, which are the recordings that need it most. The
+        // delta is still reported, so the two answers can still be
+        // compared afterwards.
+        if (opt.use_phasing && !st.has_pulse && !res.anchor_from_hint) {
             st.dead_start0 = phase;
             res.anchor_from_phasing = true;
         }
@@ -852,6 +917,34 @@ void stage_track(DecodeState& st) {
             sstr[l] = -1.0;
         }
     } else {
+        // An operator hint switches the whole-line re-acquisition sweep
+        // below OFF, and that is not a tuning choice — it is what makes
+        // `phase_anchor_hint` work at all on a station that sends a pulse
+        // [docs/05 §7.1]. Without it the hint reaches `dead_start0` and
+        // then dies two stages later: the sweep looks over HALF A LINE, so
+        // it is free to walk the tracker off the feature the operator
+        // picked and back onto the one the automatic scan liked — which is
+        // the candidate they were overruling. Measured before this existed:
+        // a hint 900 samples away on a synthetic decoy, and one at half a
+        // line on JMH, each moved the anchor and left the saved page
+        // byte-identical.
+        //
+        // The cost, stated because it is real: with a hint, a tracker that
+        // falls off a dropout can no longer sweep the line to find its way
+        // back, so a hinted decode of a recording with a big time-skip can
+        // tear where an un-hinted one recovers. That is the right way round.
+        // The sweep's job is to decide WHICH feature the line starts on,
+        // and once the operator has answered that question, a search free to
+        // answer it differently is not a recovery.
+        //
+        // Line 0's `wide` search below is deliberately NOT narrowed with it.
+        // Narrowing it too was written, and then removed: no fixture and no
+        // synthetic could be made to tell the two apart (the mutation
+        // survived), and code whose effect cannot be shown is not code this
+        // decoder keeps. It would matter only where a stronger competing
+        // feature sits between `search_frac` and 5% of a line from the
+        // operator's click, which is a recording the library does not have.
+        const bool hinted = opt.phase_anchor_hint >= 0.0;
         const double wide = 0.05 * period0;
         // must exceed the phasing<->image regime offset (~half a dead
         // sector = 0.0225 lines) or the tracker falls off the grid at the
@@ -885,7 +978,8 @@ void stage_track(DecodeState& st) {
                        static_cast<double>(l) / n_lines);
             }
             const double c = last_good + (l - last_good_l) * period0;
-            const bool reacq = miss >= kReacqMisses && (miss % kReacqEvery) == 0;
+            const bool reacq =
+                !hinted && miss >= kReacqMisses && (miss % kReacqEvery) == 0;
             const double span = reacq ? 0.5 * period0 : narrow;
             const double lo = std::max(pmin, c - span);
             const double hi = std::min(pmax, c + span);
@@ -932,6 +1026,13 @@ void stage_fit(DecodeState& st) {
     // averaging: pairing each locked line with the one half a recording
     // later turns the same ±2 samples into fractions of a ppm.
     double a = st.start + st.dead_start0, b = period0;
+    // Did the long-baseline fit actually have a baseline? This is the
+    // question `clock_ppm_fallback` is answered by, and asking the fit
+    // itself is better than asking three proxies for it: §7.1 names a
+    // white-only station, a forced start and too few locked lines, and all
+    // three arrive here as the same fact — no segment of locked lines long
+    // enough to pair across. See the fallback below.
+    bool fitted = false;
     {
         std::vector<int> lk;
         for (int l = 0; l < n_lines; l++)
@@ -986,6 +1087,11 @@ void stage_fit(DecodeState& st) {
             for (int l = 0; l < n_lines; l++)
                 if (sstr[l] >= lock) intercepts.push_back(spos[l] - b * l);
             a = median(intercepts);
+            // ...and only counts as a baseline if the picture is going to
+            // be drawn on it. `autolock = false` throws this fit away two
+            // statements below, so claiming a measurement there would hand
+            // the operator's value to nothing.
+            fitted = opt.autolock;
         }
     }
     st.a = a;
@@ -997,6 +1103,30 @@ void stage_fit(DecodeState& st) {
         // no clock correction at all: coarse phase, nominal period
         st.a = st.start + st.dead_start0;
         st.b = st.nominal;
+    }
+
+    // --- the operator's SYNC, where and only where nothing measured it ----
+    // [docs/05 §7.1] The fit above wins wherever it ran, and this is the
+    // half of the decision most easily written as a plain override — which
+    // would be the quiet bug, because it fails on exactly the recordings
+    // that look fine: a healthy pulse station would be drawn on an
+    // eyeballed ppm instead of a fitted one and nothing would say so.
+    //
+    // Where the fit did NOT run there is no measurement to outrank it. The
+    // period is then `period0`, the whole-file fold refinement, which is
+    // the number that is off by 30-180 ppm on real signals (session 5) and
+    // slants a white-only station by exactly that error — the one thing
+    // the operator can see and the fold cannot. So their trim replaces it,
+    // as a ppm against nominal, the same quantity `res.clock_ppm` reports
+    // and the same one `StreamPreview::set_clock_ppm` applies live.
+    if (!fitted && !std::isnan(opt.clock_ppm_fallback)) {
+        st.b = st.nominal * (1.0 + opt.clock_ppm_fallback * 1e-6);
+        res.line_period_s = st.b / st.fs;
+        res.clock_ppm = opt.clock_ppm_fallback;
+        res.clock_from_fallback = true;
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: no fit baseline -> operator SYNC %+.1f ppm, b=%.4f",
+             opt.clock_ppm_fallback, st.b);
     }
 
     dlog(st.hooks, LogTopic::kInfo,

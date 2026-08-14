@@ -14,13 +14,13 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(32 test suites (+2 with the GUI): three synthetic matrices + 21
+(34 test suites (+2 with the GUI): three synthetic matrices + 21
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually
 running + the audio ring + the PNG round-trip under an independent
-decoder; `gui_layout` and `gui_shell` join when FLTK and RtAudio are
-installed.)
+decoder + the two operator corrections behaving asymmetrically;
+`gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 See the M4 shell, if FLTK and RtAudio are installed — the full window,
 and since session 23 with the live decode behind it: `./build/nova-gui`
 It opens the default input device, so feed it a receiver (or a virtual
@@ -55,6 +55,15 @@ hear; give it the operator's answer: `--force 576 120`, and `--phase` /
 `--sync` exercise the overrides. The screamer form:
 `ctest --test-dir build -R live_preview -V` — and `live_session` for the
 machine itself.)
+See the two operator corrections behave DIFFERENTLY, which is the whole
+point of them — the same recording, both ways. On a white-only station
+(no per-line sync, so nothing measures the clock) the typed ppm is used;
+on a pulse station the fit outranks it and the page does not move:
+`./build/nova-decode fixtures/vmw-white-sector-120s.wav w.pgm --sync 2000`
+`./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav p.pgm --sync 2000`
+(`--phase FRAC` is the other one, and is a seed: point it near the dead
+sector and the search refines back onto it; point it at a different
+feature and the picture moves there.)
 Hear the library's only real stop tone — 450 Hz, fading 0.88 s mid-tone,
 cut session 21 so the signal that ENDS a transmission is in the library:
 `./build/nova-tones fixtures/nmc-image-stop-tone-120s.wav`

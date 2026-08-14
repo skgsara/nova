@@ -289,6 +289,15 @@ void LiveSession::end_transmission(long long stop_sample, bool via_tone,
     // carries the start tone, and batch IOC selection from it is the
     // proven path [ISO §4.2.5].
     dopt.ioc = forced_ ? ioc_ : 0;
+    // The live corrections, carried into THIS transmission's re-decode and
+    // no other [docs/05 §7, §7.1]. They are handed over as what they are —
+    // a seed for the anchor search and a fallback for the clock — so the
+    // operator's one action means the same thing in the preview they
+    // corrected and in the picture that replaces it. Untouched controls
+    // hand over nothing: the defaults are "no hint" and "no fallback", not
+    // zeroes, because 0 ppm is a legal clock and column 0 a legal anchor.
+    if (phase_set_) dopt.phase_anchor_hint = phase_frac_;
+    if (sync_set_) dopt.clock_ppm_fallback = sync_ppm_;
     dopt.hooks = opt_.hooks;
 
     // The store starts over for the next transmission; the pre-roll rule

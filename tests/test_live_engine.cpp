@@ -414,7 +414,18 @@ void test_provenance() {
 
     const std::vector<nova::PngText> measured =
         nova::decode_qa(r, "", false, false);
+    // Supplied AND used: the decode reports it took both from the operator.
+    nova::DecodeResult used = r;
+    used.anchor_from_hint = true;
+    used.clock_from_fallback = true;
     const std::vector<nova::PngText> edited =
+        nova::decode_qa(used, "JMH", true, true);
+    // Supplied and OUTRANKED, which §7.1 makes the ordinary case for SYNC:
+    // the operator typed a ppm, the fit had a baseline, and the pixels owe
+    // it nothing. A header that called this "operator" would be claiming a
+    // provenance the picture does not have — and it would be doing it on
+    // every healthy recording, where nobody would notice.
+    const std::vector<nova::PngText> outranked =
         nova::decode_qa(r, "JMH", true, true);
 
     const auto find = [](const std::vector<nova::PngText>& t,
@@ -426,9 +437,15 @@ void test_provenance() {
     check(find(measured, "Nova:Phase") == "measured" &&
               find(measured, "Nova:Sync") == "measured",
           "an untouched decode records PHASE and SYNC as measured");
-    check(find(edited, "Nova:Phase") == "operator" &&
-              find(edited, "Nova:Sync") == "operator",
-          "an operator-corrected one records them as operator-supplied");
+    check(find(edited, "Nova:Phase") == "operator hint, refined" &&
+              find(edited, "Nova:Sync") == "operator (no fit baseline)",
+          "values the decode actually used are recorded as the operator's");
+    check(find(outranked, "Nova:Sync") == "measured (operator outranked)" &&
+              find(outranked, "Nova:Phase") == "operator (not used)",
+          "values it did not use are NOT recorded as the operator's");
+    check(find(edited, "Nova:Anchor") == "operator hint, refined" &&
+              find(measured, "Nova:Anchor") == "image lines",
+          "the anchor line names the hint when the hint is what anchored it");
     check(find(measured, "Title") == "(absent)" &&
               find(edited, "Title") == "JMH",
           "a blank label writes no Title chunk; a label writes it whole");

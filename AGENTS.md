@@ -151,7 +151,12 @@ more likely right than one that agrees only with its own reasoning.
   far apart the candidates are: 563 px on `gya-weak-white-120s`, 46 px
   on `vmw-white-sector-120s`. `live_preview` reports it and does not pin
   it; the operator's PHASE control is the answer and one click lands the
-  page to 1 px. Do not "fix" this by widening a tolerance.
+  page to 1 px. Do not "fix" this by widening a tolerance. Since session
+  24 the click also reaches the SAVED image, not just the preview
+  (`DecodeOptions::phase_anchor_hint`), and it is a seed the anchor search
+  refines rather than a position it obeys: on `vmw-phasing-image-160s`,
+  five clicks spread across 3.5% of a line settle on one anchor, 13 px
+  from the independent phasing witness.
 - IOC 288 fixture: none. Re-confirmed session 6 with a detector that works
   in the right domain and searches ±1.5% around 675 Hz: no IOC-288 start
   tone anywhere in the library. IOC 288 remains synthetic-only.

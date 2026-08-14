@@ -640,6 +640,15 @@ Pending:
   runnable on a machine with no audio device, and what stops inspecting
   Nova from switching on somebody's microphone. Still grey, and honestly
   so: `Auto`, which means re-rendering a decoded picture, needs §7.1.
+- **The operator's two corrections reach the batch decode [built session
+  24]** — `DecodeOptions::phase_anchor_hint` / `clock_ppm_fallback`
+  [docs/05 §7.1], the only change M4 asks of `core/`, plus the two
+  provenance flags a truthful QA header needs (`DecodeResult::
+  anchor_from_hint` / `clock_from_fallback`). `nova-decode` gains
+  `--phase` / `--sync`, which is how the asymmetry can be seen by hand:
+  the same recording, both ways. Screamers `override_phase_seed` and
+  `override_sync_fallback`; ten mutations run against them. Suite count
+  34 (+2 GUI).
 - **`nova-preview` [built session 22]** — the CLI that drives the real
   session machine over a recording and writes the PREVIEW, so the
   provisional picture can be looked at by eye (`--force IOC LPM` for
@@ -660,16 +669,26 @@ one feature with several parts, plus one verification no test can do.
    bar, the progress bar, the status line. The BlackHole 2ch virtual
    device on this machine is the quickest route — route a recording into
    it and select it as Nova's input.
-2. **`DecodeOptions::phase_anchor_hint` and `clock_ppm_fallback`**
-   [docs/05 §7.1], with §9 screamers 5 and 6. They board at
-   `LiveEngine`'s decode callback. The asymmetry is decided and already
-   pinned one stage earlier in `StreamPreview`: PHASE **seeds** the
-   anchor search, SYNC is only a **fallback** where the batch fit has no
-   baseline. Writing SYNC as a plain override is the quiet bug, and
-   `override_sync_fallback` is the screamer that exists to catch it.
-3. **The second retained snapshot** [docs/05 §3]. Nothing to retain one
-   *for* until item 2 exists; with it, the displayed image keeps a raw
-   stream behind it and the correction controls stop being grey.
+2. ~~**`DecodeOptions::phase_anchor_hint` and `clock_ppm_fallback`**~~
+   **Done (session 24)** [docs/05 §7.1], with §9 screamers 5 and 6 built
+   as `override_phase_seed` / `override_sync_fallback`. Both fields are
+   in `DecodeOptions`, `LiveSession` hands them to the re-decode of the
+   transmission the operator corrected, and the asymmetry holds: PHASE
+   seeds the anchor search and is refined off it, SYNC is used only
+   where the period fit had no baseline. Three things the build found
+   that the design did not have — the fallback is gated on the fit's own
+   emptiness rather than on §7.1's three separate proxies for it; the
+   hint had to be defended in `stage_track` as well, where the
+   re-acquisition sweep was quietly walking the picture back onto the
+   candidate the operator overruled; and it had to outrank the phasing
+   anchor, without which the field was inert on exactly the white-only
+   recordings that need it. `DecodeResult` gained two provenance flags
+   (`anchor_from_hint`, `clock_from_fallback`) so the PNG's QA header
+   stops recording a typed-but-outranked SYNC as the operator's.
+3. **The second retained snapshot** [docs/05 §3]. Now unblocked: item 2
+   exists, so there is something to retain a snapshot *for* — the
+   displayed image keeps a raw stream behind it and the correction
+   controls stop being grey.
 4. **The post-decode edit lifecycle** [docs/05 §8.5 items 2–4]: Apply
    re-renders AND overwrites the same file (one transmission, one file);
    Auto restores the measured values and re-renders; an edit begins at

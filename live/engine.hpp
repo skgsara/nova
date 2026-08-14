@@ -160,7 +160,10 @@ std::string image_filename(const std::string& utc_stamp,
 // Furunos printing `Phase OK` / `Phase NG` on every chart are the
 // precedent: the header tells the truth about how the picture was
 // obtained. `phase_operator` / `sync_operator` record §8.5 item 3's
-// requirement that a re-render says the values were the operator's.
+// requirement that a re-render says the values were the operator's — they
+// say the operator SUPPLIED one; whether the decode used it is the
+// result's own `anchor_from_hint` / `clock_from_fallback`, and under §7.1
+// those two answers routinely differ for SYNC.
 std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
                                bool phase_operator, bool sync_operator);
 

@@ -101,14 +101,30 @@ std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
     t.push_back(PngText{"Nova:PlacementRMS", fmt("%.2f px", r.place_rms_px)});
     t.push_back(PngText{"Nova:Seams", fmti(r.seams)});
     t.push_back(PngText{"Nova:Phasing", r.phasing_found ? "found" : "none"});
-    t.push_back(PngText{"Nova:Anchor", r.anchor_from_phasing
-                                    ? "phasing interval"
-                                    : (r.per_line_sync ? "image lines"
-                                                       : "unanchored")});
+    t.push_back(PngText{"Nova:Anchor", r.anchor_from_hint
+                                    ? "operator hint, refined"
+                                    : (r.anchor_from_phasing
+                                           ? "phasing interval"
+                                           : (r.per_line_sync ? "image lines"
+                                                              : "unanchored"))});
     // §8.5 item 3: a re-render must say the values were the OPERATOR's, or
-    // the file claims a provenance its pixels no longer have.
-    t.push_back(PngText{"Nova:Phase", phase_operator ? "operator" : "measured"});
-    t.push_back(PngText{"Nova:Sync", sync_operator ? "operator" : "measured"});
+    // the file claims a provenance its pixels no longer have. Which cuts
+    // both ways, and §7.1 is why: the operator SUPPLYING a value is not the
+    // same as the decode USING it, and for SYNC the two usually differ —
+    // the fit outranks a typed ppm wherever it has a baseline. So the
+    // supplied flags decide whether there was an operator in the loop at
+    // all, and the result's own provenance decides what the pixels owe to
+    // them.
+    t.push_back(PngText{
+        "Nova:Phase", !phase_operator ? "measured"
+                                      : (r.anchor_from_hint
+                                             ? "operator hint, refined"
+                                             : "operator (not used)")});
+    t.push_back(PngText{
+        "Nova:Sync", !sync_operator ? "measured"
+                                    : (r.clock_from_fallback
+                                           ? "operator (no fit baseline)"
+                                           : "measured (operator outranked)")});
     t.push_back(PngText{"Nova:Standards",
                         "WMO-No. 386 Vol. I Part III 5; ISO 9876:2015 4.2"});
     return t;
