@@ -758,8 +758,19 @@ one feature with several parts, plus one verification no test can do.
    remains open is only WHICH hop steps (SDR, network, WebAudio), and
    that is no longer Nova's question. **(c) is built** (session 26): the
    Quality field now reads e.g. "2106/2114, −86 ppm, 1 seams" — zero is
-   said too, since zero is what clears the capture chain. **(b) is still
-   Sara's**, and HLL 2147Z is the real audio to judge it against.
+   said too, since zero is what clears the capture chain. **(b) took a
+   wrong turn and came back** (session 26): "hold the gap" (paint the
+   hole mid-grey) was built, and Sara rejected it on sight — the nicks
+   landed in the black porch, and the dead-zone raggedness they were
+   meant to explain was untouched. The re-investigation then found the
+   raggedness is not dropped samples drawn honestly but **false per-line
+   sync locks**: the pulse template's white window is polluted when dark
+   content follows the gap closely (or fading dirties the gap), a
+   position ~60 samples late out-scores the true one (0.72 vs 0.44 on
+   HLL line 342, measured), the change-point detector blesses the hop as
+   a seam, and the strip jogs. The audio's real drops exist (HLL lines
+   1189–1243 are a true mute) but are not what the eye trips on. Fix
+   direction is Sara's call — see SESSION-LOG 2026-08-14 (cont).
 
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the

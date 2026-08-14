@@ -7,6 +7,66 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 26 (cont): the grey hold is rejected, and the ragged edges are FALSE LOCKS, not seams
+
+Agent: Kimi. No code survives from this half-session: the seam-hold
+change (`kHoleGrey` fill in `stage_assembly`, `roundtrip [16]`, the
+docs/01 §5 item-4 amendment and ROADMAP (b) note) was **reverted in full
+by Sara's call** after she looked at the before/after: "we shouldn't
+fill grey there — the dead zone is NOT a solid black strip from top to
+bottom." The hole-nicks were landing in the black porch (HLL columns
+1–44 and 1792–1809), painting grey into the one place that is supposed
+to be black, and the strip's raggedness — the thing her eye actually
+objects to — was untouched, because it was never caused by the
+within-line echo.
+
+**The re-investigation she ordered found the real mechanism.** The seam
+debug log on HLL 2147Z (`NOVA_DEBUG_SEAMS/FULL`) shows the "seams" are
+isolated +50…+90 sample hops that RETURN to the family level 1–3 lines
+later (l=342 +59.6, l=344 +53.4, l=348 +56.7, l=353 +63.6, l=356 +86.8,
+and ~20 more), always with a DIPPED lock score (0.62–0.71 against the
+family's 0.88–0.91). Reading the audio directly (fm_demod waveform and
+black-run positions, no decoder machinery in between): the dead-sector
+runs march within ±5 samples of the line period straight through the
+"seam" at line 342 — **the stream does not move; the lock is false.**
+The template (`fax_pulse_score`: mean of the 90 samples after minus the
+90 before [kFaxPulseFrac 0.0225]) scores the true position DOWN when
+dark picture content sits close after the white gap — on line 342 the
+true position reads 0.44 and a position +60 later, whose white window
+clears the dip, reads 0.72, so `fax_best_sync` locks there. The
+change-point detector then blesses the hop as a seam ("4 lines each side
+vouch" — but HLL's hops come in pairs, and two bad lines in the
+four-line window beat the median), the assembly follows it, and the
+dead-zone strip jogs. That is the raggedness in both HLL catches: not
+dropped samples being drawn honestly, but the tracker re-anchoring rows
+off their physical dead sector on a faded/dirty-gap signal. The REAL
+dropout on this recording is separately visible at lines 1189–1243
+(sstr 0.00–0.4, residuals to ±1600 samples) — a genuine mute region,
+handled by coasting, not by hops.
+
+**Consequence for item 8's metric, said plainly:** `res.seams` counts
+false locks along with real sample drops, so "the seam count convicts
+the audio path" is weaker than session 26's first entry claimed. The
+audible HLL drops are real (the mute region proves the path drops), but
+the ±20–40 px raggedness is largely tracker error that a perfect audio
+path would still produce on a faded HLL. The Quality-field seam count
+(8(c), built earlier today) stays, but it reports "the decoder followed
+N moves", not "the audio dropped N times".
+
+**Next step: Sara picks the fix direction for the false locks.** The
+candidates, in increasing blast radius: (1) seam ADMISSION — a level
+move that returns within a couple of lines is a lock error, not a stream
+event (real drops persist; warp/JSC never return), so don't open a seam
+for it, let the row coast; (2) template robustness — the white window
+of `fax_pulse_score` polluted by a dark dip is what creates the false
+peak at all (score on the gap only, or a robust mean), which recalibrates
+every locked-position threshold in the library; (3) trust weighting —
+lines locking well below the family score (0.6x vs 0.9) are evidence of
+a contested line, not of a moved one. (1) is the smallest change that
+straightens the strip; (2) is the true fix and the expensive one.
+
+---
+
 ## 2026-08-14 — Session 26: the operator's four findings, and the hop is convicted
 
 Agent: Kimi. Code changed: `live/session.cpp` (`start_capture` re-arms
