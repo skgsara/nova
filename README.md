@@ -158,8 +158,20 @@ the measurement wins wherever it has a baseline, and the operator's value
 is used only where it has none — a white-only station, a forced start,
 too few locked lines. On a healthy recording the typed SYNC is therefore
 measured away from, and the file's QA header says so rather than
-recording it as the operator's. What is left is clicking PHASE on the
-image rather than typing it, and the post-decode re-render.
+recording it as the operator's.
+
+Since session 27 the same two corrections reach a chart that has already
+been **saved**. Every completed transmission keeps its raw demodulated
+stream — the one the picture was decoded from — for exactly as long as it
+is the picture on screen, so Apply re-renders from the signal rather than
+from the pixels, and writes the result back over the same file: one
+transmission, one file, and no Save button, because a chart corrected and
+then closed with the good version only in memory is the failure the whole
+lifecycle was shaped to remove. Auto puts the automatic decode back byte
+for byte, which is only possible because the decode's own settings were
+kept beside the stream. A correction that cannot be made says why rather
+than being a grey control with no explanation. What is left is clicking
+PHASE on the image rather than typing it.
 
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen
