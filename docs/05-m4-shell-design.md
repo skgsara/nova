@@ -1293,6 +1293,64 @@ have, and the Furunos printing `Phase OK` / `Phase NG` on every chart are
 the precedent for the header telling the truth about how the picture was
 obtained [docs/04 Finding 4 additions].
 
+**[BUILT session 27 — items 2, 3 and 4 together, because they are one
+mechanism** (`LiveEngine::redecode` / `Correction`, `correction_for` in
+the shell, `live_engine`'s `test_rerender` and `gui_shell`'s truth
+table). Apply re-renders the picture on the pane from the raw stream
+retained behind it [§3] and overwrites the file it was saved to; three
+Applies leave one PNG in the folder, and the bytes change each time.
+There is no Save button. Auto restores the automatic decode **byte for
+byte** — the same file the transmission first wrote — which is only
+possible because §3 retained the options as well as the stream.
+
+Four things the build settled that the six answers above did not.
+
+- **Auto is not a third mode: it is the empty correction.** "As
+  measured" is the ABSENCE of the two values, which §7.1's own sentinels
+  already say (−1 is "no hint" because column 0 is a legal anchor; NaN is
+  "no fallback" because 0 ppm is a legal clock). So one entry point takes
+  a `Correction` and Auto sends `{}`. This is the same "auto as a value"
+  idiom `lpm = 0` and `ioc = 0` established, applied one level up.
+- **This is the one decode `LiveSession` does not own** [DECIDED
+  2026-08-14, Sara, session 27]. Every other decode is a state change the
+  machine made; a re-render is the operator asking for the same
+  transmission again, and the machine stays in SAVED throughout —
+  `batch_done` from SAVED was already a no-op, so the state cannot be
+  corrupted by it. It shares the one-slot batch inbox, thread 3, and the
+  collect-save-post tail with the automatic path. The alternative, a
+  re-decode state on the session, was weighed and rejected as more
+  surface for a decode that changes no state. **Consequence, recorded
+  because it is the cost:** §2's "the session owns every decode" now has
+  one exception, and the shell can no longer read "is anything decoding"
+  off the state — `LiveEngine::redecoding()` is the other half of that
+  question, and the progress bar and the transport both consult it.
+- **The busy flag is lowered when the FILE is written, not when the
+  decode finishes** — and the first version got that wrong, which the
+  screamer caught intermittently before it was made to spin rather than
+  sleep. Lowering it early re-arms Apply while the PNG is still being
+  written and lets a second Apply in on top of it. It is §8.5 item 1's
+  own lesson a second time: the operator-visible signal comes after the
+  file, never before it.
+- **The edit's other end needed a stand-in.** Item 4 says an edit ends at
+  Apply, at Auto, "or when the operator switches to the live view" — and
+  there is no live view to switch to until §8.2's background buffer
+  (ROADMAP item 6). The built rule is the honest equivalent: the edit
+  ends when the pane stops showing the chart being corrected, at which
+  point the boxes go back to blank [item 6 below: measured-or-blank, no
+  memory between transmissions]. When item 6 lands, that sentence becomes
+  the operator's own action rather than a consequence of one.
+
+**What the buttons do when there is nothing to do: nothing, visibly.**
+`correction_for` is a pure function of four booleans — live surface,
+re-render possible, edit dirty, correction applied — so the rule is
+checkable without a window, and `gui_shell` checks all sixteen
+combinations against the rules rather than against a copy of the table.
+Post-decode with nothing typed and nothing applied, both buttons are
+grey: the picture already IS the measured render, so Apply would rewrite
+the same file and Auto would undo nothing. An active button that does
+nothing is the failure session 26 found on the air, and this surface has
+three chances to reintroduce it.]**
+
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
 PHASE or SYNC, or the first click on the image, and **ends** at Apply, at

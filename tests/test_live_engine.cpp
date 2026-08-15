@@ -683,6 +683,202 @@ void test_retention(const char* wav_path, const char* tmp_dir) {
     }
 }
 
+// --- §8.5 items 2-4: the post-decode re-render -----------------------------
+// Apply re-renders the saved image from the raw stream retained behind it
+// [§3] and OVERWRITES the file it was saved to — one transmission, one
+// file [§8.5 item 2] — and there is no Save button, because the file on
+// disk must always match what is on the screen [item 3]. Auto restores the
+// measured values and re-renders [item 4]; it is not a third mode, because
+// "as measured" is the ABSENCE of the two values, so Auto is the empty
+// correction.
+//
+// This is the one decode `LiveSession` does not own [Sara, session 27]: the
+// machine stays in SAVED throughout, and the claims below are what makes
+// that safe rather than merely quiet.
+//
+//   1. the same path is written, not a second file — the folder holds one
+//      PNG after three Applies, not four;
+//   2. the pixels on disk CHANGE, so the re-render actually re-rendered,
+//      and the picture on the pane is the one on disk;
+//   3. Auto puts back exactly the automatic decode — byte for byte the
+//      image the transmission first saved, which is only possible because
+//      §3 kept the stream AND the options;
+//   4. the PNG says the values were the operator's [§8.5 item 3], and
+//      stops saying it after Auto — a file whose metadata claims a
+//      provenance its pixels no longer have is the failure that rule
+//      exists to prevent;
+//   5. the session state does not move. SAVED before, SAVED after.
+void test_rerender(const char* wav_path, const char* tmp_dir) {
+    std::printf("the post-decode re-render [docs/05 §8.5 items 2-4]\n");
+    nova::Wav w = nova::read_wav(wav_path);
+    const std::vector<float> audio =
+        nova::resample(w.samples, w.sample_rate, kInternalRate);
+
+    const std::string folder = std::string(tmp_dir) + "/rerender";
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    std::filesystem::create_directories(folder, ec);
+
+    nova::EngineOptions opt;
+    opt.image_folder = folder;
+    // A CHANGING stamp, so a second file would be a different name and
+    // therefore visible as a second file. With a fixed stamp an accidental
+    // "save under a new name" would silently overwrite and this test would
+    // pass while §8.5 item 2 was broken.
+    auto stamp_n = std::make_shared<int>(0);
+    opt.utc_now = [stamp_n] {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "20260814T0000%02dZ", ++*stamp_n);
+        return std::string(buf);
+    };
+    opt.poll_ms = 1;
+    nova::LiveEngine eng(kInternalRate, opt);
+    eng.run();
+    eng.start_capture();
+    eng.force_start(576, 120.0);
+
+    nova::SessionState state = nova::SessionState::kIdle;
+    std::string saved_path;
+    const auto pump = [&] {
+        for (const nova::EngineMessage& m : eng.drain()) {
+            if (m.kind == nova::EngineMsg::kStateChanged) state = m.state;
+            if (m.kind == nova::EngineMsg::kSaved) saved_path = m.path;
+        }
+    };
+    for (std::size_t at = 0; at < audio.size();) {
+        const std::size_t n = std::min<std::size_t>(4096, audio.size() - at);
+        const std::size_t took = eng.push_audio(audio.data() + at, n);
+        at += took;
+        pump();
+        if (took < n) std::this_thread::sleep_for(
+            std::chrono::milliseconds(1));
+    }
+    // End the transmission and let the automatic save happen, WITHOUT
+    // shutting the engine down: a re-render needs the engine alive, which
+    // is the whole point of it being an operator action.
+    eng.stop_capture();
+    for (int i = 0; i < 6000 && state != nova::SessionState::kSaved; i++) {
+        pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    check(state == nova::SessionState::kSaved, "the transmission saved");
+    check(!saved_path.empty(), "...to a named file");
+    if (state != nova::SessionState::kSaved || saved_path.empty()) {
+        eng.shutdown();
+        return;
+    }
+
+    const auto read_file = [](const std::string& p) {
+        std::string out;
+        std::FILE* f = std::fopen(p.c_str(), "rb");
+        if (!f) return out;
+        char buf[65536];
+        std::size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+        std::fclose(f);
+        return out;
+    };
+    const auto count_pngs = [&] {
+        std::size_t n = 0;
+        for (const auto& e : std::filesystem::directory_iterator(folder))
+            if (e.path().extension() == ".png") n++;
+        return n;
+    };
+    // SPINS rather than sleeps, deliberately. `redecoding()` is what greys
+    // Apply and holds the transport, and the claim is that it goes false
+    // only once the FILE has been written [§8.5 items 1-2 share this rule].
+    // Sleeping between polls hides a violation by arriving late; spinning
+    // reads the file as soon as the flag allows it, which is exactly what
+    // an operator's second click would do. It caught the flag being lowered
+    // before the save, intermittently — see the session log.
+    const auto wait_idle = [&] {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::seconds(60);
+        while (eng.redecoding() &&
+               std::chrono::steady_clock::now() < deadline)
+            pump();
+        pump();
+    };
+
+    const std::string automatic = read_file(saved_path);
+    check(!automatic.empty() && count_pngs() == 1,
+          "one file on disk after the automatic save");
+
+    // --- Apply, three times, with a PHASE that moves the picture ---------
+    const std::string before_state = nova::session_state_name(state);
+    std::string last = automatic;
+    std::size_t moved = 0;
+    for (int i = 1; i <= 3; i++) {
+        nova::Correction c;
+        c.phase_set = true;
+        c.phase_frac = 0.10 * i;   // three different anchors
+        eng.redecode(c);
+        wait_idle();
+        const std::string now = read_file(saved_path);
+        if (now != last) moved++;
+        last = now;
+    }
+    checkf(count_pngs() == 1,
+           "three Applies wrote the SAME file, not four files (%zu PNGs in "
+           "the folder)", count_pngs());
+    checkf(moved > 0,
+           "...and the bytes on disk changed, so a re-render re-rendered "
+           "(%zu of 3 Applies moved the file)", moved);
+    check(read_file(saved_path) != automatic,
+          "...the file is no longer the automatic version");
+
+    // The pane shows what is on disk [§8.5 item 3: the file on disk always
+    // matches what is on the screen].
+    {
+        nova::Image on_pane;
+        const bool have = eng.copy_image(&on_pane);
+        const nova::RetainedVideo v = eng.retained_video();
+        nova::Image again;
+        bool threw = false;
+        try {
+            nova::DecodeOptions d = v.decoded_options;
+            d.hooks = nova::DecodeHooks{};
+            again = nova::decode_fax(*v.decoded, kInternalRate, d).img;
+        } catch (const nova::DecodeError&) {
+            threw = true;
+        }
+        std::string why;
+        checkf(have && !threw && same_image(again, on_pane, &why),
+               "the picture on the pane is the corrected one, and the "
+               "retained options now describe IT (%s)",
+               why.empty() ? "identical" : why.c_str());
+    }
+
+    // The metadata says the operator supplied PHASE [§8.5 item 3].
+    const std::string corrected = read_file(saved_path);
+    check(corrected.find("Nova:Phase") != std::string::npos &&
+              corrected.find("measured") != std::string::npos,
+          "the PNG carries the Phase provenance chunk either way");
+    const std::size_t at_phase = corrected.find("Nova:Phase");
+    check(at_phase != std::string::npos &&
+              corrected.compare(at_phase, 40, "Nova:Phase") &&
+              corrected.find("operator", at_phase) != std::string::npos &&
+              corrected.find("operator", at_phase) < at_phase + 40,
+          "...and after Apply it says the value was the OPERATOR's");
+
+    // --- Auto: back to the automatic decode, byte for byte ---------------
+    eng.redecode(nova::Correction{});
+    wait_idle();
+    const std::string restored = read_file(saved_path);
+    checkf(restored == automatic,
+           "Auto restored the automatic decode byte for byte (%zu bytes vs "
+           "%zu)", restored.size(), automatic.size());
+    checkf(count_pngs() == 1,
+           "...still one file (%zu PNGs)", count_pngs());
+
+    // --- and the machine never moved -------------------------------------
+    checkf(state == nova::SessionState::kSaved,
+           "the session stayed in SAVED throughout — a re-render is the "
+           "operator's decode, not the machine's (was %s, now %s)",
+           before_state.c_str(), nova::session_state_name(state));
+    eng.shutdown();
+}
+
 // --- the operator provenance in the metadata -------------------------------
 void test_provenance() {
     std::printf("decode QA provenance [docs/05 §8.5 item 3]\n");
@@ -829,6 +1025,10 @@ int main(int argc, char** argv) {
     // The tone-driven fixture, because §3's two roles only diverge when a
     // transmission STARTS on its own while another is on the pane.
     test_retention(argv[2], tmp);
+    // The short forced-start fixture: the re-render claims are about the
+    // file and the metadata, not about the picture, so the cheapest
+    // recording that decodes is the right one.
+    test_rerender(argv[argc - 1], tmp);
     test_provenance();
     test_filenames();
     test_overrun_counted(argv[argc - 1]);

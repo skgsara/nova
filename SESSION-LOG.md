@@ -7,6 +7,103 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 27 (cont 2): the post-decode edit lifecycle, and
+## a "done" flag that fired before the file was on disk
+
+Agent: Claude. Code changed: `live/engine.hpp` / `live/engine.cpp`
+(`Correction`, `LiveEngine::redecode` / `redecoding()`,
+`start_redecode`, `save_image(r, overwrite)`, `saved_path_`),
+`gui/nova-gui.cpp` (`correction_for` as a pure function; Apply branching
+by surface; `cb_auto`; `cb_edit` and the dirty rule; the transport and
+progress bar consulting `redecoding()`; a `--correction` truth-table
+mode), `tests/test_live_engine.cpp` (`test_rerender`, 12 checks),
+`tests/gui_shell.cmake` (all sixteen combinations of the correction
+surface, checked as rules). Files changed:
+`docs/05-m4-shell-design.md` (§8.5 built-note for items 2-4),
+`ROADMAP.md` (item 4 done), `AGENTS.md`, `SESSION-LOG.md`. Test count
+unchanged at 37; suite 239 s → 240 s.
+
+**Task as accepted:** ROADMAP M4 item 4, with the shape question from the
+previous entry put to Sara first. **She chose the `LiveEngine` entry
+point** over a new `LiveSession` state, so a re-render goes through the
+same one-slot batch inbox, the same thread 3 and the same
+collect-save-post tail, and **this is the one decode the session does not
+own** — it stays in SAVED throughout, and `batch_done` from SAVED was
+already a no-op.
+
+**What it does.** Apply re-renders the picture on the pane from the
+stream retained by item 3 and overwrites the file it was saved to. Three
+Applies leave ONE PNG in the folder — checked with a CHANGING timestamp,
+so an accidental save-under-a-new-name would show up as a second file
+rather than silently overwriting — and the bytes change each time, so a
+re-render really re-rendered. Auto restores the automatic decode **byte
+for byte**: the same file the transmission first wrote, which is only
+possible because item 3 kept the options as well as the stream. The PNG
+says the values were the operator's, and stops saying it after Auto.
+
+**The bug the screamer found, and it is the same one twice.** The busy
+flag that greys Apply and holds the transport was lowered when the
+DECODE finished rather than when the PNG was WRITTEN — so Apply re-arms
+while the file is still being written, and a second Apply can land on top
+of it, which is the "one decode at a time" rule broken in the place it is
+easiest not to notice. That is session 23's write-then-SAVED lesson
+again, inverted, and it is now registered in `AGENTS.md` as a pattern
+rather than an incident: whenever a flag says "done", find the last side
+effect it is promising and put it after that.
+
+**It also showed why a polling test must SPIN.** The check caught this
+only intermittently at first — the poll slept 2 ms between looks and kept
+arriving after the window it was meant to observe. Spinning instead reads
+the file the instant the flag allows it, which is exactly what an
+operator's second click does. Verified in both directions after the
+change: 12/12 on three consecutive runs with the fix, and the FAIL
+reproduced 3-for-3 with the early lowering put back.
+
+**Three smaller things the build settled**, all written into docs/05
+§8.5. **Auto is not a third mode: it is the empty correction** — "as
+measured" is the ABSENCE of the two values, which §7.1's own sentinels
+already say, so one entry point takes a `Correction` and Auto sends `{}`.
+**The edit's "switch to the live view" end needed a stand-in**, because
+there is no live view to switch to until §8.2's background buffer (item
+6): today the edit ends when the pane stops showing the chart being
+corrected, and the boxes go back to blank. And **the shell can no longer
+read "is anything decoding" off the session state** — that is the price
+of the shape Sara chose, and both the progress bar and the transport now
+consult `redecoding()` as well.
+
+**No active button that does nothing.** This surface had three chances to
+reintroduce session 26's finding 2, so the rule is a pure function of
+four booleans (`correction_for`) and `gui_shell` checks all sixteen
+combinations against the RULES rather than against a copy of the table —
+a copied table would agree with the implementation whatever it said. With
+nothing typed and nothing applied, both buttons are grey: the picture
+already IS the measured render.
+
+**Contradictions found:** `gui_shell`'s "the post-decode pair is grey in
+every state, because item 4 is not built" is now false and is rewritten —
+an inspection run has no engine, which is why they are still grey there.
+
+**Validation.** 37/37, full suite. The re-render screamer verified
+against a deliberately reintroduced defect.
+
+**Next step: ROADMAP M4 item 5 or 6, Sara's pick** — items 5, 6 and 7 are
+independent. Item 5 is click-to-set-PHASE on the image [§8.3 item 1]:
+PHASE is currently typed as a column, the surveyed affordance is clicking
+the dead sector, and the arithmetic already exists and is pinned
+(`live/ruler.hpp`, `ruler_mapping`), so it is an `FL_PUSH` handler
+calling functions that exist. **It is also the natural companion to what
+just landed** — the whole re-render lifecycle is driven by a value the
+operator currently has to read off a ruler and type. Item 6 is the
+transmission arriving mid-edit [§8.2]: the background buffer and the
+compact receiving indicator, which is what makes the retained stream
+REACHABLE while the next transmission draws (see cont's finding) and what
+turns item 4's stand-in edit-end into the operator's own action. Item 7
+is m4a input via runtime ffmpeg. Unrelated and registered: whether Zoom
+should keep the vertical ROW rather than the pixel offset (this session's
+first entry), and template white-window robustness (session 26).
+
+---
+
 ## 2026-08-14 — Session 27 (cont): the second retained snapshot, and
 ## retention turned out not to be the same question as reachability
 

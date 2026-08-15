@@ -719,20 +719,34 @@ one feature with several parts, plus one verification no test can do.
    why they cannot act, in a wrapped line under the Apply/Auto pair
    (`gui_shell` pins that it is never blank, and that it has room to be
    read).
-4. **The post-decode edit lifecycle** [docs/05 §8.5 items 2–4]. Unblocked
-   by item 3 as of session 27: the stream and the options are both
-   retained, so a re-render has everything it needs. One shape question
-   to settle FIRST, and not in code: an operator Apply after SAVED starts
-   a decode the session machine did not ask for, and today `LiveSession`
-   owns every decode. Either `LiveEngine` grows a re-decode entry point
-   through the same one-slot batch inbox (smaller, but the session stops
-   owning every decode), or `LiveSession` grows a state for it (truer to
-   §4, more surface).
-   The lifecycle itself: Apply
-   re-renders AND overwrites the same file (one transmission, one file);
-   Auto restores the measured values and re-renders; an edit begins at
-   the first dirty control and ends at Apply, at Auto, or at a switch to
-   the live view. This is what makes `Auto` stop being grey.
+4. ~~**The post-decode edit lifecycle**~~ **Done (session 27)** [docs/05
+   §8.5 items 2–4]. Apply re-renders the picture on the pane from the
+   stream retained by item 3 and OVERWRITES the file it was saved to —
+   three Applies leave one PNG in the folder and the bytes change each
+   time; there is no Save button. Auto restores the automatic decode
+   **byte for byte**, which is only possible because item 3 retained the
+   options as well as the stream. The PNG says the values were the
+   operator's, and stops saying it after Auto.
+   **The shape question was settled by Sara: a `LiveEngine` entry point**
+   (`redecode(Correction)`) through the same one-slot batch inbox, not a
+   new `LiveSession` state. So this is the one decode the session does
+   not own — it stays in SAVED throughout, and `batch_done` from SAVED
+   was already a no-op. The cost, recorded: the shell can no longer read
+   "is anything decoding" off the state, so `LiveEngine::redecoding()` is
+   the other half of that question and both the progress bar and the
+   transport consult it.
+   Three findings [written into docs/05 §8.5]: **Auto is not a third
+   mode, it is the empty correction** (§7.1's sentinels already say "as
+   measured" is the absence of a value); **the busy flag must be lowered
+   when the FILE is written, not when the decode finishes** — the first
+   version lowered it early, which re-arms Apply mid-write, and the
+   screamer caught it only intermittently until it was made to spin
+   rather than sleep; and **the edit's "switch to the live view" end
+   needed a stand-in** until item 6 gives the operator a second picture
+   to switch to — today the edit ends when the pane stops showing the
+   chart being corrected. `correction_for` is a pure function of four
+   booleans and `gui_shell` checks all sixteen combinations against the
+   rules, so "an active button that does nothing" cannot come back here.
 5. **Click-to-set-PHASE on the image** [docs/05 §8.3 item 1, docs/04's
    ruler/coordinate pattern]. PHASE is currently *typed* as an image
    column; the surveyed affordance is clicking the dead sector. The

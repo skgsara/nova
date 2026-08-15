@@ -279,16 +279,18 @@ endforeach()
 # --- the correction controls are grey, and they SAY WHY [§3] ---------------
 # §3: "The PHASE/SYNC controls must then be visibly disabled with the
 # reason shown — not silently inert. Manual adjustment is not offered and
-# then found not to work." Session 27 retains the raw stream behind the
-# displayed image, so there is now something for a correction to act on;
-# the lifecycle that spends it is M4 item 4, so Apply and Auto stay grey
-# after SAVED ON PURPOSE — an active button that does nothing is the one
-# failure this shell must not have (session 26, finding 2). What is
-# checked here is that the greying is explained rather than mute.
+# then found not to work."
+#
+# An INSPECTION run has no engine behind it, so nothing has been decoded
+# and no correction is possible in any state — which is the point here:
+# whatever the state says, the controls are grey and they SAY WHY. The
+# rule that decides them when there IS something behind them is the
+# truth table below, and the lifecycle they drive is `live_engine`'s
+# `test_rerender`.
 foreach(st "idle" "ready" "drawing" "decoding" "saved")
   run_metrics(out --state ${st} --ioc 576 --rate 120)
-  # The post-decode pair is grey in every state, because item 4 is not
-  # built. When it is, this list is what says so out loud.
+  # Auto needs a decoded picture to restore, and an inspection run has
+  # none in any state.
   expect("post-decode ${st}" "${out}" auto_active "0")
   # ...and the reason is never blank. An inspection run has no engine
   # behind it, so it says the honest thing about itself.
@@ -300,6 +302,103 @@ foreach(st "idle" "ready" "drawing" "decoding" "saved")
   endif()
   message(STATUS "gui_shell PASS correction ${st}: grey, reason \"${why}\"")
 endforeach()
+
+# --- what the correction surface offers [§7, §8.5 item 4] ------------------
+# `--correction` prints the whole truth table of `correction_for`, four
+# booleans wide. Checked as RULES rather than transcribed row for row: a
+# copy of the table would restate the implementation and agree with it
+# whatever it said.
+execute_process(COMMAND ${NOVA_GUI} --correction
+  RESULT_VARIABLE rv OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT rv EQUAL 0)
+  message(FATAL_ERROR "nova-gui --correction exited ${rv}\n${out}\n${err}")
+endif()
+string(REPLACE "\n" ";" lines "${out}")
+set(rows 0)
+foreach(line IN LISTS lines)
+  if(NOT line MATCHES "^ +([01]) +([01]) +([01]) +([01]) \\| +([01]) +([01]) +([01])$")
+    continue()
+  endif()
+  set(live ${CMAKE_MATCH_1})
+  set(can ${CMAKE_MATCH_2})
+  set(dirty ${CMAKE_MATCH_3})
+  set(applied ${CMAKE_MATCH_4})
+  set(inputs ${CMAKE_MATCH_5})
+  set(ap ${CMAKE_MATCH_6})
+  set(au ${CMAKE_MATCH_7})
+  math(EXPR rows "${rows} + 1")
+  set(where "live=${live} can=${can} dirty=${dirty} applied=${applied}")
+
+  # 1. No button is ever active with nothing behind it. This is the rule
+  #    session 26 found broken on the air (finding 2: an active Start that
+  #    swallowed clicks), stated for this surface.
+  if(ap EQUAL 1 AND live EQUAL 0 AND can EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL correction ${where}: Apply is active with no surface "
+      "behind it")
+  endif()
+  if(au EQUAL 1 AND can EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL correction ${where}: Auto is active with no picture "
+      "to re-render")
+  endif()
+  if(inputs EQUAL 1 AND live EQUAL 0 AND can EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL correction ${where}: the boxes are editable with "
+      "nothing to correct")
+  endif()
+
+  # 2. Post-decode, nothing typed and nothing applied: both buttons grey.
+  #    The picture already IS the measured render, so Apply would rewrite
+  #    the same file and Auto would undo nothing [§8.5 items 2, 4].
+  if(live EQUAL 0 AND can EQUAL 1 AND dirty EQUAL 0 AND applied EQUAL 0)
+    if(NOT ap EQUAL 0 OR NOT au EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL correction ${where}: a button is active with "
+        "nothing to do (apply=${ap} auto=${au})")
+    endif()
+  endif()
+  # 3. An edit in progress makes both live: something to apply, something
+  #    to discard [§8.5 item 4, "an edit begins at the first dirty control"].
+  if(live EQUAL 0 AND can EQUAL 1 AND dirty EQUAL 1)
+    if(NOT ap EQUAL 1 OR NOT au EQUAL 1)
+      message(FATAL_ERROR
+        "gui_shell FAIL correction ${where}: an edit is in progress and "
+        "cannot be applied or abandoned (apply=${ap} auto=${au})")
+    endif()
+  endif()
+  # 4. A correction already applied, nothing newly typed: Auto can undo it,
+  #    Apply has nothing new to send.
+  if(live EQUAL 0 AND can EQUAL 1 AND dirty EQUAL 0 AND applied EQUAL 1)
+    if(NOT au EQUAL 1 OR NOT ap EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL correction ${where}: an applied correction must be "
+        "undoable and must not re-apply itself (apply=${ap} auto=${au})")
+    endif()
+  endif()
+  # 5. The live surface [§7]: Apply always available — the correction goes
+  #    forward from the next row whatever the boxes hold — and Auto never,
+  #    because there is no re-render to restore, only rows not yet drawn.
+  if(live EQUAL 1)
+    if(NOT ap EQUAL 1)
+      message(FATAL_ERROR
+        "gui_shell FAIL correction ${where}: the live surface must always "
+        "accept Apply")
+    endif()
+    if(can EQUAL 0 AND NOT au EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL correction ${where}: Auto has no meaning on the "
+        "live surface")
+    endif()
+  endif()
+endforeach()
+if(NOT rows EQUAL 16)
+  message(FATAL_ERROR
+    "gui_shell FAIL correction: expected all 16 combinations, parsed "
+    "${rows}:\n${out}")
+endif()
+message(STATUS
+  "gui_shell PASS correction surface: all 16 combinations obey the rules")
 
 # The reason has somewhere to be READ, not just somewhere to be stored: it
 # is a region of the panel, inside the sidebar, under the two buttons it

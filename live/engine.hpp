@@ -219,6 +219,17 @@ struct RetainedVideo {
     }
 };
 
+// The operator's two corrections as the panel holds them: each either
+// typed or blank [docs/05 §8.5 item 6 — "PHASE and SYNC reset to
+// measured-or-blank for every transmission"]. Blank means "as measured",
+// so **Auto is not a third mode: it is the empty correction.**
+struct Correction {
+    bool phase_set = false;
+    double phase_frac = 0.0;   // fraction of a line, as §7.1's seed
+    bool sync_set = false;
+    double sync_ppm = 0.0;     // line-rate trim, as §7.1's fallback
+};
+
 class LiveEngine {
 public:
     LiveEngine(int capture_rate, const EngineOptions& opt);
@@ -261,6 +272,34 @@ public:
     // snapshot of a prefix, never a torn image.
     bool copy_image(Image* out);
 
+    // --- thread 4: the post-decode correction [docs/05 §8.5 items 2-4] ------
+    // Re-render the image on the pane from the raw stream retained behind
+    // it [§3], and OVERWRITE the file it was saved to — one transmission,
+    // one file [§8.5 item 2], which is also why there is no Save button
+    // [item 3]. Apply sends the operator's values; Auto sends `{}`.
+    //
+    // **This is the one decode `LiveSession` does not own** [Sara, session
+    // 27]. Every other decode is a state change the machine made; this one
+    // is the operator asking for the same transmission again, and the
+    // machine stays in SAVED throughout — `batch_done` from SAVED is
+    // already a no-op, so the state cannot be corrupted by it. What is
+    // shared with the automatic path is everything that matters: the same
+    // one-slot batch inbox, the same thread 3, the same collect-save-post
+    // tail. The alternative — a re-decode state on the session — was
+    // weighed and rejected as more surface for a decode that changes no
+    // state [ROADMAP M4 item 4].
+    //
+    // Ignored when there is nothing to re-render (`retained_video()`
+    // reports why) or while any decode is already running: the shell is
+    // serialized, one decode at a time [§8.3 item 4].
+    void redecode(const Correction& c);
+    // True while a re-decode is running. The session is in SAVED and says
+    // so, which is the truth; this is the other truth the shell needs, so
+    // the progress bar can move and the transport can hold still.
+    bool redecoding() const {
+        return redecoding_.load(std::memory_order_acquire);
+    }
+
     // The retained raw video [§3], by role. Safe from thread 4 at any
     // time: the displayed snapshot is immutable once frozen, so this hands
     // back a shared_ptr to it rather than a copy of 38 MB, and taking that
@@ -281,12 +320,13 @@ public:
 
 private:
     enum class CmdKind { kStart, kStop, kForce, kPhase, kSync, kLabel,
-                         kFolder };
+                         kFolder, kRedecode };
     struct Cmd {
         CmdKind kind = CmdKind::kStart;
         int ioc = 0;
         double a = 0.0;
         std::string text;
+        Correction correction;
     };
 
     void thread2();
@@ -295,9 +335,10 @@ private:
     void post(EngineMessage m);
     void begin_batch(std::shared_ptr<const std::vector<float>> snap,
                      long long start, const DecodeOptions& dopt);
+    void start_redecode(const Correction& c);
     void collect_batch();
     void append_display_rows();
-    std::string save_image(const DecodeResult& r);
+    std::string save_image(const DecodeResult& r, bool overwrite);
 
     int capture_rate_;
     EngineOptions opt_;
@@ -374,6 +415,17 @@ private:
     std::string label_;
     bool phase_operator_ = false;
     bool sync_operator_ = false;
+    // The file the image on the pane was written to. A re-render
+    // OVERWRITES it — one transmission, one file [§8.5 item 2] — and Nova
+    // never renames, so a label typed after the automatic save reaches the
+    // PNG's text chunks on the next Apply and the name does not move
+    // [§8.5 item 5].
+    std::string saved_path_;
+    // Set while the decode in flight is a re-render rather than a
+    // transmission's own. Thread 2 writes it, `collect_batch` reads it to
+    // choose the filename; the atomic below is the same fact for thread 4.
+    bool batch_is_redecode_ = false;
+    std::atomic<bool> redecoding_{false};
 };
 
 }  // namespace nova

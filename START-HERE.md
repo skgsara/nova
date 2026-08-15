@@ -29,7 +29,13 @@ receiver (or a virtual cable) and press Start; Force Start needs IOC and
 Rate both explicit and is how you begin mid-transmission. Rows appear in the pane as they are
 drawn, the level meter moves, and a completed transmission is decoded and
 saved to the folder in Settings → Image folder, named by UTC timestamp.
-PHASE and SYNC go live while the preview is drawing.
+PHASE and SYNC go live while the preview is drawing — and since session 27
+they work on the SAVED chart too: type a column or a ppm, press Apply, and
+the picture is re-rendered from the raw stream kept behind it and written
+back over the same file (one transmission, one file — there is no Save
+button). Auto puts the automatic decode back, byte for byte. When a
+correction is not possible the two buttons say why instead of just being
+grey.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

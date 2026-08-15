@@ -207,6 +207,42 @@ Transport transport_for(LiveState s, bool ioc_explicit, bool rate_explicit,
 }
 
 // ---------------------------------------------------------------------------
+// What the correction surface offers [docs/05 §7, §7.1, §3, §8.5 items
+// 2-4]. A pure function for the same reason `transport_for` is one: the
+// rule can then be checked without a window, a sound card, or a decoded
+// image behind it, and the shell has exactly one place that decides it.
+//
+// The same two boxes serve two surfaces, and never both at once, because a
+// picture is either being drawn or has been decoded:
+//   - LIVE [§7]: forward-only corrections to a preview. Apply is always
+//     available, because the correction takes effect from the next row
+//     whatever the boxes hold.
+//   - POST-DECODE [§7.1, §8.5]: a re-render of a picture already on disk,
+//     from the raw stream retained behind it [§3]. Apply is available when
+//     an EDIT IS IN PROGRESS — §8.5 item 4's "an edit begins at the first
+//     dirty control" — because re-rendering the values already rendered
+//     would rewrite the same file for nothing, and Auto when there is a
+//     typed value to discard or an applied one to undo.
+//
+// The rule both halves obey, and the reason this is not just taste: **an
+// active button that does nothing is the one failure this shell must not
+// have** (session 26, finding 2, found on the air).
+struct CorrectionUi {
+    bool inputs_active;
+    bool apply_active;
+    bool auto_active;
+};
+
+CorrectionUi correction_for(bool live_surface, bool can_rerender,
+                            bool edit_dirty, bool applied) {
+    CorrectionUi c;
+    c.inputs_active = live_surface || can_rerender;
+    c.apply_active = live_surface || (can_rerender && edit_dirty);
+    c.auto_active = can_rerender && (edit_dirty || applied);
+    return c;
+}
+
+// ---------------------------------------------------------------------------
 // The preference file [docs/05 §8.4 item 1]: plain text, next to the
 // executable — visible, inspectable, movable with the program, and no
 // hidden platform store. If the directory is not writable (a system-wide
@@ -617,6 +653,20 @@ struct Shell {
     Fl_Button* autob = nullptr;
     Fl_Box* correct_why = nullptr;   // §3's "with the reason shown"
     std::string correct_reason;      // ...and the string it is showing
+
+    // §8.5 item 4: an edit is dirty controls, not a mode. It BEGINS at the
+    // first change to PHASE or SYNC and ENDS at Apply, at Auto, or when the
+    // pane stops showing the chart being corrected — which is this shell's
+    // form of "a switch to the live view" until §8.2's background buffer
+    // (ROADMAP item 6) gives the operator a second picture to switch away
+    // from. A typed-but-not-applied value is an edit in progress.
+    bool edit_dirty = false;
+    bool was_rerendering = false;   // so drain notices one start or finish
+    // What the picture on the pane was last re-rendered WITH, so Auto knows
+    // whether it has anything to undo. Empty means the picture is the
+    // measured render, which is what every transmission starts as [§8.5
+    // item 6: measured-or-blank, and no memory between transmissions].
+    nova::Correction applied;
     LevelMeter* meter = nullptr;
     Fl_Box* status_bg = nullptr;
     Fl_Box* status_state = nullptr;
@@ -955,11 +1005,15 @@ struct Shell {
         cap_phase = caption("PHASE");
         phase_input = new Fl_Int_Input(0, 0, 0, 0);
         phase_input->textsize(kFontSize);
+        phase_input->when(FL_WHEN_CHANGED);
+        phase_input->callback(cb_edit, this);
         phase_input->deactivate();
         note("phase_input", phase_input);
         cap_sync = caption("SYNC");
         sync_input = new Fl_Float_Input(0, 0, 0, 0);
         sync_input->textsize(kFontSize);
+        sync_input->when(FL_WHEN_CHANGED);
+        sync_input->callback(cb_edit, this);
         sync_input->deactivate();
         note("sync_input", sync_input);
 
@@ -970,6 +1024,7 @@ struct Shell {
         note("apply_button", apply);
         autob = new Fl_Button(0, 0, 0, 0, "Auto");
         autob->labelsize(kFontSize);
+        autob->callback(cb_auto, this);
         autob->deactivate();
         note("auto_button", autob);
 
@@ -1168,9 +1223,18 @@ struct Shell {
     void apply_state() {
         const Transport t = transport_for(state, ioc_explicit(), rate_explicit(),
                                           capture);
+        // A re-render is a decode the session did not make a state for — it
+        // stays in SAVED throughout [§8.5 items 2-4, the shape Sara chose
+        // session 27] — so the transport has to be held still by the engine's
+        // answer rather than by the state. The shell is serialized: one
+        // decode at a time [§8.3 item 4], and starting a capture on top of a
+        // running re-render is exactly the second one.
+        const bool rerendering = engine && engine->redecoding();
         start->label(t.label);
-        if (t.start_active) start->activate(); else start->deactivate();
-        if (t.force_active) force->activate(); else force->deactivate();
+        if (t.start_active && !rerendering) start->activate();
+        else start->deactivate();
+        if (t.force_active && !rerendering) force->activate();
+        else force->deactivate();
 
         // The Device menu reopens the stream, which would kill a live
         // chart, so it is insensitive from Start until the transmission
@@ -1178,7 +1242,8 @@ struct Shell {
         // [§8.3 item 9, decided session 25]. Same deactivate-never-prompt
         // idiom as Force Start.
         if (!devices.empty() &&
-            (state == LiveState::kIdle || state == LiveState::kSaved))
+            (state == LiveState::kIdle || state == LiveState::kSaved) &&
+            !rerendering)
             device->activate();
         else
             device->deactivate();
@@ -1193,38 +1258,68 @@ struct Shell {
         // next row — drawn rows are never revised — which is the whole
         // contract of the provisional renderer.
         //
-        // Correcting a picture that has already been decoded and saved is
-        // the OTHER surface, and since session 27 the raw stream it needs
-        // is retained [§3]. What is still missing is the lifecycle that
-        // spends it — Apply re-rendering and overwriting the file, Auto
-        // restoring the measured values [§8.5 items 2-4, ROADMAP M4 item
-        // 4] — so the two buttons stay grey after SAVED, deliberately: an
-        // active button that does nothing is the one failure this shell
-        // must not have (session 26, finding 2). What session 27 adds is
-        // the honest half of §3 — the control says WHY it cannot act.
+        // The two boxes serve TWO surfaces, and never both at once, because
+        // a picture is either being drawn or has been decoded:
+        //   live [§7]      — forward-only corrections to a preview; the
+        //                    correction takes effect from the next row and
+        //                    drawn rows are never revised;
+        //   post-decode    — a re-render of a picture already on disk, from
+        //   [§7.1, §8.5]     the raw stream retained behind it [§3].
         const nova::RetainedVideo retained =
             engine ? engine->retained_video() : nova::RetainedVideo{};
-        correct_reason = engine ? retained.unavailable_reason
-                                : std::string("no capture running");
-        if (retained.can_correct())
-            correct_reason = "raw stream retained; correction lands in M4 "
-                             "item 4";
-        correct_why->copy_label(correct_reason.c_str());
-
+        const bool busy = rerendering;
         const bool overrides_live = capture && state ==
                                                    LiveState::kDrawingPreview;
-        if (overrides_live) {
+        const bool can_rerender = retained.can_correct() && !busy;
+
+        // §8.5 item 4's other end: the edit ends when the pane stops showing
+        // the chart it was correcting, and the controls go back to
+        // measured-or-blank, because there is no memory between
+        // transmissions [§8.5 item 6].
+        if (!retained.can_correct() && !overrides_live &&
+            (edit_dirty || applied.phase_set || applied.sync_set)) {
+            edit_dirty = false;
+            applied = nova::Correction{};
+            phase_input->value("");
+            sync_input->value("");
+        }
+
+        // One place decides all three, and it is a pure function so the
+        // truth table is checkable without a window [see correction_for].
+        const CorrectionUi cu = correction_for(
+            overrides_live, can_rerender, edit_dirty,
+            applied.phase_set || applied.sync_set);
+        if (cu.inputs_active) {
             phase_input->activate();
             sync_input->activate();
-            apply->activate();
         } else {
             phase_input->deactivate();
             sync_input->deactivate();
-            apply->deactivate();
         }
-        // The progress bar is populated ONLY during DECODING, from the nine
-        // decode stages [docs/05 §8, §4]. Elsewhere it is empty and dead.
-        if (state == LiveState::kDecoding) progress->activate();
+        if (cu.apply_active) apply->activate(); else apply->deactivate();
+        if (cu.auto_active) autob->activate(); else autob->deactivate();
+
+        // §3: a correction that cannot be made says why. So does one that
+        // can — what Apply will DO is the thing an operator most needs
+        // told, because it overwrites a file with no prompt [§8.5 items
+        // 2-3].
+        if (!engine)
+            correct_reason = "no capture running";
+        else if (busy)
+            correct_reason = "re-rendering the saved image";
+        else if (overrides_live)
+            correct_reason = "applies from the next row drawn";
+        else if (can_rerender)
+            correct_reason = "Apply re-renders and overwrites the saved file";
+        else
+            correct_reason = retained.unavailable_reason;
+        correct_why->copy_label(correct_reason.c_str());
+
+        // The progress bar is populated ONLY during a decode, from the nine
+        // decode stages [docs/05 §8, §4] — and a re-render is a decode. The
+        // session stays in SAVED throughout one (it is the operator's
+        // decode, not the machine's), so the state alone cannot answer this.
+        if (state == LiveState::kDecoding || busy) progress->activate();
         else progress->deactivate();
 
         // The ruler is blank and disabled until the image width is known,
@@ -1363,7 +1458,12 @@ struct Shell {
             nova::Image img;
             if (engine->copy_image(&img)) show_image(img);
         }
-        if (state_changed || rows_changed) {
+        // A re-render starting or finishing changes no state and draws no
+        // rows — the session stays in SAVED throughout — so it is its own
+        // reason to re-apply the transport and the progress bar.
+        const bool rr = engine && engine->redecoding();
+        if (state_changed || rows_changed || rr != was_rerendering) {
+            was_rerendering = rr;
             apply_state();
             update_status();
         }
@@ -1550,26 +1650,82 @@ struct Shell {
         s->engine->force_start(s->ioc_value(), s->rate_value());
     }
 
-    // Apply sends the two live overrides to the renderer [§7]. It is the
-    // "touch once and wait several lines before judging" affordance: the
-    // row where each takes effect is marked, so the operator can see
-    // where their correction began rather than guessing.
+    // PHASE is typed as an image COLUMN, because that is what the ruler
+    // above the pane names [§8.3 item 1] and what the operator can read off
+    // the picture. Both surfaces want a fraction of the line.
+    bool typed_phase(double* frac) const {
+        const int cols = image_cols();
+        const char* pv = phase_input->value();
+        if (!pv || !*pv || cols <= 0) return false;
+        *frac = std::min(0.999, std::max(0.0, std::atof(pv) / cols));
+        return true;
+    }
+    bool typed_sync(double* ppm) const {
+        const char* sv = sync_input->value();
+        if (!sv || !*sv) return false;
+        *ppm = std::atof(sv);
+        return true;
+    }
+
+    // Apply serves both surfaces [§7 live, §8.5 post-decode], because they
+    // are the same two boxes and the operator does the same thing with
+    // them. Which one is live is decided by what is on the pane, not by a
+    // mode the operator has to hold in their head.
     static void cb_apply(Fl_Widget*, void* p) {
         Shell* s = static_cast<Shell*>(p);
         if (!s->engine) return;
-        const int cols = s->image_cols();
-        const char* pv = s->phase_input->value();
-        if (pv && *pv && cols > 0) {
-            const double col = std::atof(pv);
-            // PHASE is typed as an image COLUMN, because that is what the
-            // ruler above the pane names [§8.3 item 1] and what the
-            // operator can read off the picture. The renderer wants a
-            // fraction of the line.
-            const double frac = std::min(0.999, std::max(0.0, col / cols));
-            s->engine->set_phase(frac);
+        double frac = 0.0, ppm = 0.0;
+        const bool has_phase = s->typed_phase(&frac);
+        const bool has_sync = s->typed_sync(&ppm);
+
+        if (s->state == LiveState::kDrawingPreview) {
+            // The live surface: "touch once and wait several lines before
+            // judging". The row where each takes effect is marked, so the
+            // operator can see where their correction began.
+            if (has_phase) s->engine->set_phase(frac);
+            if (has_sync) s->engine->set_sync(ppm);
+            return;
         }
-        const char* sv = s->sync_input->value();
-        if (sv && *sv) s->engine->set_sync(std::atof(sv));
+        // The post-decode surface: re-render the saved image from its
+        // retained raw stream and OVERWRITE the file [§8.5 items 2-3].
+        // There is no Save button and no prompt, which is why the reason
+        // line under these buttons says what Apply does before it is
+        // pressed.
+        nova::Correction c;
+        c.phase_set = has_phase;
+        c.phase_frac = frac;
+        c.sync_set = has_sync;
+        c.sync_ppm = ppm;
+        s->engine->redecode(c);
+        s->applied = c;
+        s->edit_dirty = false;   // the edit ends at Apply [§8.5 item 4]
+        s->apply_state();
+    }
+
+    // Auto restores the measured values and re-renders [§8.5 item 4]. It is
+    // not a third mode: "as measured" is the ABSENCE of the two values, so
+    // Auto is the empty correction, and the boxes go back to blank because
+    // blank is how this shell writes "measured" [§8.5 item 6].
+    static void cb_auto(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine) return;
+        s->phase_input->value("");
+        s->sync_input->value("");
+        s->engine->redecode(nova::Correction{});
+        s->applied = nova::Correction{};
+        s->edit_dirty = false;   // ...and at Auto [§8.5 item 4]
+        s->apply_state();
+    }
+
+    // §8.5 item 4: the edit BEGINS at the first change to PHASE or SYNC.
+    // FLTK reports a changed input only if asked to, so the two boxes are
+    // set to FL_WHEN_CHANGED — without it the boundary would be "when the
+    // operator pressed Enter", which is not what the sentence says.
+    static void cb_edit(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (s->edit_dirty) return;
+        s->edit_dirty = true;
+        s->apply_state();
     }
 
     // IOC or Rate changed: the transport gating and the ruler's width both
@@ -1748,6 +1904,27 @@ int print_follow(Shell& s, int batches, int rows_per_batch) {
     return 0;
 }
 
+// --correction: the whole truth table of `correction_for`, so §8.5 item 4's
+// edit boundary and the "no active button that does nothing" rule are
+// checkable without a decoded image behind the shell. Sixteen rows, because
+// four booleans is small enough to state completely and a rule stated
+// completely cannot be half-wrong somewhere nobody looked.
+int print_correction() {
+    std::printf("# nova-gui correction surface [docs/05 §7, §8.5 item 4]\n");
+    std::printf("# %4s %11s %5s %7s | %6s %5s %4s\n", "live", "can_rerender",
+                "dirty", "applied", "inputs", "apply", "auto");
+    for (int bits = 0; bits < 16; bits++) {
+        const bool live = bits & 1, can = bits & 2, dirty = bits & 4,
+                   applied = bits & 8;
+        const CorrectionUi c = correction_for(live, can, dirty, applied);
+        std::printf("  %4d %11d %5d %7d | %6d %5d %4d\n", live ? 1 : 0,
+                    can ? 1 : 0, dirty ? 1 : 0, applied ? 1 : 0,
+                    c.inputs_active ? 1 : 0, c.apply_active ? 1 : 0,
+                    c.auto_active ? 1 : 0);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1757,6 +1934,7 @@ int main(int argc, char** argv) {
     int win_h = kWinH;
     int resize_w = 0;
     int resize_h = 0;
+    bool correction_only = false;
     int follow_batches = 0;
     int follow_rows = 0;
     LiveState state = LiveState::kIdle;
@@ -1792,6 +1970,8 @@ int main(int argc, char** argv) {
                  std::sscanf(argv[++i], "%dx%d", &resize_w, &resize_h) == 2 &&
                  resize_w >= kMinW && resize_h >= kMinH)
             ;
+        else if (!std::strcmp(argv[i], "--correction"))
+            correction_only = true;
         else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%dx%d", &follow_batches,
                              &follow_rows) == 2 &&
@@ -1819,13 +1999,17 @@ int main(int argc, char** argv) {
                      "                [--state NAME] [--zoom fit|25|50|100|200]"
                      "\n                [--ioc auto|576|288] "
                      "[--rate auto|60|90|120]\n"
-                     "                [--follow BATCHESxROWS]\n"
+                     "                [--follow BATCHESxROWS] "
+                     "[--correction]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
         return 2;
     }
     if (devices_only) return print_devices();
+    // Before the Shell is built: it is a pure function, and asking about it
+    // must not need a window any more than it needs a sound card.
+    if (correction_only) return print_correction();
 
     Shell shell;
     shell.build(win_w, win_h, argv[0]);

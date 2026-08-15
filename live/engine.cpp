@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <limits>
 #include <stdexcept>
 
 namespace nova {
@@ -210,6 +211,19 @@ void LiveEngine::set_sync(double ppm) {
     c.a = ppm;
     cmds_.push_back(std::move(c));
 }
+void LiveEngine::redecode(const Correction& c) {
+    // Raised HERE, on the operator's thread, rather than when thread 2 gets
+    // to it: the shell has to grey the transport and start the progress bar
+    // on the click, not one poll later, and a request accepted is already a
+    // re-render in progress as far as the operator is concerned. Thread 2
+    // lowers it again if it turns out there is nothing to re-render.
+    redecoding_.store(true, std::memory_order_release);
+    std::lock_guard<std::mutex> g(cmd_mu_);
+    Cmd cmd;
+    cmd.kind = CmdKind::kRedecode;
+    cmd.correction = c;
+    cmds_.push_back(std::move(cmd));
+}
 void LiveEngine::set_label(const std::string& label) {
     std::lock_guard<std::mutex> g(cmd_mu_);
     Cmd c;
@@ -333,8 +347,55 @@ void LiveEngine::run_commands() {
                 break;
             case CmdKind::kLabel: label_ = c.text; break;
             case CmdKind::kFolder: opt_.image_folder = c.text; break;
+            case CmdKind::kRedecode: start_redecode(c.correction); break;
         }
     }
+}
+
+// The operator's Apply or Auto [docs/05 §8.5 items 2-4]. Thread 2.
+void LiveEngine::start_redecode(const Correction& c) {
+    std::shared_ptr<const std::vector<float>> snap;
+    DecodeOptions base;
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        snap = displayed_snap_;
+        base = displayed_options_;
+    }
+    // Nothing to re-render, or something already decoding. Both are
+    // states the shell greys the buttons in [§3, §8.3 item 4], so
+    // reaching here is a race, not a click on a dead control — and the
+    // engine still declines rather than starting a second decode.
+    if (!snap || batch_running_.load(std::memory_order_acquire)) {
+        redecoding_.store(false, std::memory_order_release);
+        return;
+    }
+
+    // The record of what produced the picture, with ONLY the operator's
+    // two fields replaced. Everything else — the forced IOC, the hooks,
+    // the segmentation — is what it was, because a correction corrects
+    // two things and must not quietly re-decide the rest.
+    DecodeOptions d = base;
+    // "As measured" is the absence of a value, not a value: §7.1's own
+    // sentinels, which is why Auto needs no third mode. -1 is "no hint"
+    // because column 0 is a legal anchor; NaN is "no fallback" because
+    // 0 ppm is a legal clock.
+    d.phase_anchor_hint = c.phase_set ? c.phase_frac : -1.0;
+    d.clock_ppm_fallback =
+        c.sync_set ? c.sync_ppm : std::numeric_limits<double>::quiet_NaN();
+    // §8.5 item 3: a re-render's PNG says the values were the operator's.
+    // They say the operator SUPPLIED one; whether the decode USED it is
+    // the result's own anchor_from_hint / clock_from_fallback, and under
+    // §7.1 those two answers routinely differ for SYNC.
+    phase_operator_ = c.phase_set;
+    sync_operator_ = c.sync_set;
+
+    batch_is_redecode_ = true;
+    long long start = 0;
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        start = displayed_start_;
+    }
+    begin_batch(snap, start, d);
 }
 
 void LiveEngine::append_display_rows() {
@@ -431,11 +492,23 @@ void LiveEngine::begin_batch(std::shared_ptr<const std::vector<float>> snap,
     });
 }
 
-std::string LiveEngine::save_image(const DecodeResult& r) {
-    const std::string name = image_filename(opt_.utc_now(), label_);
-    std::string dir = opt_.image_folder;
-    if (!dir.empty() && dir.back() == '/') dir.pop_back();
-    const std::string path = dir.empty() ? name : dir + "/" + name;
+std::string LiveEngine::save_image(const DecodeResult& r, bool overwrite) {
+    // §8.5 item 2: a re-render overwrites the file the transmission was
+    // saved to. One transmission, one file — hunting for the right PHASE
+    // across five Applies writes the same path five times, which costs
+    // nothing, where a new file per Apply would turn one chart into five
+    // near-identical ones the operator then has to weed. Nova never
+    // renames [item 5], so a label typed after the automatic save reaches
+    // the text chunks here and the name stays where it was.
+    std::string path;
+    if (overwrite && !saved_path_.empty()) {
+        path = saved_path_;
+    } else {
+        const std::string name = image_filename(opt_.utc_now(), label_);
+        std::string dir = opt_.image_folder;
+        if (!dir.empty() && dir.back() == '/') dir.pop_back();
+        path = dir.empty() ? name : dir + "/" + name;
+    }
     write_png(path, r.img, decode_qa(r, label_, phase_operator_,
                                      sync_operator_));
     return path;
@@ -456,6 +529,25 @@ void LiveEngine::collect_batch() {
         }
     }
     if (!ready) return;
+
+    // Whose decode was that — a transmission's own, or the operator asking
+    // for the same one again [§8.5 items 2-4]?
+    //
+    // **`redecoding_` is lowered when the FILE has been written, not when
+    // the decode finished**, and the difference is not cosmetic: the flag
+    // is what greys Apply and holds the transport still, so lowering it
+    // early would re-arm the button while the PNG was still being written
+    // and let a second Apply in on top of it — the "one decode at a time"
+    // rule [§8.3 item 4] broken in the one place it is easiest not to
+    // notice. It is the same lesson as §8.5 item 1's write-then-SAVED: the
+    // operator-visible signal comes after the file, never before it.
+    const bool was_redecode = batch_is_redecode_;
+    batch_is_redecode_ = false;
+    // Lowered on every exit below, and only after the save.
+    const struct LowerWhenSaved {
+        std::atomic<bool>* flag;
+        ~LowerWhenSaved() { flag->store(false, std::memory_order_release); }
+    } lower_when_saved{&redecoding_};
 
     if (!ok) {
         // A decode that produced no image puts no image on the pane, so
@@ -482,7 +574,8 @@ void LiveEngine::collect_batch() {
     std::string save_error;
     if (!opt_.image_folder.empty()) {
         try {
-            saved_path = save_image(res);
+            saved_path = save_image(res, was_redecode);
+            saved_path_ = saved_path;
         } catch (const std::exception& e) {
             save_error = e.what();
         }

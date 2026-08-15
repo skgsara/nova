@@ -312,6 +312,17 @@ more likely right than one that agrees only with its own reasoning.
   anything can look at it; the fix was a second operator Stop and polling
   through the decode. Related: [session 23's rule that a mutation harness
   must be verified before its verdict means anything].
+- The operator-visible signal comes AFTER the file, never before it — and
+  the project has now got this wrong twice (session 23: the status line
+  read SAVED over a file not yet written; session 27: the re-render busy
+  flag was lowered when the decode finished rather than when the PNG was
+  written, which re-arms Apply mid-write and lets a second Apply in on top
+  of it). **The lesson for the next agent: whenever a flag or a message
+  says "done", find the last side effect it is promising and put it after
+  THAT.** Both were invisible until a test recorded order rather than
+  outcome, and the second one only became reliably catchable when the test
+  spun instead of sleeping — a poll that sleeps arrives after the window
+  it is meant to observe.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.
