@@ -283,6 +283,22 @@ more likely right than one that agrees only with its own reasoning.
   exists because the strip statistic is unmeasurable on this chart — the
   same coastline that causes the false locks crowds the strip — and
   because a percentile is blind to a two-row jog by design.
+- A widget toolkit's idea of its own state is not the state (session 27,
+  the bouncing scroll). `Fl_Scroll` scrolls by MOVING its child, so the
+  child's position IS the scroll offset and `yposition()` is a cached copy
+  that any child `resize()` invalidates — and `scroll_to` early-returns
+  when its arguments equal the cache, so the obvious repair line repairs
+  nothing. Session 26's follow-the-newest-row set the cached number
+  perfectly and the picture bounced between the bottom of the chart and
+  the top of it, once per row batch. **The lesson for the next agent: when
+  a check and the screen disagree about a widget, suspect the check —
+  ask the thing that is actually drawn where it is, not the object that
+  was told where to put it.** Measured on the pre-fix build,
+  `yposition()` read 632 while the picture sat at 150. `nova-gui --follow
+  BATCHESxROWS` reports the child's real offset and `gui_shell` pins it;
+  it needs no window and no draw, because the divergence is in the widget
+  positions. Same mechanism had been silently resetting the vertical
+  scroll on every zoom change since session 23.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

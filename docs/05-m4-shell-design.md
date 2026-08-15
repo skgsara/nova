@@ -984,6 +984,42 @@ is the price of a promise that cannot be misunderstood. Once the state
 leaves DRAWING the scroll is the operator's again — the save taking the
 pane does not move it.
 
+**[BUILT session 26; the picture did not actually follow until session
+27, and the reason is a property of the toolkit worth writing down.**
+Sara: *"it scrolls like, bouncing up and down instead of smoothly going
+down a bit."* **`Fl_Scroll` scrolls by MOVING its child, so the child's
+position IS the scroll offset and `yposition()` is only a cached copy of
+it.** `layout_view()` resizes the child on every row batch — the picture
+grew — and it resized it to the pane's top-left, which silently scrolled
+the chart back to the top while `Fl_Scroll` went on reporting the old
+offset. The repair line already there, `scroll_to(keep, yposition())`,
+could not repair it: `scroll_to` early-returns when its arguments equal
+the cached values. Every later `scroll_to` then moved by a delta measured
+against a number that was no longer true, landing the picture at
+`max_y − previous` — so it alternated between the bottom of the chart and
+the top of it, once per batch. Fix: resize the child AT the current
+offset, so the invariant `Fl_Scroll` re-derives on draw holds
+continuously and every actual move goes through `scroll_to`.
+
+Two things this cost, recorded because they are the general lesson:
+
+- **The follow was verified against the cached number, which is why it
+  passed review and bounced on screen.** Measured on the pre-fix build,
+  `yposition()` read 632 — exactly right — while the picture sat at 150.
+  A check that asks a toolkit where it thinks it is will agree with the
+  code that told it; the screamer added here (`--follow`, in
+  `gui_shell`) asks the CHILD where it is instead.
+- **The same desync silently reset the VERTICAL scroll on every zoom
+  change**, by the same mechanism through `cb_zoom`, and nobody had seen
+  it because vertical scrolling only became possible in session 23 and
+  the only state that scrolls far is the one the follow was overriding.
+  It is fixed by the same line. Zoom now keeps the vertical position as
+  §8.4 item 2 keeps the left edge — as a pixel offset, not as a row, so
+  the row at the top of the pane still changes with the scale. Whether
+  it should be rescaled the way `rezoomed` rescales x is **open, and
+  registered rather than built**: it is invisible during DRAWING and
+  small after SAVED.]**
+
 **4. Start becomes Stop while receiving**, one button relabelled by
 state, with Force Start insensitive during reception. What Stop *means*
 is the load-bearing half: docs/04 Finding 6 says a transmission ends in

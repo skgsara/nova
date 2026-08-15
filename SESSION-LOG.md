@@ -7,6 +7,97 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 27: the pane that bounced, and the toolkit's own
+## number was the liar
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`layout_view` resizes the
+scrolled child AT the current offset; `follow_newest_row` / `show_image`
+extracted from `drain`; `scroll_y_actual`; a `--follow BATCHESxROWS`
+inspection mode), `tests/gui_shell.cmake` (the follow screamer, two
+directions). Files changed: `docs/05-m4-shell-design.md` (§8.3 item 3
+built-note), `AGENTS.md` (the lesson registered), `SESSION-LOG.md`. Test
+count unchanged at 37 — the new checks are inside `gui_shell`, not a new
+target.
+
+**Task as accepted:** before starting ROADMAP M4 item 3, Sara sent back
+session 26's follow-the-newest-row: *"it scrolls like, bouncing up and
+down instead of smoothly going down a bit."*
+
+**The mechanism, and it is a property of FLTK, not of the follow rule.**
+`Fl_Scroll` scrolls by MOVING its child, so the child's position IS the
+scroll offset and `yposition()` is only a cached copy of it.
+`layout_view()` resizes the child on every row batch — the picture grew —
+and it resized it to the pane's top-left, which silently scrolled the
+chart back to the top while `Fl_Scroll` went on reporting the old offset.
+The repair line already sitting there, `scroll_to(keep, yposition())`,
+cannot repair it: `scroll_to` early-returns when its arguments equal the
+cached values, which by construction they do. Every later `scroll_to`
+then moved by a delta measured against a number that was no longer true,
+landing the picture at `max_y − previous` — so it alternated between the
+bottom of the chart and the top of it, once per batch. Fix: resize the
+child at the current offset, so the invariant `Fl_Scroll` re-derives on
+draw holds continuously and every actual move goes through `scroll_to`.
+
+**Measured, against real FLTK 1.4.5, before writing anything into the
+project.** A 40-line probe outside the tree reproduced the desync at the
+API level (`scroll_to(0,700)` → child at −698; `child.resize(top)` →
+child at 2 with `yposition()` still 700; the next `scroll_to` off by the
+whole difference), then ran the row-batch loop both ways: today's resize
+drifts and stalls, the fix sits at the bottom on every batch. Only then
+was the real file touched.
+
+**Why session 26 shipped it bouncing, which is the part worth keeping.**
+The follow was verified against `yposition()` — and `yposition()` is
+exactly the number the buggy code sets correctly. On the pre-fix build it
+reads 632 while the picture sits at 150. A check that asks a toolkit
+where it thinks it is will agree with the code that told it. The screamer
+added here asks the CHILD: `--follow BATCHESxROWS` drives the real
+`show_image` path with synthetic batches and prints the offset the child
+actually sits at, and `gui_shell` asserts it equals the bottom and never
+retreats. It needs no window and no draw — the divergence is in the
+widget positions — so it costs the suite nothing and runs on a machine
+with no audio device, like every other GUI check.
+
+**Instrument verified in both directions before the fix was believed**
+(the session-23 rule): the screamer FAILS on the pre-fix resize, naming
+it — *"batch 5 (750 rows) sits at 150, but the newest row is at 182"* —
+and passes after. Reverting one line is what produced that failure, not
+reasoning about it.
+
+**One thing found that Sara did not ask about.** The same desync had been
+silently resetting the VERTICAL scroll to the top on every zoom change,
+through `cb_zoom`, since vertical scrolling became possible in session
+23. Nobody had seen it because the only state that scrolls far is the one
+the follow was overriding. The same line fixes it, and zoom now keeps the
+vertical position as §8.4 item 2 keeps the left edge — as a pixel offset,
+not as a row, so the row at the top still changes with the scale.
+Rescaling it the way `rezoomed` rescales x is **registered, not built**:
+invisible during DRAWING, small after SAVED, and Sara's call.
+
+**Contradictions found:** none in the log. docs/05 §8.3 item 3's
+"[BUILT session 26]" claim was true of the code and false of the screen;
+it is amended in place with the built-note rather than by deletion.
+
+**Validation.** 37/37, full suite, with the GUI targets. Baseline 37/37
+measured at the start of the session before any edit.
+
+**Next step: ROADMAP M4 item 3** — the second retained snapshot [docs/05
+§3]: two raw streams held by ROLE (the transmission being received, and
+the image being displayed), released when the operator moves on, never
+three; and an image with no snapshot behind it shows the correction
+controls disabled WITH THE REASON ("raw stream no longer retained")
+rather than silently inert. Then item 4 (the post-decode edit lifecycle)
+on top of it in the same session if there is room — the ROADMAP asks that
+3 and 4 not be split. Sara approved this order at the top of the session,
+before the scroll fix was interposed. One shape question to settle when
+item 4 starts and NOT to smuggle into code: whether an operator re-decode
+after SAVED is a new `LiveEngine` entry point through the same one-slot
+batch inbox, or a new `LiveSession` state — the session currently owns
+every decode, and Apply-after-SAVED is the first decode it did not ask
+for.
+
+---
+
 ## 2026-08-14 — Session 26 (cont 3): the documentation sweep
 
 Agent: Kimi. Files changed: `ROADMAP.md` (item 8 marked done in the

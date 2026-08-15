@@ -188,6 +188,94 @@ foreach(row IN LISTS bars)
     "gui_shell PASS scrollbar: ioc=${b_ioc} zoom=${b_zoom} -> h=${want_h}")
 endforeach()
 
+# --- the pane follows the newest row, and the picture REALLY moves ---------
+# [§8.3 item 3, Sara session 26; the bounce fixed session 27.]
+#
+# The rule: while rows are arriving the bottom of the pane is the newest
+# line. The trap: Fl_Scroll scrolls by MOVING its child, so yposition() is
+# a cached copy of the child's position that a child resize invalidates
+# without telling anyone — and layout_view() resizes the child on every
+# batch. Session 26's follow set that cached number correctly and the
+# picture bounced anyway, so this checks where the picture ACTUALLY sits.
+# Asking Fl_Scroll where it thinks it is would pass on the broken code:
+# measured before the fix, yposition read 632 while the chart sat at 150.
+#
+# At zoom 100 one image row is one screen pixel, so the numbers are the
+# chart's own: rows_drawn - pane_interior_h, once there are enough rows to
+# exceed the pane at all.
+foreach(row_batch "8x150" "12x97" "5x400")
+  execute_process(
+    COMMAND ${NOVA_GUI} --state drawing --ioc 576 --rate 120 --zoom 100
+            --follow ${row_batch}
+    RESULT_VARIABLE rv OUTPUT_VARIABLE out ERROR_VARIABLE err)
+  if(NOT rv EQUAL 0)
+    message(FATAL_ERROR
+      "nova-gui --follow ${row_batch} exited ${rv}\n${out}\n${err}")
+  endif()
+  string(REPLACE "\n" ";" lines "${out}")
+  set(seen 0)
+  set(prev_actual -1)
+  foreach(line IN LISTS lines)
+    if(NOT line MATCHES "^ +([0-9]+) +([0-9]+) +([0-9]+) +([0-9]+) +([0-9]+)$")
+      continue()
+    endif()
+    set(b ${CMAKE_MATCH_1})
+    set(rows ${CMAKE_MATCH_2})
+    set(max_y ${CMAKE_MATCH_3})
+    set(actual ${CMAKE_MATCH_5})
+    math(EXPR seen "${seen} + 1")
+    # The newest row is at the bottom of the pane: the offset the child
+    # really sits at is the largest the content allows.
+    if(NOT actual EQUAL max_y)
+      message(FATAL_ERROR
+        "gui_shell FAIL follow ${row_batch}: batch ${b} (${rows} rows) sits "
+        "at ${actual}, but the newest row is at ${max_y} — the pane is not "
+        "following it")
+    endif()
+    # And it gets there by going DOWN. This is the half that convicts the
+    # bounce: an offset that retreats is the chart jumping back up.
+    if(actual LESS prev_actual)
+      message(FATAL_ERROR
+        "gui_shell FAIL follow ${row_batch}: batch ${b} scrolled BACK from "
+        "${prev_actual} to ${actual} — the picture bounced")
+    endif()
+    set(prev_actual ${actual})
+  endforeach()
+  if(seen EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL follow ${row_batch}: no batch lines parsed from:\n${out}")
+  endif()
+  message(STATUS
+    "gui_shell PASS follow: ${row_batch} batches, ${seen} checked, "
+    "newest row at the pane bottom throughout")
+endforeach()
+
+# The follow is for rows ARRIVING. In every other state the scroll is the
+# operator's, and nothing moves it [§8.3 item 3] — after SAVED the operator
+# is reading the chart, and a pane that kept yanking to the bottom would
+# fight them.
+foreach(st "ready" "phasing" "decoding" "saved")
+  execute_process(
+    COMMAND ${NOVA_GUI} --state ${st} --ioc 576 --rate 120 --zoom 100
+            --follow 6x300
+    RESULT_VARIABLE rv OUTPUT_VARIABLE out ERROR_VARIABLE err)
+  if(NOT rv EQUAL 0)
+    message(FATAL_ERROR "nova-gui --follow in ${st} exited ${rv}\n${err}")
+  endif()
+  string(REPLACE "\n" ";" lines "${out}")
+  foreach(line IN LISTS lines)
+    if(NOT line MATCHES "^ +([0-9]+) +([0-9]+) +([0-9]+) +([0-9]+) +([0-9]+)$")
+      continue()
+    endif()
+    if(NOT CMAKE_MATCH_5 EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL follow in ${st}: the pane scrolled itself to "
+        "${CMAKE_MATCH_5}; outside DRAWING the scroll belongs to the operator")
+    endif()
+  endforeach()
+  message(STATUS "gui_shell PASS follow: nothing scrolls itself in ${st}")
+endforeach()
+
 # --- an inspection run brings up no capture, and the window says so --------
 # Until session 23 this passed because nothing in the program COULD
 # capture. It now can — nova-gui opens a real input stream and runs the

@@ -1086,10 +1086,64 @@ struct Shell {
                 std::lround(view->image_rows() * v.scale));
             ih = std::max(drawn, pane_interior_h());
         }
-        view->resize(pane->x() + kFrame, pane->y() + kFrame, iw, ih);
+        // **Fl_Scroll scrolls by MOVING its child, so the child's position
+        // IS the scroll offset and `yposition()` is only a cached copy of
+        // it.** Resizing the child to the pane's top-left therefore
+        // silently scrolls the picture back to the top while Fl_Scroll goes
+        // on reporting the old offset — and the repair below cannot repair
+        // it, because `scroll_to` early-returns when its arguments equal
+        // the cached values. Every later `scroll_to` then moves by a delta
+        // measured from a number that is no longer true, which is the
+        // bouncing Sara saw once the pane started following the newest row
+        // [session 27; measured against FLTK 1.4.5]: with a batch of rows
+        // arriving between redraws the offset lands at `max_y - previous`,
+        // so the chart alternates between its bottom and its top.
+        //
+        // Resize the child AT the current offset instead. The invariant
+        // Fl_Scroll re-derives on draw then holds continuously, and every
+        // actual move goes through `scroll_to` — the only place that knows
+        // it is moving something.
+        view->resize(pane->x() + kFrame - pane->xposition(),
+                     pane->y() + kFrame - pane->yposition(), iw, ih);
+        // Both axes are clamped to what the new geometry can show. Y needs
+        // it for the same reason X always did: a new transmission restarts
+        // the picture at row 0, and an offset from the previous chart's
+        // height would point past the end of this one.
         const double keep = std::min(static_cast<double>(pane->xposition()),
                                      nova::max_scroll_px(v));
-        pane->scroll_to(static_cast<int>(std::lround(keep)), pane->yposition());
+        const int keep_y = std::min(pane->yposition(),
+                                    std::max(0, ih - pane_interior_h()));
+        pane->scroll_to(static_cast<int>(std::lround(keep)), keep_y);
+    }
+
+    // Where the child ACTUALLY sits. The only authority on the scroll
+    // offset, for the reason above, and what the --follow inspection
+    // reports so a screamer can tell a followed row from a cached lie.
+    int scroll_y_actual() const { return pane->y() + kFrame - view->y(); }
+
+    // While rows arrive the pane follows them [Sara, session 26]: the
+    // bottom of the pane IS the newest line, so the operator never chases
+    // the scrollbar to watch the chart come in. A manual scroll up is
+    // corrected on the next row — the price of a promise that cannot be
+    // misunderstood. Once the state leaves DRAWING the scroll is the
+    // operator's again: nothing moves it after SAVED.
+    void follow_newest_row() {
+        const int max_y = std::max(0, view->h() - pane_interior_h());
+        if (pane->yposition() != max_y)
+            pane->scroll_to(pane->xposition(), max_y);
+    }
+
+    // A new picture reached the pane. One method rather than a block
+    // inside `drain`, because the --follow inspection must take the SAME
+    // path the operator does — an inspection that reimplements the rule
+    // pins the reimplementation.
+    void show_image(const nova::Image& img) {
+        const bool resized = view->set_image(img);
+        if (resized) {
+            layout(win->w(), win->h());
+            ruler->redraw();
+        }
+        if (state == LiveState::kDrawingPreview) follow_newest_row();
     }
 
     // Everything the state decides, in one place, so a state change cannot
@@ -1279,26 +1333,7 @@ struct Shell {
         }
         if (rows_changed) {
             nova::Image img;
-            if (engine->copy_image(&img)) {
-                const bool resized = view->set_image(img);
-                if (resized) {
-                    layout(win->w(), win->h());
-                    ruler->redraw();
-                }
-                // While rows arrive the pane follows them [Sara, session
-                // 26]: the bottom of the pane IS the newest line, so the
-                // operator never chases the scrollbar to watch the chart
-                // come in. A manual scroll up is corrected on the next
-                // row — the price of a promise that cannot be
-                // misunderstood. Once the state leaves DRAWING the scroll
-                // is the operator's again: nothing moves it after SAVED.
-                if (state == LiveState::kDrawingPreview) {
-                    const int max_y =
-                        std::max(0, view->h() - pane_interior_h());
-                    if (pane->yposition() != max_y)
-                        pane->scroll_to(pane->xposition(), max_y);
-                }
-            }
+            if (engine->copy_image(&img)) show_image(img);
         }
         if (state_changed || rows_changed) {
             apply_state();
@@ -1637,6 +1672,44 @@ int print_metrics(const Shell& s) {
     return 0;
 }
 
+// --follow BATCHESxROWS: drive the newest-row follow [§8.3 item 3, Sara
+// session 26] with synthetic row batches and report, per batch, where the
+// picture ACTUALLY sits against where it should be.
+//
+// Why the actual offset and not `yposition()`. Fl_Scroll scrolls by moving
+// its child, so `yposition()` is a cached copy of the child's position and
+// a child resize invalidates it without telling anyone. Session 26's follow
+// was written against that cached number and read correct while the picture
+// bounced; a check that asks Fl_Scroll where it thinks it is would have
+// passed just as happily. `scroll_y_actual` asks the child.
+//
+// Like --metrics this shows no window and opens no sound card, so it runs
+// on a machine with no audio device — the property both GUI screamers rest
+// on. It needs no draw either: the divergence is in the widget positions,
+// which is why it is catchable without one.
+int print_follow(Shell& s, int batches, int rows_per_batch) {
+    const int cols = s.image_cols();
+    if (cols <= 0) {
+        std::fprintf(stderr, "--follow needs an explicit --ioc\n");
+        return 2;
+    }
+    std::printf("# nova-gui follow, FLTK %d.%d.%d\n", FL_MAJOR_VERSION,
+                FL_MINOR_VERSION, FL_PATCH_VERSION);
+    std::printf("# %5s %7s %7s %11s %8s\n", "batch", "rows", "max_y",
+                "yposition", "actual");
+    nova::Image img;
+    img.width = cols;
+    for (int b = 1; b <= batches; b++) {
+        img.height = b * rows_per_batch;
+        img.px.assign(static_cast<std::size_t>(img.width) * img.height, 128);
+        s.show_image(img);
+        const int max_y = std::max(0, s.view->h() - s.pane_interior_h());
+        std::printf("  %5d %7d %7d %11d %8d\n", b, img.height, max_y,
+                    s.pane->yposition(), s.scroll_y_actual());
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1646,6 +1719,8 @@ int main(int argc, char** argv) {
     int win_h = kWinH;
     int resize_w = 0;
     int resize_h = 0;
+    int follow_batches = 0;
+    int follow_rows = 0;
     LiveState state = LiveState::kIdle;
     bool state_given = false;
     int zoom_index = 0;
@@ -1679,6 +1754,11 @@ int main(int argc, char** argv) {
                  std::sscanf(argv[++i], "%dx%d", &resize_w, &resize_h) == 2 &&
                  resize_w >= kMinW && resize_h >= kMinH)
             ;
+        else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
+                 std::sscanf(argv[++i], "%dx%d", &follow_batches,
+                             &follow_rows) == 2 &&
+                 follow_batches > 0 && follow_rows > 0)
+            ;
         else if (!std::strcmp(argv[i], "--state") && i + 1 < argc &&
                  parse_state(argv[++i], &state))
             state_given = true;
@@ -1701,6 +1781,7 @@ int main(int argc, char** argv) {
                      "                [--state NAME] [--zoom fit|25|50|100|200]"
                      "\n                [--ioc auto|576|288] "
                      "[--rate auto|60|90|120]\n"
+                     "                [--follow BATCHESxROWS]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
@@ -1725,6 +1806,8 @@ int main(int argc, char** argv) {
     // flag stays so that the equivalence keeps being checkable.
     if (resize_w > 0) shell.win->resize(0, 0, resize_w, resize_h);
     if (metrics_only) return print_metrics(shell);
+    if (follow_batches > 0)
+        return print_follow(shell, follow_batches, follow_rows);
 
     shell.win->show();
     // The live half comes up only now — after the window exists and after
