@@ -7,6 +7,88 @@ anything as our develop history").
 
 ---
 
+## 2026-08-15 — Session 28 (closing): the documentation sweep, and three
+## stale counts nobody had reason to look at
+
+Agent: Claude. No code. Files changed: `CMakeLists.txt` and
+`tests/gui_layout.cmake` / `tests/gui_shell.cmake` (stale suite counts
+and headers describing a test that has grown a long way past its
+description), `docs/05-m4-shell-design.md` (§13's PHASE/SYNC coverage
+gap, rewritten to say what is ACTUALLY left), `SESSION-LOG.md`. Verified
+from a **deleted build directory**: configure, full build, 37/37 in
+248.7 s.
+
+**What this session built,** in one place: the SYNC steppers (ROADMAP M4
+item 9), click-to-set-PHASE (item 5) and two-click SYNC (item 10). All
+three are correction surfaces, and all three came out of Sara's first
+by-hand run of the surface items 3-4 built.
+
+**The sweep found three stale suite counts**, all in places a reader
+would trust and nobody re-reads: `gui_layout.cmake` still called itself
+"the +1 in 24 (+1 with the GUI)" — two counts and one GUI test out of
+date — and `CMakeLists.txt` and `gui_shell.cmake` both said 34 where the
+base count is 35. Corrected. The counts inside ROADMAP's *built-session*
+entries were left alone: those are dated statements about what was true
+then, and rewriting them would turn a history into a claim.
+
+**`gui_shell`'s own header had stopped describing it.** It listed the
+transport, Force Start, the ruler and the preference file — and said
+nothing about the correction surface, which is now the larger half of
+the file and all of what sessions 27 and 28 added. Rewritten, with the
+reason the checks are shaped the way they are: this is interaction
+surface, it is where this project's defects have actually lived, so it
+is driven through the shell's REAL handlers rather than by restating the
+arithmetic in CMake.
+
+**And §13's coverage gap was overdue a rewrite rather than another
+footnote.** It has been narrowed twice in one session, and "the GUI's
+PHASE/SYNC fields are not covered by a screamer" no longer describes the
+situation. What is left is now stated precisely — the text fields
+themselves (typing, and `cb_edit` firing) and everything from `cb_apply`
+onward, which writes files — along with the shape of what was actually
+bought: **not "the widgets are tested" but "the handlers behind them are
+reachable without a window"**, which is a smaller claim and the honest
+one. It carries the session's own caution with it: both new seams first
+produced checks that passed against builds with the rule deleted. A seam
+makes a rule reachable; it does not make a check correct.
+
+**Contradictions found:** the three suite counts and the `gui_shell`
+header above. Nothing else in README, START-HERE or AGENTS.md was
+falsified by this session's code — checked by grep for "what is left",
+"still not", "unbuilt" and the test-count strings.
+
+**Validation.** `rm -rf build`, configure, build, `ctest`: 37/37,
+248.7 s. Nothing in the tree depends on a stale object file.
+
+**Next step: run `./build/nova-gui` by hand.** Nothing built in session
+28 has been touched by a person — not the steppers, not the crosshair,
+not whether clicking the dead sector lands where Sara means, not whether
+the two-click baseline rule reads as help or as a control refusing to
+work. The record is unambiguous about what that gap is worth: sessions
+25, 26 and 27 each found a defect on the air that a green suite could
+not see, and this session added three new interaction surfaces on top of
+that record. Specifically worth watching: whether ±1/±10 are the right
+step sizes on a real chart; whether the crosshair reads as "clickable"
+or as a stray cursor change; and the short-chart case where the baseline
+wants more rows than the preview HAS, so every second click re-picks
+PHASE — correct behaviour, never seen by a person.
+Then **ROADMAP M4 item 6** (a transmission arriving mid-edit [§8.2]: the
+background buffer and the compact receiving indicator), which is
+independent of everything above and is the one thing the by-hand run
+could not observe, there having been no second transmission — it also
+turns item 4's stand-in edit-end into the operator's own action. Or
+**item 7** (m4a input via runtime ffmpeg), independent of all of it.
+Registered, not scheduled: per-line correction segments (`Correction` as
+a list of `{from_line, phase, ppm}`, driven by the two-click gesture,
+needing a synthetic white-only fixture with a step at a known line,
+because such a step is undetectable by construction and no fixture shows
+one); the pulse-station SYNC override (no recording yet exists where the
+fit is wrong and the eye is right); whether Zoom should keep the
+vertical ROW rather than the pixel offset; template white-window
+robustness.
+
+---
+
 ## 2026-08-15 — Session 28 (cont 2): two-click SYNC, and a screamer that
 ## passed against a build with the rule deleted
 

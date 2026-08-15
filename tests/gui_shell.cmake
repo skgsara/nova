@@ -1,7 +1,7 @@
 # gui_shell.cmake — §9 screamer 9 [docs/05], run as
 #   cmake -DNOVA_GUI=<path to nova-gui> -P tests/gui_shell.cmake
 # Added as a ctest target only when the GUI target was built
-# (NOVA_BUILD_GUI), so it is one of the two in "34 (+2 with the GUI)".
+# (NOVA_BUILD_GUI), so it is one of the two in "35 (+2 with the GUI)".
 #
 # gui_layout pins where the shell's regions ARE; this pins what the shell
 # DOES — the §8.3 and §8.4 behaviour rules, which are the ones a widget
@@ -22,7 +22,23 @@
 #     the check — it is also what keeps this suite runnable with no audio
 #     device, and what stops inspecting Nova from opening a microphone;
 #   - the preference file next to the executable is read at startup, and
-#     merely inspecting the shell leaves no file behind [§8.4 item 1].
+#     merely inspecting the shell leaves no file behind [§8.4 item 1];
+#   - the CORRECTION surface [§7, §7.1, §8.5, added sessions 27-28]: all
+#     sixteen combinations of `correction_for` checked against the rules
+#     rather than against a copy of the table; the SYNC steppers active
+#     exactly where the box is and starting a nudge at the clock the
+#     picture was DRAWN on rather than at zero; the click naming the
+#     column the ruler names at that x, refusing to act where a
+#     correction cannot be made, and naming nothing past the image's
+#     right edge; and the two-click slant with its baseline rule, both
+#     click orders, and its anchor ending with the edit.
+#
+# Those last ones are interaction surface, which is where this project's
+# defects have actually lived (sessions 25, 26 and 27 each found one on
+# the air with a green suite). So they are driven through the shell's
+# REAL handlers via --click / --nudge / --then-state rather than by
+# restating the arithmetic here, and every check in this file has been
+# verified by deliberately reintroducing the defect it exists to catch.
 #
 # --state drives the shell into a live state exactly as nova-live will,
 # which is what makes all of this testable with no window and no audio

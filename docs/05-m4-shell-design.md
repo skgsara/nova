@@ -2338,10 +2338,25 @@ It is worth expecting a third instance somewhere in this document.
   FLTK callbacks that read the text fields and call `set_phase` /
   `set_sync` — which is on the far side of the same seam as everything
   else in §13's first entry.
-  **Narrowed session 28, for the SYNC steppers only.** `--nudge N` drives
-  the stepper's real callback through the real widget and reports the
-  box and the dirty flag through `--metrics`, so one path from a button
-  press to shell state IS now covered — the one that had a hazard in it
-  (FLTK not firing an input callback for a programmatic `value()`). The
-  text fields themselves, and PHASE's whole path, are unchanged: still
-  uncovered, still on the far side of that seam.
+  **Narrowed twice in session 28, and this is now a much smaller gap than
+  the sentence above describes.** Covered: the SYNC steppers (`--nudge N`
+  drives the real callback through the real widget), click-to-set-PHASE
+  and the two-click slant (`--click X,Y`, repeatable, through
+  `click_image`), and the rules that fire when the surface changes under a
+  half-finished edit (`--then-state`). All three report through
+  `--metrics`, and each was verified by reintroducing the defect it exists
+  to catch.
+  **What is still uncovered, precisely:** the TEXT FIELDS — typing into
+  the PHASE or SYNC box and having `cb_edit` fire — and everything from
+  `cb_apply` onward, which writes files. Those remain on the far side of
+  the same seam as §13's first entry. Note the shape of what the two
+  narrowings actually bought: not "the widgets are tested" but "the
+  handlers behind them are reachable without a window", which is a
+  different and smaller claim.
+  **And a caution earned the hard way, twice in one session.** Both new
+  seams first produced checks that passed against builds with the rule
+  deleted — the click guard was masked by `apply_state`'s edit-end
+  cleanup, and the anchor-clearing check spanned two processes and so
+  could not observe the transition it was about. A seam makes a rule
+  reachable; it does not make a check correct. Ask what else could make it
+  pass.

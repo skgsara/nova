@@ -548,7 +548,7 @@ if(NOVA_BUILD_GUI)
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
     # output identical to one dragged to it. The first test in the
-    # project to cover FLTK at all, and one of the two in "34 (+2 with the
+    # project to cover FLTK at all, and one of the two in "35 (+2 with the
     # GUI)".
     # It drives the built binary through a CMake script so it stays
     # portable; it exists only when nova-gui does.
@@ -558,10 +558,13 @@ if(NOVA_BUILD_GUI)
     # §9 screamer 9 [docs/05]: what the shell DOES rather than where its
     # regions are — the transport relabelling and sensitivity, Force
     # Start's gating on explicit IOC + rate, the ruler staying blank
-    # until the image width is known, and the preference file beside the
-    # program. Driven through --state/--metrics, so it needs no window
-    # and no audio device; guarded with nova-gui, the second of the two
-    # in "34 (+2 with the GUI)".
+    # until the image width is known, the preference file beside the
+    # program, and (sessions 27-28) the whole correction surface: the
+    # sixteen-row Apply/Auto rule, the SYNC steppers, click-to-set-PHASE
+    # and the two-click slant. Driven through --state / --metrics /
+    # --click / --nudge / --then-state, so it needs no window and no
+    # audio device; guarded with nova-gui, the second of the two
+    # in "35 (+2 with the GUI)".
     add_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
       -DNOVA_GUI=$<TARGET_FILE:nova-gui>
       -P ${CMAKE_SOURCE_DIR}/tests/gui_shell.cmake)

@@ -1,7 +1,9 @@
 # gui_layout.cmake — §9 screamer 7 [docs/05], run as
 #   cmake -DNOVA_GUI=<path to nova-gui> -P tests/gui_layout.cmake
 # Added as a ctest target only when the GUI target was built
-# (NOVA_BUILD_GUI), so it is the +1 in "24 (+1 with the GUI)".
+# (NOVA_BUILD_GUI), so it is one of the two in "35 (+2 with the GUI)".
+# (This header read "the +1 in 24 (+1 with the GUI)" until session 28,
+# which was two counts and one GUI test out of date.)
 #
 # Pins docs/05 §8.0 corrections 2 and 4 against `nova-gui --metrics`:
 #   2. the ruler is aligned to the image pane's INTERIOR — ruler.x ==
