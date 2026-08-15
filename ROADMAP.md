@@ -832,6 +832,33 @@ one feature with several parts, plus one verification no test can do.
    white window itself — is registered as the later, bigger fix if the
    library ever shows the need.
 
+9. ~~**SYNC steppers**~~ **Done (session 28)** — Sara's, after the first
+   by-hand run of the correction surface. Four buttons (−10 −1 +1 +10)
+   under the SYNC box. **The sizes are measured, not chosen**: 1 ppm is
+   ~2.2 px of skew at the bottom of a ~1200-line chart at IOC 576, and
+   real errors run 30–180 ppm (session 5; the white-only fixtures read
+   −70 to −118), so a fine button alone would be a hundred clicks across
+   the range it exists to cross.
+   **PHASE deliberately gets none, and that is the asymmetry rather than
+   an omission**: PHASE is a seed refined to the best feature within
+   `search_frac` of it — ±3% of a line, ±54 columns at IOC 576 — so any
+   nudge smaller than the window is refined straight back onto the same
+   feature and the picture does not move. A control that visibly does
+   nothing is session 26's finding 2 in a different hat. PHASE's
+   instrument is item 5's click.
+   Two things the build settled, both screamed: **a nudge from a blank
+   box starts at the CLOCK THE PICTURE WAS DRAWN ON**, not at zero —
+   blank means "as measured", the measured clock is −70 to −118 on the
+   stations this control exists for, and starting at zero would make the
+   operator's first click a jump of the whole clock error away from
+   correct; a typed value (including a typed `0`, which is not the same
+   thing as blank — the same distinction core/ makes with NaN) outranks
+   it. And **a nudge has to declare the edit itself**: FLTK does not fire
+   an input's callback for a programmatic `value()`, so the box would
+   move while the shell believed nothing had changed, leaving Apply grey
+   over the operator's own change. `--sync-step` and `--nudge N` make
+   both checkable without a window; all three defects were reintroduced
+   deliberately and each was caught.
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
 next. Items 5, 6, 7 and 8 are independent and can be taken in any order.

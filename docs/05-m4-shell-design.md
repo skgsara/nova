@@ -1351,6 +1351,60 @@ the same file and Auto would undo nothing. An active button that does
 nothing is the failure session 26 found on the air, and this surface has
 three chances to reintroduce it.]**
 
+**[BUILT session 28 — the SYNC steppers, and why PHASE has none.** Asked
+by Sara after the first by-hand run of this surface: typing a whole ppm
+each time is the wrong instrument for a judgement made by eye, which is
+"a bit more", not "−93". Four buttons under the SYNC box: −10 −1 +1 +10.
+
+*The sizes are measured.* At IOC 576 a line is 1810 px, so 1 ppm walks
+the line start by 1810e−6 px per line — about 2.2 px of skew at the
+bottom of a full ~1200-line chart, which is roughly the smallest step
+worth having. Real errors run 30–180 ppm (session 5; the four white-only
+fixtures read −70 to −118), so a fine button alone would be a hundred
+clicks across the range the control exists to cross. Hence a coarse one.
+
+*PHASE deliberately gets none.* PHASE is a SEED refined to the best
+feature within `search_frac` of it — ±3% of a line, ±54 columns at IOC
+576 [core/fax.cpp, `stage_dead_sector`]. A nudge smaller than that window
+is refined straight back onto the same feature and the picture does not
+move: a control that visibly does nothing, which is the paragraph above
+wearing a different hat. PHASE's instrument is the click (ROADMAP item
+5), and this asymmetry is the same one §7.1 already draws between the two
+fields — seed versus trim — reaching the glass.
+
+*Where a nudge starts, which is the one thing here that can be quietly
+wrong.* A blank box means "as measured", and the measured clock is not
+0 ppm — it is −70 to −118 on exactly the white-only stations this control
+exists for. Starting a nudge at zero would make the operator's first
+click a jump of the whole clock error, away from correct. So a nudge from
+blank starts at the clock the picture on the pane was DRAWN on, which is
+the number the Quality field is already showing them; a re-render posts
+`kBatchDone` like any other decode, so after an Apply the next nudge is
+relative to the corrected picture rather than the original measurement.
+A TYPED value outranks the shown clock — including a typed `0`, which is
+the operator saying zero ppm and is not the same thing as blank. That is
+the same distinction core/ makes by giving `clock_ppm_fallback` a NaN
+sentinel rather than 0.
+
+*And a nudge has to declare the edit itself.* FLTK does not fire an
+input's callback for a programmatic `value()`, so a stepper that only
+wrote the box would move the number while the shell still believed
+nothing had changed — the operator's own correction sitting in a control
+that reports itself clean, with Apply grey over it. `nudge_sync` sets the
+dirty flag by hand, which means the claim is a line of code that can be
+lost, so it is screamed rather than trusted.
+
+*Made checkable without a window*, since this is interaction surface and
+the last three sessions each found a defect the suite could not see:
+`--sync-step` prints where a nudge starts for thirteen cases and
+`gui_shell` reads it as RULES, not as a transcript; `--nudge N` presses
+the +1 stepper N times before `--metrics`, so "a nudge is an edit" is a
+checkable claim; and `sync_steps_active` is a COUNT, so a stepper that
+disagreed with its own box would show up as a number that is neither 0
+nor 4. All three defects were deliberately reintroduced and each was
+caught. What still needs hands: that the buttons are comfortable to hit
+and the step sizes feel right on a real chart.]**
+
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
 PHASE or SYNC, or the first click on the image, and **ends** at Apply, at
@@ -2179,3 +2233,10 @@ It is worth expecting a third instance somewhere in this document.
   FLTK callbacks that read the text fields and call `set_phase` /
   `set_sync` — which is on the far side of the same seam as everything
   else in §13's first entry.
+  **Narrowed session 28, for the SYNC steppers only.** `--nudge N` drives
+  the stepper's real callback through the real widget and reports the
+  box and the dirty flag through `--metrics`, so one path from a button
+  press to shell state IS now covered — the one that had a hazard in it
+  (FLTK not firing an input callback for a programmatic `value()`). The
+  text fields themselves, and PHASE's whole path, are unchanged: still
+  uncovered, still on the far side of that seam.

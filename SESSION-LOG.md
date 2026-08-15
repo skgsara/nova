@@ -7,6 +7,150 @@ anything as our develop history").
 
 ---
 
+## 2026-08-15 — Session 28: the hand-run's verdict, the steppers Sara
+## asked for, and a default of blank that is not a default of zero
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`sync_step` and
+`sync_text` as pure functions; four stepper buttons and `nudge_sync`;
+`shown_ppm` recorded where the Quality field is written; `--sync-step`
+and `--nudge N` inspection modes; `sync_steps_active`, `edit_dirty` and
+`sync_value` in `--metrics`), `tests/gui_shell.cmake` (steppers follow
+the box in five states; the stepper row's geometry; the `--sync-step`
+table read as rules; a nudge IS an edit). Files changed: `README.md`,
+`START-HERE.md`, `ROADMAP.md` (M4 item 9), `docs/05-m4-shell-design.md`
+(§8.5 built-note; §13's PHASE/SYNC-uncovered bullet narrowed),
+`AGENTS.md` (two patterns), `SESSION-LOG.md`. Test count unchanged at
+37; suite 240 s → 239.7 s.
+
+**The hand-run happened, and it passed.** Sara ran the shell against a
+chart overnight: Force Start, stop tone, Stop mid-picture, Auto, the
+re-render, the progress bar and the reason line all behave. Three
+sessions running, the by-hand run had found a defect the green suite
+could not see; this time it found none. **The one thing still unobserved
+is what the pane does when the next transmission starts drawing while a
+chart is being corrected** — which is ROADMAP item 6's own subject, so
+it is not a gap in items 3-4 so much as the shape of the hole item 6
+fills.
+
+**Then Sara asked five things, and the answers reordered the list.** The
+decoder question first, because it decided the rest: *on a station with
+no black pulse, does sync still fire occasionally?* **No — never.**
+`stage_dead_sector` decides the style from across-line consistency
+(measured, never configured); no pulse sets `per_line_sync = false`; and
+`stage_track` then takes a branch with no search in it at all — every
+line start is `start + dead_start0 + l * period0` and every line is
+marked unlocked, `sstr = -1.0`. Phase is established ONCE and the
+picture cruises on the measured clock, exactly as she guessed. Firing
+the template anyway would be searching for a feature that is not there
+and would inject per-line jitter into a picture currently drawn on a
+clean straight grid. The consequence that matters: with nothing locked
+the long-baseline fit has no baseline, so `fitted` is false and the
+period stays `period0` — which session 5 measured as off by 30-180 ppm.
+That error is a slant, it is the one thing the operator's eye can see
+and the fold cannot, and it is the entire reason SYNC exists.
+
+**Two of her five ideas were dropped, one by her own reasoning.** She
+worked out that "disable sync detect" is a no-op on a white-only station
+(detection is already off) — correct, and on a pulse station it would be
+actively destructive, taking dropout recovery and change-point handling
+with it. So the toggle is either useless or harmful, never useful. The
+*override* it might have become — letting a typed ppm outrank the fit on
+a pulse station — is a different thing and is **registered, not
+scheduled**: there is no recording in the library where the fit is wrong
+and the eye is right (`xsg-phasing-image-100s` locks 126 of 137 and fits
+cleanly), and a control with no case to answer is a control with nothing
+to verify it.
+
+**Her click-geometry idea was right and inverted.** She proposed one
+click for SYNC and two for PHASE; it is the other way round. PHASE is a
+horizontal offset — one feature, one row, one click. SYNC is a SLANT, so
+it needs the same feature at two rows:
+`ppm = (col1-col0)/(row1-row0)/width * 1e6`. This is the strongest idea
+of the five and for a reason worth recording: **two clicks a thousand
+lines apart is not an eyeball, it is a fit over the longest baseline
+available**, which is this project's own founding principle (sessions 5,
+8, 9). §7.1 currently apologises that an eyeballed ppm loses to a fitted
+one; the two-click gesture is how the operator stops eyeballing.
+
+**Built this session: the SYNC steppers (ROADMAP M4 item 9).** Four
+buttons, −10 −1 +1 +10. The sizes are measured, not chosen: 1 ppm is
+~2.2 px of skew at the bottom of a ~1200-line chart at IOC 576, and real
+errors run 30-180 ppm, so a fine button alone is a hundred clicks across
+the range it exists to cross. **PHASE deliberately gets none**, and that
+is the §7.1 asymmetry reaching the glass rather than an omission: PHASE
+is a seed refined within `search_frac` (±54 columns at IOC 576), so any
+smaller nudge is refined straight back onto the same feature and the
+picture does not move — session 26's "active control that does nothing"
+in a different hat. PHASE's instrument is the click, which is item 5.
+
+**The decision with the trap in it: where a nudge STARTS.** A blank box
+means "as measured", and the measured clock is not 0 ppm — the four
+white-only fixtures read −70 to −118. Starting at zero would make the
+operator's first click a jump of the entire clock error, away from
+correct, on exactly the stations the control exists for. So a nudge from
+blank starts at the clock the picture was DRAWN on, the number the
+Quality field already shows; a re-render posts `kBatchDone` like any
+decode, so after an Apply the next nudge is relative to the corrected
+picture. A typed value outranks it — including a typed `0`, which is the
+operator saying zero and is not the same thing as blank. **That is the
+same distinction core/ makes by giving `clock_ppm_fallback` a NaN
+sentinel rather than 0**, and it is now an `AGENTS.md` pattern: a default
+of blank is not a default of zero.
+
+**The second hazard, and it is a line of code that can simply be
+forgotten.** FLTK does not fire an input's callback for a programmatic
+`value()`, so a stepper that only wrote the box would move the number
+while the shell still believed nothing had changed — the operator's own
+correction sitting in a control that reports itself clean, Apply grey
+over it. `nudge_sync` sets the dirty flag by hand. Also now an
+`AGENTS.md` pattern: a widget set programmatically does not tell anyone.
+
+**Every claim above was screamed, and every screamer was verified by
+breaking it first** [session 23's rule]. `--sync-step` prints where a
+nudge starts for 13 cases and `gui_shell` reads it as RULES; `--nudge N`
+presses the real stepper through the real callback; `sync_steps_active`
+is a COUNT, so a stepper disagreeing with its box reads as neither 0 nor
+4. Three defects reintroduced deliberately, three caught, each naming
+the case: the blank-box nudge starting at zero (caught by the arithmetic
+check, "expected shown+delta (-1170 tenths), got 10"), the steppers
+always active ("sync_active=0 so 0 steppers should be active, 4 are"),
+and the missing dirty flag ("the box reads \"1\" but the edit is not
+dirty — Apply would stay grey over the operator's own change").
+
+**One measurement worth carrying forward.** Every fixture is 100-160 s,
+~140-250 lines; a real chart is ~1200. The library therefore understates
+the problem SYNC solves by roughly five to one, and no fixture can show
+a full page of accumulated slant.
+
+**Contradictions found:** docs/05 §13's "the GUI's PHASE/SYNC fields are
+not covered by a screamer" is now too broad — one path from a button
+press to shell state IS covered, the one that had the hazard in it — and
+is narrowed rather than deleted, because the text fields and PHASE's
+whole path remain uncovered. README's "what is left is clicking PHASE"
+stands but now says why the click is that field's instrument rather than
+a nicety.
+
+**Validation.** 37/37, full suite, 239.7 s.
+
+**Next step: ROADMAP M4 item 5, click-to-set-PHASE** [§8.3 item 1] — an
+`FL_PUSH` handler calling `live/ruler.hpp` arithmetic that already
+exists and is pinned by `ruler_mapping`. Then **two-click SYNC**, Sara's
+idea corrected, which is the same handler counting to two and is where
+the slant stops being eyeballed. Then, and only then, **per-line
+segments**: `Correction` becomes a list of `{from_line, phase, ppm}`,
+empty list still meaning Auto, driven by the two-click gesture rather
+than typed line numbers — and it needs an answer to "how do we know it
+works", because a mid-chart step on a white-only station is undetectable
+by construction (no locked lines, nothing to detect it with) and no
+fixture in the library shows one. A synthetic with a step injected at a
+known line is the likely instrument. Item 6 (transmission arriving
+mid-edit) is independent and is the one thing the hand-run could not
+observe. Registered, not scheduled: the pulse-station SYNC override;
+whether Zoom should keep the vertical ROW rather than the pixel offset;
+template white-window robustness.
+
+---
+
 ## 2026-08-14 — Session 27 (closing): the next step is a pair of hands,
 ## not the next item
 

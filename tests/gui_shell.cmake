@@ -400,6 +400,188 @@ endif()
 message(STATUS
   "gui_shell PASS correction surface: all 16 combinations obey the rules")
 
+# --- the SYNC steppers follow the BOX [session 28] -------------------------
+# They are the SYNC input in another shape, so "active" must mean the same
+# thing for both. A stepper live over a dead box is session 26's finding 2
+# again — a button that does nothing — and a stepper grey over a live box
+# is the control silently missing. Either way the count is what tells:
+# `sync_steps_active` is 0 or 4 and agrees with `sync_active`.
+foreach(st "idle" "ready" "drawing" "decoding" "saved")
+  run_metrics(out --state ${st} --ioc 576 --rate 120)
+  shell_value(sync_active "${out}" sa)
+  shell_value(sync_steps_active "${out}" ss)
+  if(sa EQUAL 1)
+    set(want 4)
+  else()
+    set(want 0)
+  endif()
+  if(NOT ss EQUAL want)
+    message(FATAL_ERROR
+      "gui_shell FAIL steppers ${st}: sync_active=${sa} so ${want} steppers "
+      "should be active, ${ss} are")
+  endif()
+  message(STATUS
+    "gui_shell PASS steppers ${st}: ${ss} active, box ${sa}")
+endforeach()
+
+# ...and the steppers sit under the SYNC box they step, inside the panel.
+run_metrics(out --state saved --ioc 576 --rate 120)
+region(sync_input "${out}" six siy siw sih)
+region(status_panel "${out}" spx spy spw sph)
+math(EXPR panel_r "${spx} + ${spw}")
+set(prev_r 0)
+foreach(tag sync_step_m10 sync_step_m1 sync_step_p1 sync_step_p10)
+  region(${tag} "${out}" bx by bw bh)
+  math(EXPR sync_bottom "${siy} + ${sih}")
+  if(by LESS sync_bottom)
+    message(FATAL_ERROR
+      "gui_shell FAIL steppers: ${tag} at y=${by} is not below the SYNC box "
+      "(bottom ${sync_bottom})")
+  endif()
+  math(EXPR br "${bx} + ${bw}")
+  if(bx LESS spx OR br GREATER panel_r)
+    message(FATAL_ERROR
+      "gui_shell FAIL steppers: ${tag} (${bx}..${br}) leaves the panel "
+      "(${spx}..${panel_r})")
+  endif()
+  # Left to right in the order they are labelled, so the row reads as a
+  # scale rather than as four buttons in an arbitrary order.
+  if(NOT bx GREATER prev_r AND NOT prev_r EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL steppers: ${tag} at x=${bx} does not follow the "
+      "previous stepper (ends ${prev_r})")
+  endif()
+  set(prev_r ${br})
+endforeach()
+message(STATUS "gui_shell PASS steppers: under the box, in order, in panel")
+
+# --- where a SYNC nudge STARTS [sync_step] ---------------------------------
+# The trap this checks: a blank box means "as measured", and the measured
+# clock is not 0 ppm — the white-only fixtures read -70 to -118. A nudge
+# that started at zero would make the operator's FIRST click a jump of the
+# whole clock error, away from correct, on exactly the stations the control
+# exists for. Checked as rules, like the table above.
+execute_process(COMMAND ${NOVA_GUI} --sync-step
+  RESULT_VARIABLE rv OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT rv EQUAL 0)
+  message(FATAL_ERROR "nova-gui --sync-step exited ${rv}\n${out}\n${err}")
+endif()
+string(REPLACE "\n" ";" lines "${out}")
+set(rows 0)
+set(saw_blank_from_shown 0)
+foreach(line IN LISTS lines)
+  if(NOT line MATCHES
+     "^ +([^ ]+) +(-?[0-9.]+) +([01]) +(-?[0-9.]+) \\| +(-?[0-9.]+) +([01])$")
+    continue()
+  endif()
+  set(typed ${CMAKE_MATCH_1})
+  set(shown ${CMAKE_MATCH_2})
+  set(valid ${CMAKE_MATCH_3})
+  set(delta ${CMAKE_MATCH_4})
+  set(value ${CMAKE_MATCH_5})
+  set(from_shown ${CMAKE_MATCH_6})
+  math(EXPR rows "${rows} + 1")
+  set(where "typed=${typed} shown=${shown} valid=${valid} delta=${delta}")
+
+  # 1. A nudge from a blank box starts at the shown clock whenever there
+  #    IS one. This is the whole point of the field.
+  if(typed STREQUAL "\"\"" AND valid EQUAL 1)
+    if(NOT from_shown EQUAL 1)
+      message(FATAL_ERROR
+        "gui_shell FAIL sync-step ${where}: a blank box with a decoded "
+        "clock behind it must start from that clock, not from zero")
+    endif()
+    set(saw_blank_from_shown 1)
+    # ...and it lands exactly one step from it.
+    math(EXPR want "0")  # cmake math is integer-only; compare in tenths
+    string(REPLACE "." "" s10 "${shown}")
+    string(REPLACE "." "" d10 "${delta}")
+    string(REPLACE "." "" v10 "${value}")
+    # the printer drops a trailing ".0", so a whole number needs scaling
+    if(NOT shown MATCHES "\\.")
+      math(EXPR s10 "${shown} * 10")
+    endif()
+    if(NOT delta MATCHES "\\.")
+      math(EXPR d10 "${delta} * 10")
+    endif()
+    if(NOT value MATCHES "\\.")
+      math(EXPR v10 "${value} * 10")
+    endif()
+    math(EXPR want "${s10} + ${d10}")
+    if(NOT v10 EQUAL want)
+      message(FATAL_ERROR
+        "gui_shell FAIL sync-step ${where}: expected shown+delta "
+        "(${want} tenths), got ${v10}")
+    endif()
+  endif()
+
+  # 2. A TYPED value always wins over the shown clock — including a typed
+  #    "0", which is the operator saying zero ppm and is not the same
+  #    thing as blank. That distinction is the same one core/ makes with
+  #    NaN rather than 0 for `clock_ppm_fallback`.
+  if(NOT typed STREQUAL "\"\"" AND NOT typed STREQUAL "-")
+    if(NOT from_shown EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL sync-step ${where}: a typed value must outrank the "
+        "shown clock")
+    endif()
+  endif()
+
+  # 3. With nothing decoded there is no clock to start from, so zero is
+  #    all there is — and it must not claim otherwise.
+  if(valid EQUAL 0 AND NOT from_shown EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL sync-step ${where}: nothing has been decoded, so "
+      "there is no shown clock to start from")
+  endif()
+endforeach()
+if(rows LESS 10)
+  message(FATAL_ERROR
+    "gui_shell FAIL sync-step: parsed only ${rows} cases:\n${out}")
+endif()
+if(NOT saw_blank_from_shown EQUAL 1)
+  message(FATAL_ERROR
+    "gui_shell FAIL sync-step: no blank-box case with a decoded clock — "
+    "the rule that matters was never exercised")
+endif()
+message(STATUS
+  "gui_shell PASS sync-step: ${rows} cases, a blank box starts at the "
+  "shown clock")
+
+# --- a nudge IS an edit [§8.5 item 4] --------------------------------------
+# FLTK does not fire an input's callback for a programmatic `value()`, so
+# the stepper has to declare the edit itself. Forget that line and the box
+# moves while the shell still believes nothing changed — the operator's
+# correction sitting in a control that reports itself clean, and Apply grey
+# over it. Pressing the button N times must move the value N times AND
+# leave the edit dirty; pressing it zero times must leave both alone.
+run_metrics(out --state drawing --ioc 576 --rate 120 --nudge 0)
+shell_value(edit_dirty "${out}" d0)
+shell_value(sync_value "${out}" v0)
+if(NOT d0 EQUAL 0 OR NOT v0 STREQUAL "")
+  message(FATAL_ERROR
+    "gui_shell FAIL nudge: with no nudge the box is \"${v0}\" and dirty="
+    "${d0}; an untouched shell is clean")
+endif()
+foreach(n 1 3)
+  run_metrics(out --state drawing --ioc 576 --rate 120 --nudge ${n})
+  shell_value(edit_dirty "${out}" d)
+  shell_value(sync_value "${out}" v)
+  if(NOT d EQUAL 1)
+    message(FATAL_ERROR
+      "gui_shell FAIL nudge ${n}: the box reads \"${v}\" but the edit is not "
+      "dirty — Apply would stay grey over the operator's own change")
+  endif()
+  # Nothing is decoded on an inspection run, so there is no shown clock and
+  # the nudges accumulate from zero: N presses of +1 read N.
+  if(NOT v STREQUAL "${n}")
+    message(FATAL_ERROR
+      "gui_shell FAIL nudge ${n}: expected the box to read \"${n}\", got "
+      "\"${v}\"")
+  endif()
+  message(STATUS "gui_shell PASS nudge ${n}: box \"${v}\", edit dirty")
+endforeach()
+
 # The reason has somewhere to be READ, not just somewhere to be stored: it
 # is a region of the panel, inside the sidebar, under the two buttons it
 # explains — not in the sidebar's empty lower area, which §8 already spoke

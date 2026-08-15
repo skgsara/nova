@@ -54,6 +54,8 @@
 //                 position, not Fl_Scroll's cached copy of it [session 27]
 //   --correction  the whole truth table of `correction_for`, so §8.5 item
 //                 4's edit boundary is checkable with nothing decoded
+//   --sync-step   where a SYNC nudge starts from, which is the one thing
+//                 in the steppers that can be quietly wrong [sync_step]
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -249,6 +251,66 @@ CorrectionUi correction_for(bool live_surface, bool can_rerender,
     c.apply_active = live_surface || (can_rerender && edit_dirty);
     c.auto_active = can_rerender && (edit_dirty || applied);
     return c;
+}
+
+// --- the SYNC steppers [Sara, session 28] ----------------------------------
+// SYNC is a ppm trim and the operator nulls a slant with it BY EYE, so the
+// judgement they actually have is "a bit more", not "-93". Four buttons
+// step the box.
+//
+// The two sizes are measured, not chosen. At IOC 576 a line is 1810 px
+// wide, so a clock error of 1 ppm walks the line start by 1810e-6 px per
+// line: over a full ~1200-line chart that is ~2.2 px of skew at the bottom
+// of the page — visible, and about the smallest step worth having. Real
+// errors run 30-180 ppm (session 5; the four white-only fixtures read -70
+// to -118), so a 1 ppm button ALONE would be a hundred clicks to cross the
+// range it exists to cross. Fine 1, coarse 10.
+//
+// PHASE deliberately gets no steppers, and this is the asymmetry rather
+// than an omission: PHASE is a SEED refined to the best feature within
+// `search_frac` of it, ±3% of a line = ±54 columns at IOC 576
+// [core/fax.cpp, stage_dead_sector]. Any nudge smaller than that window is
+// refined straight back onto the same feature and the picture does not
+// move — a control that visibly does nothing, which is session 26's
+// finding 2 wearing a different hat. PHASE's instrument is the click.
+struct SyncStep {
+    double value;      // the ppm the box will hold after the nudge
+    bool from_shown;   // ...and whether it started from the shown clock
+};
+
+// The one decision here with a trap in it is WHERE A NUDGE STARTS when the
+// box is blank. Blank means "as measured", and the measured clock is not
+// 0 ppm — on the white-only fixtures it is -70 to -118. Starting from zero
+// would make the operator's FIRST click a jump of the entire clock error,
+// away from correct, on exactly the stations this control exists for. So a
+// nudge from blank starts at the clock the picture on the pane was DRAWN
+// on, which is the number the Quality field is already showing them.
+SyncStep sync_step(const char* typed, double shown_ppm, bool shown_valid,
+                   double delta) {
+    SyncStep s;
+    s.from_shown = false;
+    double base = 0.0;
+    char* end = nullptr;
+    const double v = typed ? std::strtod(typed, &end) : 0.0;
+    if (typed && end != typed) {
+        base = v;
+    } else if (shown_valid) {
+        base = shown_ppm;
+        s.from_shown = true;
+    }
+    s.value = base + delta;
+    return s;
+}
+
+// Whole ppm is the normal case — the buttons step by 1 and 10 — and a
+// trailing ".0" on every value is noise. A typed fraction survives.
+std::string sync_text(double ppm) {
+    char buf[32];
+    if (std::fabs(ppm - static_cast<double>(std::lround(ppm))) < 1e-9)
+        std::snprintf(buf, sizeof buf, "%ld", std::lround(ppm));
+    else
+        std::snprintf(buf, sizeof buf, "%.1f", ppm);
+    return buf;
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +720,12 @@ struct Shell {
     Fl_Int_Input* phase_input = nullptr;
     Fl_Box* cap_sync = nullptr;
     Fl_Float_Input* sync_input = nullptr;
+    // Coarse and fine, either way [see sync_step]. They follow the BOX,
+    // never the buttons: a stepper is only ever offered where the value it
+    // steps can be typed.
+    static constexpr int kSyncSteps = 4;
+    Fl_Button* sync_step_btn[kSyncSteps] = {nullptr, nullptr, nullptr,
+                                            nullptr};
     Fl_Button* apply = nullptr;
     Fl_Button* autob = nullptr;
     Fl_Box* correct_why = nullptr;   // §3's "with the reason shown"
@@ -723,6 +791,12 @@ struct Shell {
     char quality_buf[64] = "--";
     char lines_buf[32] = "line --";
     char status_buf[160] = "IDLE";
+    // The clock the picture on the pane was DRAWN on — the same number the
+    // Quality field is showing. It is where a SYNC nudge starts from when
+    // the box is blank [see sync_step], so it is recorded wherever that
+    // field is written and nowhere else.
+    double shown_ppm = 0.0;
+    bool shown_ppm_valid = false;
 
     // The RtAudio callback [thread 1, realtime]. It does exactly one
     // thing, which is §2's whole rule for this thread: no allocation, no
@@ -1026,6 +1100,23 @@ struct Shell {
         sync_input->deactivate();
         note("sync_input", sync_input);
 
+        // The four steppers [see sync_step]. Labels carry the sign so the
+        // direction is readable without the caption, and the coarse pair
+        // sits outside the fine pair so the row reads as a scale.
+        static const char* kStepLabels[kSyncSteps] = {"-10", "-1", "+1",
+                                                      "+10"};
+        static const char* kStepTags[kSyncSteps] = {
+            "sync_step_m10", "sync_step_m1", "sync_step_p1", "sync_step_p10"};
+        static Fl_Callback* const kStepCbs[kSyncSteps] = {
+            cb_sync_m10, cb_sync_m1, cb_sync_p1, cb_sync_p10};
+        for (int i = 0; i < kSyncSteps; i++) {
+            sync_step_btn[i] = new Fl_Button(0, 0, 0, 0, kStepLabels[i]);
+            sync_step_btn[i]->labelsize(kFontSize - 1);
+            sync_step_btn[i]->callback(kStepCbs[i], this);
+            sync_step_btn[i]->deactivate();
+            note(kStepTags[i], sync_step_btn[i]);
+        }
+
         apply = new Fl_Button(0, 0, 0, 0, "Apply");
         apply->labelsize(kFontSize);
         apply->callback(cb_apply, this);
@@ -1134,6 +1225,18 @@ struct Shell {
         py += kPanelRowH;
         cap_sync->resize(px + kPad, py, 62, kPanelRowH);
         sync_input->resize(px + kPad + 66, py + 1, 70, kPanelRowH - 2);
+        py += kPanelRowH;
+        // The steppers get their own row rather than the SYNC row's tail:
+        // 56 px are left beside the box, and four buttons in 56 px are
+        // 14 px each, which is not a target an operator can hit. Full
+        // width, four equal cells.
+        {
+            const int gap = kPad;
+            const int bw = (fw - 3 * gap) / kSyncSteps;
+            for (int i = 0; i < kSyncSteps; i++)
+                sync_step_btn[i]->resize(px + kPad + i * (bw + gap), py,
+                                         bw, kPanelRowH - 2);
+        }
         py += kPanelRowH + kPad;
         apply->resize(px + kPad, py, 70, 21);
         autob->resize(px + kPad + 74, py, 70, 21);
@@ -1304,6 +1407,15 @@ struct Shell {
         } else {
             phase_input->deactivate();
             sync_input->deactivate();
+        }
+        // The steppers are the SYNC box in another shape, so they are
+        // active exactly when it is — never a separate rule that could
+        // drift from it and leave a live button over a dead box.
+        for (int i = 0; i < kSyncSteps; i++) {
+            if (cu.inputs_active)
+                sync_step_btn[i]->activate();
+            else
+                sync_step_btn[i]->deactivate();
         }
         if (cu.apply_active) apply->activate(); else apply->deactivate();
         if (cu.auto_active) autob->activate(); else autob->deactivate();
@@ -1489,6 +1601,12 @@ struct Shell {
                       "%d/%d, %+.0f ppm, %d seams", r.locked_lines, r.lines,
                       r.clock_ppm, r.seams);
         field_val[4]->label(quality_buf);
+        // ...and this is the clock a blank SYNC box means. A re-render
+        // posts kBatchDone like any other decode, so after an Apply this
+        // tracks the CORRECTED picture and the next nudge is relative to
+        // what is on the pane rather than to the original measurement.
+        shown_ppm = r.clock_ppm;
+        shown_ppm_valid = true;
     }
 
     void update_status() {
@@ -1737,6 +1855,31 @@ struct Shell {
         s->apply_state();
     }
 
+    // A nudge is an edit, and it has to say so ITSELF: FLTK does not fire
+    // an input's callback for a programmatic `value()`, so a stepper that
+    // only wrote the box would move the number and leave Apply grey — the
+    // operator's change sitting in a control that claims nothing changed.
+    void nudge_sync(double delta) {
+        const SyncStep st =
+            sync_step(sync_input->value(), shown_ppm, shown_ppm_valid, delta);
+        sync_input->value(sync_text(st.value).c_str());
+        if (!edit_dirty) edit_dirty = true;
+        apply_state();
+    }
+
+    static void cb_sync_m10(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->nudge_sync(-10.0);
+    }
+    static void cb_sync_m1(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->nudge_sync(-1.0);
+    }
+    static void cb_sync_p1(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->nudge_sync(1.0);
+    }
+    static void cb_sync_p10(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->nudge_sync(10.0);
+    }
+
     // IOC or Rate changed: the transport gating and the ruler's width both
     // depend on them [§8.4 item 3, §8.3 item 1].
     static void cb_geometry(Fl_Widget*, void* p) {
@@ -1853,6 +1996,19 @@ int print_metrics(const Shell& s) {
                 s.phase_input->active() ? 1 : 0);
     std::printf("  sync_active          \"%d\"\n",
                 s.sync_input->active() ? 1 : 0);
+    // One number, not four: the steppers are the SYNC box in another shape
+    // and the shell activates them together, so what is worth inspecting is
+    // whether ALL of them agree with the box. A disagreement shows up as a
+    // count that is neither 0 nor 4.
+    int steps_active = 0;
+    for (int i = 0; i < Shell::kSyncSteps; i++)
+        if (s.sync_step_btn[i]->active()) steps_active++;
+    std::printf("  sync_steps_active    \"%d\"\n", steps_active);
+    // §8.5 item 4's edit boundary, as the shell actually holds it — so that
+    // "a nudge is an edit" is a checkable claim and not just a comment on
+    // `nudge_sync`. See --nudge.
+    std::printf("  edit_dirty           \"%d\"\n", s.edit_dirty ? 1 : 0);
+    std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
     std::printf("  apply_active         \"%d\"\n", s.apply->active() ? 1 : 0);
     std::printf("  auto_active          \"%d\"\n", s.autob->active() ? 1 : 0);
     std::printf("  correct_reason       \"%s\"\n", s.correct_reason.c_str());
@@ -1934,16 +2090,59 @@ int print_correction() {
     return 0;
 }
 
+// --sync-step: where a nudge STARTS, which is the whole of `sync_step` worth
+// checking and the one place it can be quietly wrong. A blank box means "as
+// measured", so the answer must be the shown clock and not zero: on the
+// white-only fixtures those differ by 70 to 118 ppm, which is the entire
+// error the control exists to remove. Printed as a table so the check reads
+// the RULE rather than a copy of the implementation.
+int print_sync_step() {
+    struct Case {
+        const char* typed;
+        double shown;
+        bool valid;
+        double delta;
+    };
+    static const Case cases[] = {
+        // blank box, a clock behind it: start from the clock, both ways
+        {"", -118.0, true, 1.0},   {"", -118.0, true, -1.0},
+        {"", -118.0, true, 10.0},  {"", -118.0, true, -10.0},
+        {"", -75.2, true, 10.0},
+        // blank box, nothing decoded yet: zero is all there is
+        {"", 0.0, false, 1.0},     {"", 0.0, false, -10.0},
+        // a typed value always wins over the shown clock — it IS the
+        // operator's answer, and a nudge moves THAT
+        {"-93", -118.0, true, 1.0}, {"-93", -118.0, true, -10.0},
+        {"0", -118.0, true, 1.0},   {"12.5", -118.0, true, 1.0},
+        // half-typed and unparseable: falls back to the shown clock rather
+        // than silently reading as zero
+        {"-", -118.0, true, 1.0},   {"-", 0.0, false, 1.0},
+    };
+    std::printf("# nova-gui SYNC steppers [sync_step]\n");
+    std::printf("# %8s %8s %5s %6s | %9s %10s\n", "typed", "shown", "valid",
+                "delta", "value", "from_shown");
+    for (const Case& c : cases) {
+        const SyncStep s = sync_step(c.typed, c.shown, c.valid, c.delta);
+        std::printf("  %8s %8.1f %5d %6.1f | %9s %10d\n",
+                    c.typed[0] ? c.typed : "\"\"", c.shown, c.valid ? 1 : 0,
+                    c.delta, sync_text(s.value).c_str(),
+                    s.from_shown ? 1 : 0);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     bool devices_only = false;
     bool metrics_only = false;
+    int nudges = 0;
     int win_w = kWinW;
     int win_h = kWinH;
     int resize_w = 0;
     int resize_h = 0;
     bool correction_only = false;
+    bool sync_step_only = false;
     int follow_batches = 0;
     int follow_rows = 0;
     LiveState state = LiveState::kIdle;
@@ -1981,6 +2180,11 @@ int main(int argc, char** argv) {
             ;
         else if (!std::strcmp(argv[i], "--correction"))
             correction_only = true;
+        else if (!std::strcmp(argv[i], "--sync-step"))
+            sync_step_only = true;
+        else if (!std::strcmp(argv[i], "--nudge") && i + 1 < argc &&
+                 std::sscanf(argv[++i], "%d", &nudges) == 1)
+            ;
         else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%dx%d", &follow_batches,
                              &follow_rows) == 2 &&
@@ -2009,7 +2213,8 @@ int main(int argc, char** argv) {
                      "\n                [--ioc auto|576|288] "
                      "[--rate auto|60|90|120]\n"
                      "                [--follow BATCHESxROWS] "
-                     "[--correction]\n"
+                     "[--correction] [--sync-step]\n"
+                     "                [--nudge N]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
@@ -2019,6 +2224,7 @@ int main(int argc, char** argv) {
     // Before the Shell is built: it is a pure function, and asking about it
     // must not need a window any more than it needs a sound card.
     if (correction_only) return print_correction();
+    if (sync_step_only) return print_sync_step();
 
     Shell shell;
     shell.build(win_w, win_h, argv[0]);
@@ -2036,6 +2242,12 @@ int main(int argc, char** argv) {
     // different code paths until this file stopped using resizable(); the
     // flag stays so that the equivalence keeps being checkable.
     if (resize_w > 0) shell.win->resize(0, 0, resize_w, resize_h);
+    // --nudge: press the +1 stepper N times, then report. FLTK does not
+    // fire an input's callback for a programmatic value(), so "a nudge is
+    // an edit" is a claim about code that had to be written by hand and
+    // can therefore be wrong by omission — the box would move and Apply
+    // would stay grey. This is the seam that makes it checkable.
+    for (int i = 0; i < nudges; i++) shell.nudge_sync(1.0);
     if (metrics_only) return print_metrics(shell);
     if (follow_batches > 0)
         return print_follow(shell, follow_batches, follow_rows);

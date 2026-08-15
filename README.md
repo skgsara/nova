@@ -170,8 +170,19 @@ then closed with the good version only in memory is the failure the whole
 lifecycle was shaped to remove. Auto puts the automatic decode back byte
 for byte, which is only possible because the decode's own settings were
 kept beside the stream. A correction that cannot be made says why rather
-than being a grey control with no explanation. What is left is clicking
-PHASE on the image rather than typing it.
+than being a grey control with no explanation.
+
+Session 28 gave SYNC four steppers — −10 −1 +1 +10 — because nulling a
+slant is a judgement made by eye ("a bit more"), not a number anyone can
+read off a chart. From a blank box a nudge starts at the clock the
+picture was *drawn on* rather than at zero: blank means "as measured",
+and on a white-only station the measured clock is −70 to −118 ppm, so
+starting at zero would make the operator's first click a jump of the
+entire error, away from correct. PHASE has no steppers on purpose — it
+is a seed the decoder refines within ±54 columns, so a smaller nudge
+would be refined straight back and the picture would not move. What is
+left is clicking PHASE on the image rather than typing it, which is
+that field's real instrument.
 
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen

@@ -36,6 +36,13 @@ back over the same file (one transmission, one file — there is no Save
 button). Auto puts the automatic decode back, byte for byte. When a
 correction is not possible the two buttons say why instead of just being
 grey.
+Since session 28 SYNC also has four steppers under it — −10 −1 +1 +10 — so
+a slant can be nulled by eye instead of by typing a number. From a blank
+box they start at the clock the picture was drawn on, not at zero: on a
+white-only station that is −70 to −118 ppm, and starting at zero would
+make the first click a jump of the whole error. PHASE has no steppers on
+purpose — it is a seed refined within ±54 columns, so a smaller nudge
+would move nothing; its instrument is the click, which is next.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

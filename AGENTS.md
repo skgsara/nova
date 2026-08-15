@@ -323,6 +323,25 @@ more likely right than one that agrees only with its own reasoning.
   outcome, and the second one only became reliably catchable when the test
   spun instead of sleeping — a poll that sleeps arrives after the window
   it is meant to observe.
+- **A default of "blank" is not a default of ZERO — find the number the
+  operator would mean and start there** (session 28, the SYNC steppers).
+  Blank in a correction box means "as measured", and the measured value
+  is generally not zero: on a white-only station the clock is −70 to −118
+  ppm, so a stepper that nudged from zero would make the operator's first
+  click a jump of the whole error, away from correct, on exactly the
+  signals the control exists for. Note this is the SAME distinction core/
+  already makes by giving `clock_ppm_fallback` a NaN sentinel instead of
+  0 — "a perfect clock IS 0 ppm", so zero cannot also mean absent. The
+  lesson generalizes: **when a control has an empty state, ask what value
+  the picture is currently being drawn with, not what value the variable
+  is initialized to.**
+- **A widget set programmatically does not tell anyone** (session 28).
+  FLTK fires an input's callback for typing, not for `value()`, so any
+  control that writes another control must re-declare whatever the typed
+  path would have declared — here, that an edit is in progress. The
+  failure is silent and asymmetric: the box shows the operator's change
+  while the shell reports itself clean, so Apply stays grey over it. Look
+  for this wherever one control drives another.
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.
