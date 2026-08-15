@@ -42,7 +42,11 @@ box they start at the clock the picture was drawn on, not at zero: on a
 white-only station that is −70 to −118 ppm, and starting at zero would
 make the first click a jump of the whole error. PHASE has no steppers on
 purpose — it is a seed refined within ±54 columns, so a smaller nudge
-would move nothing; its instrument is the click, which is next.
+would move nothing. Its instrument is the click, also session 28: click
+the dead sector on the picture and PHASE takes that column (same
+arithmetic as the ruler, so tick and click agree). The pointer turns into
+a crosshair exactly where a click can act, and a click past the picture's
+right edge names nothing.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

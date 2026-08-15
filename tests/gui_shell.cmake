@@ -582,6 +582,118 @@ foreach(n 1 3)
   message(STATUS "gui_shell PASS nudge ${n}: box \"${v}\", edit dirty")
 endforeach()
 
+# --- click-to-set-PHASE [§8.3 item 1, ROADMAP M4 item 5] -------------------
+# The click must name the column the RULER names at that x — ruler.hpp's
+# whole correctness claim — so the exact numbers are checked at the FIXED
+# zooms, where the scale is an exact ratio and the expected column is an
+# integer this file can derive independently of the implementation:
+#   100%  1 px per column  -> column x
+#   200%  2 px per column  -> column x/2
+#    25%  1 px per 4 cols  -> column 4x
+# Fit is deliberately not checked numerically here: its scale is
+# pane/cols, so any expectation would have to recompute the pane interior
+# and would end up restating the code. `ruler_mapping` pins Fit.
+foreach(case "100;300;300" "100;0;0" "200;300;150" "200;0;0" "25;300;1200")
+  list(GET case 0 z)
+  list(GET case 1 cx)
+  list(GET case 2 want)
+  run_metrics(out --state drawing --ioc 576 --rate 120 --zoom ${z}
+              --click-rows 200 --click ${cx})
+  shell_value(phase_value "${out}" got)
+  if(NOT got STREQUAL "${want}")
+    message(FATAL_ERROR
+      "gui_shell FAIL click: at ${z}% a click ${cx} px into the pane should "
+      "name column ${want}, named \"${got}\"")
+  endif()
+  # ...and a click is an edit, the same way a nudge is [§8.5 item 4].
+  shell_value(edit_dirty "${out}" d)
+  if(NOT d EQUAL 1)
+    message(FATAL_ERROR
+      "gui_shell FAIL click: at ${z}% a click set PHASE to \"${got}\" but "
+      "left the edit clean — Apply would stay grey over it")
+  endif()
+  message(STATUS "gui_shell PASS click: ${z}% x=${cx} -> column ${got}")
+endforeach()
+
+# A click past the image's right edge NAMES NOTHING [ruler.hpp,
+# `column_at`]: there is no picture there, so there is no dead sector
+# there, and inventing a column the operator did not point at is worse
+# than doing nothing. At 25% the 1810-column image is 452 px wide, so
+# 600 px in is off the picture while still inside the pane.
+run_metrics(out --state drawing --ioc 576 --rate 120 --zoom 25
+            --click-rows 200 --click 600)
+shell_value(phase_value "${out}" got)
+shell_value(edit_dirty "${out}" d)
+if(NOT got STREQUAL "" OR NOT d EQUAL 0)
+  message(FATAL_ERROR
+    "gui_shell FAIL click: a click beyond the image's right edge named "
+    "\"${got}\" (dirty=${d}); it names nothing")
+endif()
+message(STATUS "gui_shell PASS click: past the right edge names nothing")
+
+# The image can act exactly where PHASE can be typed — one rule, three
+# surfaces (box, steppers, image). A pane that accepted clicks with the
+# boxes grey would be a control that is offered and then found not to
+# work [§3], the failure this shell must not have.
+foreach(st "idle" "ready" "drawing" "decoding" "saved")
+  run_metrics(out --state ${st} --ioc 576 --rate 120 --click-rows 200)
+  shell_value(phase_active "${out}" pa)
+  shell_value(image_click_enabled "${out}" ce)
+  if(NOT ce EQUAL pa)
+    message(FATAL_ERROR
+      "gui_shell FAIL click ${st}: PHASE is typeable=${pa} but the image "
+      "accepts clicks=${ce}; they are the same rule")
+  endif()
+  # ...and where it cannot act, a click really does not act. This asks the
+  # HANDLER what it did (`click_named`, -1 for "did not act") rather than
+  # only reading the box afterwards: `apply_state`'s edit-end rule [§8.5
+  # item 4] clears the boxes whenever a correction is impossible, so a
+  # click that wrongly acted would be wiped a moment later and the shell
+  # would look right afterwards. Verified: removing the handler's guard
+  # leaves every box-and-dirty check passing and only this one fails.
+  run_metrics(out --state ${st} --ioc 576 --rate 120 --zoom 100
+              --click-rows 200 --click 300)
+  shell_value(click_named "${out}" named)
+  shell_value(phase_value "${out}" got)
+  shell_value(edit_dirty "${out}" d)
+  if(pa EQUAL 0)
+    if(NOT named EQUAL -1)
+      message(FATAL_ERROR
+        "gui_shell FAIL click ${st}: the image cannot act here, but the "
+        "handler named column ${named}")
+    endif()
+    if(NOT got STREQUAL "" OR NOT d EQUAL 0)
+      message(FATAL_ERROR
+        "gui_shell FAIL click ${st}: the image cannot act here, but a click "
+        "set PHASE to \"${got}\" (dirty=${d})")
+    endif()
+  else()
+    if(named EQUAL -1)
+      message(FATAL_ERROR
+        "gui_shell FAIL click ${st}: PHASE is typeable here, but a click "
+        "300 px into the pane did not act")
+    endif()
+  endif()
+  message(STATUS "gui_shell PASS click ${st}: image=${ce}, PHASE=${pa}")
+endforeach()
+
+# Fl_Scroll's cached xposition against the child's own left edge. Session
+# 27 found the vertical twin of this lying, with the pane visibly wrong
+# and the number the code checked reading perfectly; the ruler and the
+# click both read the cached copy, so if it ever lies they lie together
+# and only this comparison would show it.
+foreach(z "fit" "100" "200")
+  run_metrics(out --state drawing --ioc 576 --rate 120 --zoom ${z}
+              --click-rows 200)
+  shell_value(scroll_x_actual "${out}" sx)
+  if(NOT sx EQUAL 0)
+    message(FATAL_ERROR
+      "gui_shell FAIL click: at zoom ${z} the child sits ${sx} px from the "
+      "pane's interior edge with no horizontal scroll applied")
+  endif()
+endforeach()
+message(STATUS "gui_shell PASS click: the child's edge agrees with xposition")
+
 # The reason has somewhere to be READ, not just somewhere to be stored: it
 # is a region of the panel, inside the sidebar, under the two buttons it
 # explains — not in the sidebar's empty lower area, which §8 already spoke

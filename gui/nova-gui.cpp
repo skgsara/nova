@@ -56,6 +56,9 @@
 //                 4's edit boundary is checkable with nothing decoded
 //   --sync-step   where a SYNC nudge starts from, which is the one thing
 //                 in the steppers that can be quietly wrong [sync_step]
+//   --click X     set PHASE from a click X px into the pane interior,
+//                 through the real handler; --click-rows N gives the
+//                 pane a picture to be clicked on first
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -300,6 +303,33 @@ SyncStep sync_step(const char* typed, double shown_ppm, bool shown_valid,
     }
     s.value = base + delta;
     return s;
+}
+
+// --- what a click on the image NAMES [docs/05 §8.3 item 1] ----------------
+// PHASE is typed as an image column because that is what the ruler reads,
+// and the surveyed affordance is clicking the dead sector rather than
+// reading a number off the ruler and typing it [docs/04 answer 8]. This is
+// that click, and it is deliberately the SAME arithmetic the ruler draws
+// from — `nova::column_at` on the shell's own `view_state()` — because
+// ruler.hpp's correctness claim is precisely that the column under a screen
+// x is the column the ruler names there. Two different mappings would let
+// the operator click a tick and get a different number than the tick says;
+// one mapping cannot. If `Fl_Scroll::xposition` ever lies the way session
+// 27 found `yposition` lie, the ruler and the click are wrong TOGETHER and
+// the ruler is the visible witness — which is why `scroll_x_actual` is
+// reported beside it rather than being used as a second source of truth.
+//
+// Returns the column, or -1 for "this click names nothing". With the image
+// narrower than the pane, screen x beyond the image's right edge maps
+// legitimately past the last column [ruler.hpp, `column_at`]: there is no
+// picture there, so there is no dead sector there, and inventing a column
+// the operator did not point at is worse than doing nothing.
+int clicked_column(const nova::RulerView& v, double x) {
+    if (v.image_cols <= 0) return -1;
+    const double col = nova::column_at(v, x);
+    if (col < 0.0) return -1;
+    const int c = static_cast<int>(col);
+    return c < v.image_cols ? c : -1;
 }
 
 // Whole ppm is the normal case — the buttons step by 1 and 10 — and a
@@ -633,10 +663,42 @@ public:
     void set_scale_y(double s) { scale_y_ = s; }
     double scale_y() const { return scale_y_; }
 
+    // --- click-to-set-PHASE [docs/05 §8.3 item 1, ROADMAP M4 item 5] -----
+    // The image is a control now, and an image cannot go grey to say so.
+    // So the CURSOR carries what a greyed button would: a crosshair
+    // exactly where a click can act, the plain arrow where it cannot.
+    // That is §3's "not offered and then found not to work" for a surface
+    // with no button to grey — the reason line under Apply/Auto is still
+    // the words, this is the affordance.
+    void set_click_enabled(bool e) { click_enabled_ = e; }
+    bool click_enabled() const { return click_enabled_; }
+
+    int handle(int event) override {
+        switch (event) {
+            case FL_ENTER:
+                fl_cursor(click_enabled_ ? FL_CURSOR_CROSS
+                                         : FL_CURSOR_DEFAULT);
+                return 1;
+            case FL_LEAVE:
+                fl_cursor(FL_CURSOR_DEFAULT);
+                return 1;
+            case FL_PUSH:
+                // Not consumed when it cannot act: a click that is
+                // swallowed and does nothing is session 26's finding 2,
+                // and the pane below may still want it.
+                if (!click_enabled_) return 0;
+                do_callback();
+                return 1;
+            default:
+                return Fl_Widget::handle(event);
+        }
+    }
+
 private:
     nova::Image img_;
     std::unique_ptr<Fl_RGB_Image> rgb_;
     double scale_y_ = 1.0;
+    bool click_enabled_ = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1100,7 @@ struct Shell {
         note("image_pane", pane);
         pane->begin();
         view = new ImageView(0, 0, 0, 0);
+        view->callback(cb_image_click, this);
         note("image_view", view);
         pane->end();
 
@@ -1417,6 +1480,10 @@ struct Shell {
             else
                 sync_step_btn[i]->deactivate();
         }
+        // ...and so is the image, for the same reason: clicking it sets
+        // PHASE, so it can act exactly where PHASE can be typed. One rule,
+        // three surfaces [§8.3 item 1].
+        view->set_click_enabled(cu.inputs_active);
         if (cu.apply_active) apply->activate(); else apply->deactivate();
         if (cu.auto_active) autob->activate(); else autob->deactivate();
 
@@ -1880,6 +1947,49 @@ struct Shell {
         static_cast<Shell*>(p)->nudge_sync(10.0);
     }
 
+    // A click on the image sets PHASE to the column clicked [§8.3 item 1].
+    // It SETS, it does not apply: §8.5 item 4 already names "the first
+    // click on the image" as a thing that BEGINS an edit, and an edit ends
+    // at Apply. A click that re-rendered immediately would also make the
+    // operator's aim un-correctable — the natural motion is click, look,
+    // click again, then Apply.
+    // Returns the column it set, or -1 for "did not act". The return value
+    // is what makes the guard below OBSERVABLE: `apply_state`'s edit-end
+    // rule [§8.5 item 4] clears the boxes whenever a correction is not
+    // possible, so a click that wrongly acted on a dead surface would be
+    // wiped a moment later and the shell would look correct afterwards.
+    // Net-correct for an incidental reason is not the same as correct, and
+    // it is exactly the kind of thing that stops being true when the other
+    // rule is narrowed. So the handler says what it did.
+    int click_phase(double x_in_pane) {
+        // The guard lives HERE, at the point of effect, and not only in
+        // `ImageView::handle`. The two are asking different questions —
+        // handle decides whether to CONSUME the event (it does not, so the
+        // pane below may still want it), this decides whether the click
+        // may ACT — and only the second one is a rule about the operator's
+        // data. Putting it only in the widget would also leave it on the
+        // far side of the FLTK seam, where no screamer can reach it.
+        if (!view->click_enabled()) return -1;
+        const int col = clicked_column(view_state(), x_in_pane);
+        if (col < 0) return -1;   // named nothing; say nothing
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%d", col);
+        phase_input->value(buf);
+        // The same declaration `nudge_sync` has to make, for the same
+        // reason: FLTK did not fire the input's callback, we did.
+        if (!edit_dirty) edit_dirty = true;
+        apply_state();
+        return col;
+    }
+
+    static void cb_image_click(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        // x relative to the pane's INTERIOR left edge, which is the frame
+        // `column_at` is defined in and the one the ruler is aligned to
+        // [§8.0 correction 2].
+        s->click_phase(Fl::event_x() - (s->pane->x() + kFrame));
+    }
+
     // IOC or Rate changed: the transport gating and the ruler's width both
     // depend on them [§8.4 item 3, §8.3 item 1].
     static void cb_geometry(Fl_Widget*, void* p) {
@@ -2009,6 +2119,19 @@ int print_metrics(const Shell& s) {
     // `nudge_sync`. See --nudge.
     std::printf("  edit_dirty           \"%d\"\n", s.edit_dirty ? 1 : 0);
     std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
+    std::printf("  phase_value          \"%s\"\n", s.phase_input->value());
+    // The image is a control now [§8.3 item 1], so whether it can act is
+    // as inspectable as whether a button can.
+    std::printf("  image_click_enabled  \"%d\"\n",
+                s.view->click_enabled() ? 1 : 0);
+    // Fl_Scroll's cached xposition against the child's own left edge — the
+    // horizontal twin of `scroll_y_actual`, which session 27 needed after
+    // the cached copy lied. Reported rather than used: the ruler and the
+    // click both read the cached one, so they agree with each other by
+    // construction, and this is how a divergence would become visible
+    // instead of silently moving both.
+    std::printf("  scroll_x_actual      \"%d\"\n",
+                s.pane->x() + kFrame - s.view->x());
     std::printf("  apply_active         \"%d\"\n", s.apply->active() ? 1 : 0);
     std::printf("  auto_active          \"%d\"\n", s.autob->active() ? 1 : 0);
     std::printf("  correct_reason       \"%s\"\n", s.correct_reason.c_str());
@@ -2137,6 +2260,8 @@ int main(int argc, char** argv) {
     bool devices_only = false;
     bool metrics_only = false;
     int nudges = 0;
+    int click_x = -1;
+    int click_rows = 0;
     int win_w = kWinW;
     int win_h = kWinH;
     int resize_w = 0;
@@ -2185,6 +2310,12 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nudge") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%d", &nudges) == 1)
             ;
+        else if (!std::strcmp(argv[i], "--click") && i + 1 < argc &&
+                 std::sscanf(argv[++i], "%d", &click_x) == 1)
+            ;
+        else if (!std::strcmp(argv[i], "--click-rows") && i + 1 < argc &&
+                 std::sscanf(argv[++i], "%d", &click_rows) == 1)
+            ;
         else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%dx%d", &follow_batches,
                              &follow_rows) == 2 &&
@@ -2214,7 +2345,7 @@ int main(int argc, char** argv) {
                      "[--rate auto|60|90|120]\n"
                      "                [--follow BATCHESxROWS] "
                      "[--correction] [--sync-step]\n"
-                     "                [--nudge N]\n"
+                     "                [--nudge N] [--click X] [--click-rows N]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
@@ -2248,7 +2379,27 @@ int main(int argc, char** argv) {
     // can therefore be wrong by omission — the box would move and Apply
     // would stay grey. This is the seam that makes it checkable.
     for (int i = 0; i < nudges; i++) shell.nudge_sync(1.0);
-    if (metrics_only) return print_metrics(shell);
+    // --click X: set PHASE from a click X px into the pane's interior,
+    // through the shell's real handler [see click_phase]. --click-rows
+    // gives the pane a picture first, because a click on an empty pane
+    // is a different case and both are worth being able to ask for.
+    if (click_rows > 0) {
+        nova::Image img;
+        img.width = shell.image_cols();
+        img.height = click_rows;
+        img.px.assign(static_cast<std::size_t>(img.width) * img.height,
+                      128);
+        shell.show_image(img);
+    }
+    int click_named = -1;
+    if (click_x >= 0) click_named = shell.click_phase(click_x);
+    if (metrics_only) {
+        const int rc = print_metrics(shell);
+        if (click_x >= 0)
+            std::printf("  click_named          \"%d\"\n",
+                        click_named);
+        return rc;
+    }
     if (follow_batches > 0)
         return print_follow(shell, follow_batches, follow_rows);
 

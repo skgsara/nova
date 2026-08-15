@@ -1405,6 +1405,54 @@ nor 4. All three defects were deliberately reintroduced and each was
 caught. What still needs hands: that the buttons are comfortable to hit
 and the step sizes feel right on a real chart.]**
 
+**[BUILT session 28 — click-to-set-PHASE (§8.3 item 1).** An `FL_PUSH`
+handler on the image, calling `nova::column_at` on the shell's own
+`view_state()`. **The same arithmetic the ruler draws from**, and that is
+the whole design: ruler.hpp's correctness claim is that the column under
+a screen x is the column the ruler names at that x, so a second mapping
+would let the operator click a tick and get a different number than the
+tick says. One mapping cannot disagree with itself.
+
+*It sets, it does not apply.* §8.5 item 4 already names "the first click
+on the image" as something that BEGINS an edit, and an edit ends at
+Apply. A click that re-rendered immediately would also make the
+operator's aim un-correctable; the natural motion is click, look, click
+again, then Apply.
+
+*A click past the image's right edge names nothing.* With the image
+narrower than the pane, screen x beyond its right edge maps legitimately
+past the last column [ruler.hpp, `column_at`]. There is no picture there,
+so there is no dead sector there, and inventing a column the operator did
+not point at is worse than doing nothing.
+
+*The image is a control that cannot go grey*, so the CURSOR carries what
+a greyed button would: a crosshair exactly where a click can act, the
+plain arrow where it cannot. The reason line under Apply/Auto is still
+the words; this is the affordance. One rule drives all three surfaces —
+the box, the steppers, the image — off `correction_for`'s
+`inputs_active`.
+
+*The guard belongs at the point of effect.* With it only in
+`ImageView::handle`, the rule sat on the far side of the FLTK seam where
+no screamer reaches. `handle` still refuses to CONSUME the event (the
+pane below may want it); `click_phase` refuses to ACT. Different
+questions, same flag.
+
+*And the instrument had to be fixed before its verdict meant anything*
+[session 23's rule, and this is the sharpest instance of it yet]. With
+the guard deleted, every box-and-dirty check still passed — because
+`apply_state`'s edit-end rule clears the boxes whenever a correction is
+impossible, so a click that wrongly acted was wiped a moment later and
+the shell looked correct AFTERWARDS. Net-correct for an incidental reason
+is not correct, and it stops being true the moment the other rule is
+narrowed. `click_phase` now returns what it did and `--click` reports it,
+which is what makes the guard observable at all. Exact columns are pinned
+at the FIXED zooms, where the scale is an exact ratio and the expected
+column is an integer the test derives independently (100% → x, 200% →
+x/2, 25% → 4x); Fit is left to `ruler_mapping`, because any expectation
+here would have to recompute the pane interior and would end up restating
+the code.]**
+
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
 PHASE or SYNC, or the first click on the image, and **ends** at Apply, at

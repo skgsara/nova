@@ -747,12 +747,32 @@ one feature with several parts, plus one verification no test can do.
    chart being corrected. `correction_for` is a pure function of four
    booleans and `gui_shell` checks all sixteen combinations against the
    rules, so "an active button that does nothing" cannot come back here.
-5. **Click-to-set-PHASE on the image** [docs/05 §8.3 item 1, docs/04's
-   ruler/coordinate pattern]. PHASE is currently *typed* as an image
-   column; the surveyed affordance is clicking the dead sector. The
-   arithmetic is already built and pinned — `live/ruler.hpp`,
-   `ruler_mapping` — so this is an `FL_PUSH` handler calling functions
-   that exist, not new geometry.
+5. ~~**Click-to-set-PHASE on the image**~~ **Done (session 28)** [docs/05
+   §8.3 item 1, docs/04's ruler/coordinate pattern]. An `FL_PUSH` handler
+   calling `nova::column_at` on the shell's own `view_state()` — **the
+   same arithmetic the ruler draws from**, which is the point: ruler.hpp's
+   correctness claim is that the column under a screen x is the column the
+   ruler names there, and two mappings would let the operator click a tick
+   and get a different number than the tick says. It SETS, it does not
+   apply: §8.5 item 4 already names "the first click on the image" as
+   something that BEGINS an edit, and the natural motion is click, look,
+   click again, then Apply.
+   Three things the build settled. **A click past the image's right edge
+   names nothing** — with the image narrower than the pane that x maps
+   legitimately past the last column, and inventing a column the operator
+   did not point at is worse than doing nothing. **The image is a control
+   that cannot go grey**, so the cursor carries what a greyed button
+   would: a crosshair exactly where a click can act. And **the guard
+   belongs at the point of effect, not only in the widget** — with it only
+   in `ImageView::handle` the rule sat on the far side of the FLTK seam
+   where no screamer reaches.
+   **The instrument had to be fixed before its verdict meant anything**
+   [session 23's rule]: with the guard deleted, every box-and-dirty check
+   still passed, because `apply_state`'s edit-end rule clears the boxes
+   whenever a correction is impossible — the shell looked correct
+   *afterwards* while having acted wrongly. `click_phase` now returns what
+   it did and `--click` reports it, which is what makes the guard
+   observable at all. Three defects reintroduced, three caught.
 6. **A transmission arriving mid-edit** [docs/05 §8.2]: the background
    buffer plus the compact receiving indicator (state, line count,
    thumbnail) that switches the pane when clicked. Cheap by construction

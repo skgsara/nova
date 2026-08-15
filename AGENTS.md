@@ -335,6 +335,19 @@ more likely right than one that agrees only with its own reasoning.
   lesson generalizes: **when a control has an empty state, ask what value
   the picture is currently being drawn with, not what value the variable
   is initialized to.**
+- **"Net-correct" is not correct — find the seam where the rule you are
+  testing is the ONLY thing that could produce the answer** (session 28,
+  click-to-set-PHASE, and the sharpest instance of session 23's rule so
+  far). The click handler's "do not act where a correction is impossible"
+  guard was deleted as a mutation and EVERY box-and-dirty check still
+  passed: `apply_state`'s edit-end rule clears the boxes whenever a
+  correction is impossible, so the wrongly-acting click was wiped a moment
+  later and the shell looked right afterwards. A second rule was
+  concealing the absence of the first, and would have stopped doing so the
+  moment it was narrowed. The fix was to make the handler REPORT what it
+  did — a return value the production path ignores — so the guard has an
+  observable of its own. **Ask of every new check: what else could make
+  this pass?**
 - **A widget set programmatically does not tell anyone** (session 28).
   FLTK fires an input's callback for typing, not for `value()`, so any
   control that writes another control must re-declare whatever the typed

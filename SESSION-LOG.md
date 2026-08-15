@@ -7,6 +7,103 @@ anything as our develop history").
 
 ---
 
+## 2026-08-15 — Session 28 (cont): the click, and a guard whose absence
+## every check survived
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`clicked_column` as a
+pure function; `ImageView::handle` with the crosshair cursor and
+`set_click_enabled`; `Shell::click_phase` returning what it did;
+`cb_image_click`; `phase_value`, `image_click_enabled`, `scroll_x_actual`
+and `click_named` in `--metrics`; `--click X` / `--click-rows N`),
+`tests/gui_shell.cmake` (exact columns at the fixed zooms; the
+right-edge rejection; the click enabled exactly where PHASE is typeable;
+the child's edge against `xposition`). Files changed: `README.md`,
+`START-HERE.md`, `ROADMAP.md` (item 5 done), `docs/05-m4-shell-design.md`
+(§8.5 built-note), `AGENTS.md` (one pattern), `SESSION-LOG.md`. Test
+count unchanged at 37; suite 239.4 s.
+
+**ROADMAP M4 item 5 is built.** Click the picture and PHASE takes that
+column. It is an `FL_PUSH` handler calling `nova::column_at` on the
+shell's own `view_state()` — **the same arithmetic the ruler draws
+from**, which is the whole design rather than a convenience: ruler.hpp's
+correctness claim is that the column under a screen x is the column the
+ruler names there, and a second mapping would let the operator click a
+tick and get a different number than the tick says. One mapping cannot
+disagree with itself. It SETS and does not apply, because §8.5 item 4
+already names "the first click on the image" as something that BEGINS an
+edit, and because the natural motion is click, look, click again, then
+Apply.
+
+**Two smaller decisions.** A click past the image's right edge **names
+nothing** — with the image narrower than the pane that x maps
+legitimately past the last column, and inventing a column the operator
+did not point at is worse than doing nothing. And **the image is a
+control that cannot go grey**, so the cursor carries what a greyed
+button would: a crosshair exactly where a click can act. One rule drives
+all three surfaces — box, steppers, image — off `correction_for`.
+
+**The finding, and it is a lesson about tests rather than about
+clicking.** The guard that stops a click acting where a correction is
+impossible was deleted as a mutation, and **every box-and-dirty check
+still passed.** `apply_state`'s edit-end rule clears the boxes whenever a
+correction is impossible [§8.5 item 4], so the wrongly-acting click was
+wiped a moment later and the shell looked correct AFTERWARDS. A second
+rule was concealing the absence of the first — and would have stopped
+concealing it the moment anyone narrowed it. Net-correct for an
+incidental reason is not correct.
+
+The fix was to give the guard an observable of its own: `click_phase`
+now RETURNS what it did (the production path ignores it) and `--click`
+reports it, so the check can ask the handler what happened rather than
+inspect the wreckage afterwards. With that, the same mutation fails
+immediately and by name. Registered in `AGENTS.md`: **ask of every new
+check what else could make it pass.** This is session 23's
+verify-the-instrument rule in its sharpest form yet — the instrument was
+not broken, it was reading a different quantity than the one under test.
+
+**Where the numbers come from.** Exact columns are pinned at the FIXED
+zooms, where the scale is an exact ratio and the expected column is an
+integer the test derives independently of the code: 100% → x, 200% →
+x/2, 25% → 4x. Fit is deliberately left to `ruler_mapping`, because any
+expectation here would have to recompute the pane interior and would end
+up restating the implementation. `scroll_x_actual` is reported beside
+`xposition` — the horizontal twin of session 27's `scroll_y_actual` —
+and is *reported, not used*: the ruler and the click both read the
+cached copy, so if it ever lies they lie together and only the
+comparison shows it.
+
+**Contradictions found:** none in the tree. The three defects
+deliberately reintroduced were all caught after the seam was fixed: the
+click ignoring zoom ("at 200% a click 300 px into the pane should name
+column 150, named \"300\""), the missing right-edge rejection ("named
+\"2400\"; it names nothing"), and the missing guard ("the image cannot
+act here, but the handler named column 300").
+
+**Validation.** 37/37, full suite, 239.4 s.
+
+**Next step: two-click SYNC** — Sara's idea corrected earlier this
+session, and the same handler counting to two. The same feature at two
+rows measures the slant directly: `ppm = (col1-col0)/(row1-row0)/width *
+1e6`, so the click handler needs the ROW as well as the column (it
+currently ignores y) and a small amount of state for "first click
+pending". It matters because it turns an eyeballed ppm into a fit over
+the longest baseline available, which is what §7.1 currently apologises
+for not having. Then **per-line segments** (`Correction` as a list of
+`{from_line, phase, ppm}`, empty still meaning Auto, driven by the
+two-click gesture) — which still needs an answer to "how do we know it
+works", because a mid-chart step on a white-only station is undetectable
+by construction and no fixture shows one; a synthetic with a step
+injected at a known line is the likely instrument. **Item 6** (a
+transmission arriving mid-edit) is independent and remains the one thing
+the by-hand run could not observe. Also unverified by hand: everything
+in this entry and the previous one — the crosshair, whether clicking the
+dead sector actually lands where Sara means, and whether the stepper
+sizes feel right on a real chart. Registered, not scheduled: the
+pulse-station SYNC override; Zoom keeping the vertical ROW; template
+white-window robustness.
+
+---
+
 ## 2026-08-15 — Session 28: the hand-run's verdict, the steppers Sara
 ## asked for, and a default of blank that is not a default of zero
 

@@ -180,9 +180,13 @@ and on a white-only station the measured clock is −70 to −118 ppm, so
 starting at zero would make the operator's first click a jump of the
 entire error, away from correct. PHASE has no steppers on purpose — it
 is a seed the decoder refines within ±54 columns, so a smaller nudge
-would be refined straight back and the picture would not move. What is
-left is clicking PHASE on the image rather than typing it, which is
-that field's real instrument.
+would be refined straight back and the picture would not move — its real
+instrument is the click, which landed in the same session: click the dead
+sector on the picture and PHASE takes that column, using the same
+arithmetic the ruler draws from, so clicking a tick and reading a tick
+cannot disagree. A click past the image's right edge names nothing, and
+the cursor is a crosshair exactly where a click can act — an image cannot
+go grey to say it is inert, so the pointer says it instead.
 
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen
