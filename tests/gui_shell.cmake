@@ -694,6 +694,150 @@ foreach(z "fit" "100" "200")
 endforeach()
 message(STATUS "gui_shell PASS click: the child's edge agrees with xposition")
 
+# --- two-click SYNC [session 28] -------------------------------------------
+# A slant is the same feature at two ROWS, so the measurement is
+# (dcol/drow)/width * 1e6. Checked at 100% zoom, where a screen pixel is a
+# column and a row, so the expected ppm is arithmetic this file does
+# independently: 40 columns over 400 rows at width 1810 is
+# (0.1/1810)*1e6 = 55.2 ppm.
+set(CLICK ${NOVA_GUI})
+macro(click_run OUT)
+  run_metrics(${OUT} --state drawing --ioc 576 --rate 120 --zoom 100
+              --click-rows 1200 ${ARGN})
+endmacro()
+
+click_run(out --click 300,50 --click 340,450)
+shell_value(click_action "${out}" act)
+shell_value(sync_value "${out}" sv)
+if(NOT act STREQUAL "sync" OR NOT sv STREQUAL "55.2")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: 40 columns over 400 rows at width 1810 is "
+    "55.2 ppm; got action=${act} SYNC=\"${sv}\"")
+endif()
+message(STATUS "gui_shell PASS two-click: 40/400 -> ${sv} ppm")
+
+# The measurement is signed the same both ways round: clicking bottom then
+# top flips dcol and drow together, so it is the SAME slant and the
+# operator does not have to know which order the gesture wanted. PHASE
+# takes the UPPER click either way — the anchor is where the line starts
+# near the top of the picture, and on a slanted chart the bottom column is
+# wrong by exactly the slant being measured.
+click_run(down --click 300,50 --click 340,450)
+click_run(up --click 340,450 --click 300,50)
+shell_value(sync_value "${down}" sv_down)
+shell_value(sync_value "${up}" sv_up)
+shell_value(phase_value "${down}" ph_down)
+shell_value(phase_value "${up}" ph_up)
+if(NOT sv_down STREQUAL "${sv_up}")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: top-then-bottom reads ${sv_down} ppm but "
+    "bottom-then-top reads ${sv_up}; it is one measurement")
+endif()
+if(NOT ph_down STREQUAL "${ph_up}")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: PHASE is \"${ph_down}\" clicking down and "
+    "\"${ph_up}\" clicking up; it must take the upper click either way")
+endif()
+message(STATUS
+  "gui_shell PASS two-click: both orders -> ${sv_up} ppm, PHASE ${ph_up}")
+
+# A second click TOO CLOSE is not a bad measurement, it is the operator
+# re-picking PHASE — one number doing two jobs [min_baseline_rows]. Below
+# the baseline the click must NOT produce a ppm, because at that distance
+# it would mostly be measuring their own aim.
+click_run(out --click 300,50)
+shell_value(min_baseline_rows "${out}" need)
+if(need LESS 2)
+  message(FATAL_ERROR "gui_shell FAIL two-click: baseline is ${need} rows")
+endif()
+math(EXPR too_close "50 + ${need} - 1")
+click_run(out --click 300,50 --click 340,${too_close})
+shell_value(click_action "${out}" act)
+shell_value(sync_value "${out}" sv)
+shell_value(phase_value "${out}" ph)
+shell_value(pending_row "${out}" pend)
+if(NOT act STREQUAL "phase" OR NOT sv STREQUAL "")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: a second click ${need} rows short of the "
+    "baseline measured a slant (action=${act}, SYNC=\"${sv}\")")
+endif()
+if(NOT ph STREQUAL "340" OR NOT pend EQUAL ${too_close})
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: a too-close second click must become a "
+    "fresh PHASE pick; PHASE=\"${ph}\" pending=${pend}")
+endif()
+# ...and one row further IS enough. The boundary is checked from both
+# sides, because an off-by-one here is the difference between a control
+# that works and one that silently re-picks PHASE forever.
+math(EXPR just_enough "50 + ${need}")
+click_run(out --click 300,50 --click 340,${just_enough})
+shell_value(click_action "${out}" act)
+if(NOT act STREQUAL "sync")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: exactly ${need} rows apart is the stated "
+    "baseline and must measure; it did ${act}")
+endif()
+message(STATUS
+  "gui_shell PASS two-click: ${need}-row baseline, both sides of it")
+
+# The baseline is zoom-dependent, and that is not a detail: click
+# precision is one screen pixel, which is `1/scale` columns, so a view
+# scaled down needs a longer baseline to say the same thing. Zooming IN
+# must never ask for MORE rows.
+set(prev_need 0)
+foreach(z "25" "50" "100" "200")
+  run_metrics(out --state drawing --ioc 576 --rate 120 --zoom ${z}
+              --click-rows 1200)
+  shell_value(min_baseline_rows "${out}" n)
+  if(prev_need GREATER 0 AND n GREATER prev_need)
+    message(FATAL_ERROR
+      "gui_shell FAIL two-click: zoom ${z} needs ${n} rows, more than the "
+      "${prev_need} the smaller zoom needed")
+  endif()
+  set(prev_need ${n})
+  message(STATUS "gui_shell PASS two-click: zoom ${z}% needs ${n} rows")
+endforeach()
+
+# The gesture has no widget of its own, so the REASON LINE is the only
+# thing that can teach it — and it must name the baseline for the current
+# zoom, since that is the number deciding what the next click does.
+click_run(out --click 300,50)
+shell_value(correct_reason "${out}" why)
+shell_value(min_baseline_rows "${out}" need)
+if(NOT why MATCHES "${need}")
+  message(FATAL_ERROR
+    "gui_shell FAIL two-click: a measurement is pending and the reason "
+    "line does not name the ${need}-row baseline: \"${why}\"")
+endif()
+message(STATUS "gui_shell PASS two-click: pending says \"${why}\"")
+
+# A half-made measurement ends with the edit [§8.5 item 4]. An anchor
+# remembered from a chart no longer on the pane would complete a slant
+# measured across two DIFFERENT pictures — the one failure this gesture
+# can have that produces a plausible number rather than an obvious one.
+#
+# This has to happen inside ONE process: the rule fires on a TRANSITION,
+# and two `run_metrics` calls are two programs, so the second one would
+# start with nothing pending and pass no matter what the code did. That
+# is what --then-state exists for, and the first version of this check
+# got it wrong — it passed against a build with the clearing deleted.
+foreach(st "idle" "ready" "decoding" "saved")
+  click_run(out --click 300,50 --then-state ${st})
+  shell_value(pending_row "${out}" pend)
+  shell_value(phase_value "${out}" ph)
+  if(NOT pend EQUAL -1)
+    message(FATAL_ERROR
+      "gui_shell FAIL two-click ${st}: an anchor survived into a surface "
+      "with no correction to make (pending=${pend}); the next click there "
+      "would measure a slant across two different pictures")
+  endif()
+  if(NOT ph STREQUAL "")
+    message(FATAL_ERROR
+      "gui_shell FAIL two-click ${st}: PHASE "${ph}" survived the edit")
+  endif()
+endforeach()
+message(STATUS "gui_shell PASS two-click: no anchor survives the edit's end")
+
 # The reason has somewhere to be READ, not just somewhere to be stored: it
 # is a region of the panel, inside the sidebar, under the two buttons it
 # explains — not in the sidebar's empty lower area, which §8 already spoke

@@ -348,6 +348,15 @@ more likely right than one that agrees only with its own reasoning.
   did — a return value the production path ignores — so the guard has an
   observable of its own. **Ask of every new check: what else could make
   this pass?**
+- **A test that spans two PROCESSES cannot observe a transition** (session
+  28, two-click SYNC). "No half-made measurement survives the edit's end"
+  was written as two `--metrics` runs; each is a fresh program, so the
+  second started with nothing pending and passed against a build with the
+  clearing deleted. Any rule that fires when something CHANGES needs both
+  sides of the change inside one process — `--then-state` was added for
+  exactly that. Corollary for this shell's inspection seams: `--state`
+  builds the shell already in a state, so it can never exercise a rule
+  about entering one.
 - **A widget set programmatically does not tell anyone** (session 28).
   FLTK fires an input's callback for typing, not for `value()`, so any
   control that writes another control must re-declare whatever the typed

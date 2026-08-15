@@ -46,7 +46,12 @@ would move nothing. Its instrument is the click, also session 28: click
 the dead sector on the picture and PHASE takes that column (same
 arithmetic as the ruler, so tick and click agree). The pointer turns into
 a crosshair exactly where a click can act, and a click past the picture's
-right edge names nothing.
+right edge names nothing. Click the SAME feature again further down and
+Nova measures the slant between the two and fills SYNC — that is what
+turns an eyeballed ppm into one measured over a real baseline. The reason
+line tells you how far apart the two clicks have to be for the current
+zoom (111 rows at 100%, 442 at Fit-ish 25%); closer than that and the
+click is simply read as re-picking PHASE.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

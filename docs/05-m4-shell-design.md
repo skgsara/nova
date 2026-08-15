@@ -1453,6 +1453,63 @@ x/2, 25% → 4x); Fit is left to `ruler_mapping`, because any expectation
 here would have to recompute the pane interior and would end up restating
 the code.]**
 
+**[BUILT session 28 — two-click SYNC (Sara's idea, geometry corrected).**
+She proposed one click for SYNC and two for PHASE; it is the other way
+round. PHASE is a horizontal offset — one feature, one row, one click.
+SYNC is a SLANT, which is the same feature at two ROWS:
+`ppm = (dcol/drow) / width * 1e6`.
+
+*Why it earns its place.* §7.1 apologises for this field — "a ppm
+eyeballed off thirty seconds of preview is worse than one fitted over the
+whole transmission" — and is right, because an eyeballed number has no
+baseline behind it. Two clicks a thousand rows apart do. This is sessions
+5, 8 and 9's finding (precision is baseline, not averaging) reaching the
+operator's hand instead of only the decoder's fit.
+
+*One gesture — no mode, no hidden modifier.* A click sets PHASE and
+remembers where it landed; a second click far enough away measures the
+slant between them. Rejected: a mode toggle (this document's whole idiom
+is that "auto" is a value in the same list, never a separate mode) and a
+shift-click (invisible, and §3's principle is that this surface explains
+itself).
+
+*One number doing two jobs.* `min_baseline_rows` is the honest precision
+limit — one screen pixel of click error is `1/scale` columns, so the
+baseline has to put the resulting ppm error an order of magnitude below
+the 30–180 ppm the control exists to remove: 111 rows at 100%, 442 at
+25%, 56 at 200%. It is ALSO what disambiguates the gesture, because a
+second click too close to the first is not a bad slant measurement, it is
+the operator re-picking PHASE. So it becomes a fresh first click. No
+cancel button and no mode to leave, and the same rule that keeps the
+measurement honest is the one that keeps the gesture unambiguous.
+
+*The measurement is a residual*, read off the picture as drawn, so the
+box gets `shown_ppm + slant`. That is the same operation a stepper nudge
+performs and is now literally the same function — with one difference
+worth stating: a nudge starts from whatever the operator has typed, but a
+slant is READ OFF THE PICTURE, and the picture was drawn on the shown
+clock whatever sits unapplied in the box. The evidence outranks the
+draft.
+
+*PHASE takes the UPPER of the two clicks*, not the first. On a slanted
+chart the bottom column is wrong by exactly the slant being measured —
+which can exceed the `search_frac` the seed is refined within — and the
+anchor is where the line starts near the top of the picture. Two lines of
+code remove an ordering the operator would otherwise have to know about.
+
+*The reason line teaches the gesture*, naming the baseline the current
+zoom needs. This is the only control on the surface with no widget of its
+own, so §3's "say why" duty falls to the one place that can speak.
+
+*And a screamer that passed against a broken build.* "No anchor survives
+the edit's end" was first written as two `run_metrics` calls — which are
+two PROCESSES, so the second began with nothing pending and passed
+whatever the code did. The rule fires on a TRANSITION, and the seam could
+not express one; `--then-state` exists for that. Four defects were
+reintroduced (the width dropped from the slant, the baseline test
+removed, PHASE keeping the first click, the anchor outliving the edit)
+and only after the seam was fixed did all four fail.]**
+
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
 PHASE or SYNC, or the first click on the image, and **ends** at Apply, at

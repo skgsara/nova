@@ -188,6 +188,18 @@ cannot disagree. A click past the image's right edge names nothing, and
 the cursor is a crosshair exactly where a click can act — an image cannot
 go grey to say it is inert, so the pointer says it instead.
 
+A SECOND click, far enough down the picture, measures the slant between
+the two and fills SYNC — because a slant is the same feature at two rows,
+and two clicks a thousand rows apart are a baseline rather than an
+eyeball. "Far enough" is derived rather than chosen: one screen pixel of
+click error is one column at 100% zoom, so the baseline is whatever puts
+the resulting error an order of magnitude below the 30–180 ppm the
+control exists to remove. That same number keeps the gesture unambiguous
+— a second click too close is not a bad measurement, it is the operator
+re-picking PHASE — so there is no mode to leave and no cancel button, and
+the reason line under the buttons names the baseline the current zoom
+needs.
+
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen
 commercial weather-fax receiver manuals — which is where Nova's two

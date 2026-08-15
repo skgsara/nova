@@ -879,6 +879,46 @@ one feature with several parts, plus one verification no test can do.
    over the operator's own change. `--sync-step` and `--nudge N` make
    both checkable without a window; all three defects were reintroduced
    deliberately and each was caught.
+10. ~~**Two-click SYNC**~~ **Done (session 28)** — Sara's idea, with the
+   geometry corrected: she proposed one click for SYNC and two for PHASE,
+   and it is the other way round. PHASE is a horizontal offset (one
+   feature, one row, one click); SYNC is a SLANT, so it needs the same
+   feature at two rows: `ppm = (dcol/drow)/width * 1e6`.
+   **Why it is the strongest of the five ideas she raised**: §7.1
+   apologises that "a ppm eyeballed off thirty seconds of preview is worse
+   than one fitted over the whole transmission", and it is right, because
+   an eyeballed number has no baseline. Two clicks a thousand rows apart
+   DO have one. This is sessions 5, 8 and 9's finding — precision is
+   baseline, not averaging — reaching the operator's hand rather than only
+   the decoder's fit.
+   **One gesture, no mode and no hidden modifier.** A click sets PHASE and
+   remembers where it was; a second click far enough away measures the
+   slant. "Far enough" is `min_baseline_rows`, and it does two jobs with
+   one number: it is the honest precision limit (one screen pixel of click
+   error is `1/scale` columns, so the baseline must put the resulting ppm
+   error an order of magnitude below the 30–180 ppm this control exists to
+   remove — 111 rows at 100%, 442 at 25%), AND it disambiguates the
+   gesture, because a second click too close is not a bad measurement, it
+   is the operator re-picking PHASE. No cancel button, no mode to leave.
+   Three more things the build settled. **The measurement is a residual**
+   on the picture as drawn, so the box gets `shown_ppm + slant` — the same
+   operation a stepper nudge performs, and now literally the same function
+   (`sync_step`), with one stated difference: a slant is READ OFF THE
+   PICTURE, so it adds to the shown clock and not to an unapplied typed
+   value. The evidence outranks the draft. **PHASE takes the UPPER of the
+   two clicks**, not the first — on a slanted chart the bottom column is
+   wrong by exactly the slant being measured, which can exceed the
+   `search_frac` the seed is refined within. And **the reason line teaches
+   the gesture**, naming the baseline the current zoom needs, because this
+   is the one control on the surface with no widget of its own to explain
+   it.
+   **A screamer that passed against a broken build, and had to be fixed
+   first** [session 23's rule]: "no anchor survives the edit's end" was
+   written as two `run_metrics` calls, which are two PROCESSES — the
+   second started with nothing pending and passed whatever the code did.
+   The rule fires on a TRANSITION, so the seam grew `--then-state` to
+   express one. Four defects reintroduced, and only after that fix did all
+   four fail.
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
 next. Items 5, 6, 7 and 8 are independent and can be taken in any order.

@@ -56,9 +56,11 @@
 //                 4's edit boundary is checkable with nothing decoded
 //   --sync-step   where a SYNC nudge starts from, which is the one thing
 //                 in the steppers that can be quietly wrong [sync_step]
-//   --click X     set PHASE from a click X px into the pane interior,
-//                 through the real handler; --click-rows N gives the
-//                 pane a picture to be clicked on first
+//   --click X,Y   click the image at X,Y through the real handler;
+//                 repeatable, because the gesture under test is a
+//                 SEQUENCE (one click sets PHASE, a second one far
+//                 enough down measures the slant). --click-rows N
+//                 gives the pane a picture to be clicked on first
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -330,6 +332,46 @@ int clicked_column(const nova::RulerView& v, double x) {
     if (col < 0.0) return -1;
     const int c = static_cast<int>(col);
     return c < v.image_cols ? c : -1;
+}
+
+// --- two-click SYNC [Sara, session 28] ------------------------------------
+// The other half of the click, and the reason it is worth building: SYNC
+// is a SLANT, and a slant is the same feature at two different ROWS. One
+// click cannot see it; two can. `ppm = (dcol/drow) / width * 1e6`.
+//
+// What that buys is not convenience. §7.1 currently apologises for this
+// field — "a ppm eyeballed off thirty seconds of preview is worse than one
+// fitted over the whole transmission" — and it is right, because an
+// eyeballed number has no baseline behind it. Two clicks a thousand rows
+// apart DO have one. This is sessions 5, 8 and 9's finding (precision is
+// baseline, not averaging) reaching the operator's hand instead of only
+// the decoder's fit.
+//
+// The measurement is a RESIDUAL: it is read off the picture as drawn, so
+// it is the error remaining on top of whatever clock that render used, and
+// the value for the box is `shown_ppm + residual`. Same reasoning as the
+// steppers' blank-box rule, and the same trap if it is skipped — a picture
+// drawn at -118 ppm with 4 ppm of visible slant left needs -114, not 4.
+
+// One screen pixel of click error is `1/scale` columns, so the shortest
+// baseline worth measuring over is the one that puts the resulting ppm
+// error an order of magnitude below the errors this control exists to
+// remove (30-180 ppm; session 5). Below that the operator's two clicks
+// are measuring their own aim.
+constexpr double kSlantPrecisionPpm = 5.0;
+
+int min_baseline_rows(double scale, int image_cols) {
+    if (scale <= 0.0 || image_cols <= 0) return 0;
+    const double n = 1e6 / (kSlantPrecisionPpm * scale * image_cols);
+    return static_cast<int>(std::ceil(n));
+}
+
+// Signed both ways on purpose: clicking bottom-then-top flips dcol and
+// drow together, so the answer is the same measurement and the operator
+// does not have to know which order the gesture wanted.
+double slant_ppm(int dcol, int drow, int image_cols) {
+    if (drow == 0 || image_cols <= 0) return 0.0;
+    return (static_cast<double>(dcol) / drow) / image_cols * 1e6;
 }
 
 // Whole ppm is the normal case — the buttons step by 1 and 10 — and a
@@ -800,6 +842,11 @@ struct Shell {
     // (ROADMAP item 6) gives the operator a second picture to switch away
     // from. A typed-but-not-applied value is an edit in progress.
     bool edit_dirty = false;
+    // The first click of a two-click SYNC measurement, in image
+    // coordinates; -1 for none. Not a mode — see click_image — just where
+    // the last click landed, so the next one can be measured against it.
+    int pending_col = -1;
+    int pending_row = -1;
     bool was_rerendering = false;   // so drain notices one start or finish
     // What the picture on the pane was last re-rendered WITH, so Auto knows
     // whether it has anything to undo. Empty means the picture is the
@@ -1457,6 +1504,11 @@ struct Shell {
             applied = nova::Correction{};
             phase_input->value("");
             sync_input->value("");
+            // The pending anchor is part of the edit, so it ends with it.
+            // A click remembered from a chart no longer on the pane would
+            // complete a slant measured across two different pictures.
+            pending_col = -1;
+            pending_row = -1;
         }
 
         // One place decides all three, and it is a pure function so the
@@ -1491,7 +1543,29 @@ struct Shell {
         // can — what Apply will DO is the thing an operator most needs
         // told, because it overwrites a file with no prompt [§8.5 items
         // 2-3].
-        if (!engine)
+        //
+        // A half-made slant measurement outranks all of them while it is
+        // pending, because it is the ONE thing on this surface an operator
+        // cannot discover by looking: the two-click gesture has no widget
+        // of its own [see click_image]. §3's sentence is about controls
+        // that cannot act; this is the same duty for a control with
+        // nothing to point at. It names the baseline the CURRENT zoom
+        // needs, which is the number that decides whether the next click
+        // measures a slant or re-picks PHASE.
+        const int need_rows =
+            min_baseline_rows(view_state().scale, image_cols());
+        // No `engine` term: a pending anchor can only exist if a click
+        // was allowed to act, which already implies a live surface. Adding
+        // one would be redundant in production and would suppress the hint
+        // on the inspection path, where it is the only way to check it.
+        if (pending_row >= 0 && need_rows > 0 && !busy) {
+            char why[128];
+            std::snprintf(why, sizeof why,
+                          "PHASE set; click the same feature %d+ rows away "
+                          "to measure the slant",
+                          need_rows);
+            correct_reason = why;
+        } else if (!engine)
             correct_reason = "no capture running";
         else if (busy)
             correct_reason = "re-rendering the saved image";
@@ -1893,6 +1967,8 @@ struct Shell {
         s->engine->redecode(c);
         s->applied = c;
         s->edit_dirty = false;   // the edit ends at Apply [§8.5 item 4]
+        s->pending_col = -1;     // ...and so does a half-made measurement
+        s->pending_row = -1;
         s->apply_state();
     }
 
@@ -1908,6 +1984,8 @@ struct Shell {
         s->engine->redecode(nova::Correction{});
         s->applied = nova::Correction{};
         s->edit_dirty = false;   // ...and at Auto [§8.5 item 4]
+        s->pending_col = -1;
+        s->pending_row = -1;
         s->apply_state();
     }
 
@@ -1953,15 +2031,37 @@ struct Shell {
     // at Apply. A click that re-rendered immediately would also make the
     // operator's aim un-correctable — the natural motion is click, look,
     // click again, then Apply.
-    // Returns the column it set, or -1 for "did not act". The return value
-    // is what makes the guard below OBSERVABLE: `apply_state`'s edit-end
-    // rule [§8.5 item 4] clears the boxes whenever a correction is not
-    // possible, so a click that wrongly acted on a dead surface would be
-    // wiped a moment later and the shell would look correct afterwards.
-    // Net-correct for an incidental reason is not the same as correct, and
-    // it is exactly the kind of thing that stops being true when the other
-    // rule is narrowed. So the handler says what it did.
-    int click_phase(double x_in_pane) {
+    // ONE gesture, resolved by the distance between two clicks — not a
+    // mode, and not a hidden modifier [docs/04 Finding 2's idiom: a value
+    // in the same list, never a separate mode]. A click sets PHASE and
+    // remembers where it was; a SECOND click far enough down the picture
+    // measures the slant between them and fills SYNC. PHASE keeps the
+    // UPPER of the two clicks: the anchor is where the line starts near the
+    // TOP of the picture, and the whole point of the second click is that
+    // the feature has moved by then.
+    //
+    // "Far enough" is `min_baseline_rows`, and it is doing two jobs with
+    // one number. It is the honest precision limit (below it the operator
+    // is measuring their own aim), AND it is what disambiguates the
+    // gesture: a second click too close to the first is not a bad slant
+    // measurement, it is the operator re-picking PHASE, so it simply
+    // becomes a fresh first click. No cancel button, no mode to leave.
+    //
+    // Returns what it DID, because that is what makes the guard below
+    // observable: `apply_state`'s edit-end rule [§8.5 item 4] clears the
+    // boxes whenever a correction is not possible, so a click that wrongly
+    // acted on a dead surface would be wiped a moment later and the shell
+    // would look correct afterwards. Net-correct for an incidental reason
+    // is not the same as correct.
+    enum class ClickAction { kNone, kPhase, kSync };
+    struct ClickResult {
+        ClickAction action = ClickAction::kNone;
+        int column = -1;
+        double ppm = 0.0;
+    };
+
+    ClickResult click_image(double x_in_pane, double y_in_view) {
+        ClickResult r;
         // The guard lives HERE, at the point of effect, and not only in
         // `ImageView::handle`. The two are asking different questions —
         // handle decides whether to CONSUME the event (it does not, so the
@@ -1969,25 +2069,87 @@ struct Shell {
         // may ACT — and only the second one is a rule about the operator's
         // data. Putting it only in the widget would also leave it on the
         // far side of the FLTK seam, where no screamer can reach it.
-        if (!view->click_enabled()) return -1;
-        const int col = clicked_column(view_state(), x_in_pane);
-        if (col < 0) return -1;   // named nothing; say nothing
+        if (!view->click_enabled()) return r;
+        const nova::RulerView v = view_state();
+        const int col = clicked_column(v, x_in_pane);
+        if (col < 0) return r;   // named nothing; say nothing
+        const int row = v.scale > 0.0
+                            ? static_cast<int>(y_in_view / v.scale)
+                            : -1;
+
+        // Second click, with a baseline behind it: SYNC.
+        const int need = min_baseline_rows(v.scale, v.image_cols);
+        if (pending_row >= 0 && row >= 0 && need > 0 &&
+            std::abs(row - pending_row) >= need) {
+            // The measurement is a residual on the picture AS DRAWN, so it
+            // is added to the clock that drew it — the same rule the
+            // steppers' blank box obeys, and the same error if it is
+            // skipped.
+            const double residual =
+                slant_ppm(col - pending_col, row - pending_row, v.image_cols);
+            // The SAME operation a stepper nudge performs — a delta on the
+            // clock the picture was drawn on — so it is the same function,
+            // and `--sync-step`'s table screams for both. The empty
+            // `typed` is deliberate and is the one difference worth
+            // stating: a nudge starts from whatever the operator has
+            // typed, but a SLANT IS READ OFF THE PICTURE, and the picture
+            // was drawn on the shown clock no matter what is sitting in
+            // the box unapplied. The evidence outranks the draft.
+            const SyncStep st =
+                sync_step("", shown_ppm, shown_ppm_valid, residual);
+            sync_input->value(sync_text(st.value).c_str());
+            // PHASE takes the UPPER of the two clicks, which in the natural
+            // top-down order is the first one and needs no correcting. In
+            // the other order it does: the anchor is where the line starts
+            // near the TOP of the picture [core/fax.cpp, `dead_start0`],
+            // and on a slanted chart the bottom column is wrong by exactly
+            // the slant just measured — which can exceed the ±search_frac
+            // the seed is refined within. Making the rule "the upper
+            // click" instead of "the first click" costs two lines and
+            // removes an ordering the operator would otherwise have to
+            // know about.
+            if (row < pending_row) {
+                char up[32];
+                std::snprintf(up, sizeof up, "%d", col);
+                phase_input->value(up);
+            }
+            pending_row = -1;
+            pending_col = -1;
+            if (!edit_dirty) edit_dirty = true;
+            apply_state();
+            r.action = ClickAction::kSync;
+            r.column = col;
+            r.ppm = st.value;
+            return r;
+        }
+
+        // Otherwise it is a first click: PHASE, and the anchor for a slant.
         char buf[32];
         std::snprintf(buf, sizeof buf, "%d", col);
         phase_input->value(buf);
+        pending_col = col;
+        pending_row = row;
         // The same declaration `nudge_sync` has to make, for the same
         // reason: FLTK did not fire the input's callback, we did.
         if (!edit_dirty) edit_dirty = true;
         apply_state();
-        return col;
+        r.action = ClickAction::kPhase;
+        r.column = col;
+        return r;
     }
 
     static void cb_image_click(Fl_Widget*, void* p) {
         Shell* s = static_cast<Shell*>(p);
         // x relative to the pane's INTERIOR left edge, which is the frame
         // `column_at` is defined in and the one the ruler is aligned to
-        // [§8.0 correction 2].
-        s->click_phase(Fl::event_x() - (s->pane->x() + kFrame));
+        // [§8.0 correction 2]. y is relative to the CHILD, because the
+        // child's own position is the truth about vertical scroll —
+        // session 27 found `Fl_Scroll::yposition` lying while the pane was
+        // visibly wrong. Horizontally the cached copy is used instead, and
+        // deliberately: the ruler reads it, so click and ruler agree by
+        // construction [see clicked_column].
+        s->click_image(Fl::event_x() - (s->pane->x() + kFrame),
+                       Fl::event_y() - s->view->y());
     }
 
     // IOC or Rate changed: the transport gating and the ruler's width both
@@ -2132,6 +2294,11 @@ int print_metrics(const Shell& s) {
     // instead of silently moving both.
     std::printf("  scroll_x_actual      \"%d\"\n",
                 s.pane->x() + kFrame - s.view->x());
+    // The two-click gesture's whole state, and the number that decides
+    // what the NEXT click does [see click_image].
+    std::printf("  pending_row          \"%d\"\n", s.pending_row);
+    std::printf("  min_baseline_rows    \"%d\"\n",
+                min_baseline_rows(v.scale, v.image_cols));
     std::printf("  apply_active         \"%d\"\n", s.apply->active() ? 1 : 0);
     std::printf("  auto_active          \"%d\"\n", s.autob->active() ? 1 : 0);
     std::printf("  correct_reason       \"%s\"\n", s.correct_reason.c_str());
@@ -2260,8 +2427,10 @@ int main(int argc, char** argv) {
     bool devices_only = false;
     bool metrics_only = false;
     int nudges = 0;
-    int click_x = -1;
     int click_rows = 0;
+    std::vector<std::pair<int, int>> clicks;
+    LiveState then_state = LiveState::kIdle;
+    bool then_state_given = false;
     int win_w = kWinW;
     int win_h = kWinH;
     int resize_w = 0;
@@ -2310,12 +2479,23 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nudge") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%d", &nudges) == 1)
             ;
-        else if (!std::strcmp(argv[i], "--click") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%d", &click_x) == 1)
-            ;
+        else if (!std::strcmp(argv[i], "--click") && i + 1 < argc) {
+            int cx = 0, cy = 0;
+            // X,Y in image-pane coordinates. Repeatable, because
+            // the gesture under test is a SEQUENCE of clicks.
+            if (std::sscanf(argv[++i], "%d,%d", &cx, &cy) == 2)
+                clicks.emplace_back(cx, cy);
+            else if (std::sscanf(argv[i], "%d", &cx) == 1)
+                clicks.emplace_back(cx, 0);
+            else
+                bad = true;
+        }
         else if (!std::strcmp(argv[i], "--click-rows") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%d", &click_rows) == 1)
             ;
+        else if (!std::strcmp(argv[i], "--then-state") && i + 1 < argc &&
+                 parse_state(argv[++i], &then_state))
+            then_state_given = true;
         else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%dx%d", &follow_batches,
                              &follow_rows) == 2 &&
@@ -2345,7 +2525,8 @@ int main(int argc, char** argv) {
                      "[--rate auto|60|90|120]\n"
                      "                [--follow BATCHESxROWS] "
                      "[--correction] [--sync-step]\n"
-                     "                [--nudge N] [--click X] [--click-rows N]\n"
+                     "                [--nudge N] [--click X,Y ...] [--click-rows N]\n"
+                     "                [--then-state NAME]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
@@ -2391,13 +2572,39 @@ int main(int argc, char** argv) {
                       128);
         shell.show_image(img);
     }
+    // Each click goes through the shell's real handler, in order, so the
+    // sequence under test is the sequence an operator makes.
+    const char* click_action = "none";
     int click_named = -1;
-    if (click_x >= 0) click_named = shell.click_phase(click_x);
+    double click_ppm = 0.0;
+    for (const std::pair<int, int>& c : clicks) {
+        const Shell::ClickResult r =
+            shell.click_image(c.first, c.second);
+        switch (r.action) {
+            case Shell::ClickAction::kNone: click_action = "none"; break;
+            case Shell::ClickAction::kPhase: click_action = "phase"; break;
+            case Shell::ClickAction::kSync: click_action = "sync"; break;
+        }
+        click_named = r.column;
+        click_ppm = r.ppm;
+    }
+    // --then-state: drive the shell into a SECOND state after the clicks,
+    // which is the only way this seam can express a TRANSITION. Rules that
+    // fire when the surface changes under a half-finished edit [§8.5 item
+    // 4's edit-end] are otherwise unreachable without a window: --state
+    // builds the shell already in a state, so nothing ever changes.
+    if (then_state_given) {
+        shell.state = then_state;
+        shell.apply_state();
+    }
     if (metrics_only) {
         const int rc = print_metrics(shell);
-        if (click_x >= 0)
-            std::printf("  click_named          \"%d\"\n",
-                        click_named);
+        if (!clicks.empty()) {
+            std::printf("  click_action         \"%s\"\n", click_action);
+            std::printf("  click_named          \"%d\"\n", click_named);
+            std::printf("  click_ppm            \"%s\"\n",
+                        sync_text(click_ppm).c_str());
+        }
         return rc;
     }
     if (follow_batches > 0)

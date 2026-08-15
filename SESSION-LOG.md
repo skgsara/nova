@@ -7,6 +7,108 @@ anything as our develop history").
 
 ---
 
+## 2026-08-15 — Session 28 (cont 2): two-click SYNC, and a screamer that
+## passed against a build with the rule deleted
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`min_baseline_rows` and
+`slant_ppm` as pure functions; `click_phase` → `click_image` returning a
+`ClickResult`; the pending anchor and its three end points; the reason
+line teaching the gesture; `pending_row` / `min_baseline_rows` /
+`click_action` / `click_ppm` in `--metrics`; `--click X,Y` repeatable and
+`--then-state NAME`), `tests/gui_shell.cmake` (the measurement, both
+click orders, both sides of the baseline, the zoom dependence, the
+reason line, the edit's end). Files changed: `README.md`,
+`START-HERE.md`, `ROADMAP.md` (item 10), `docs/05-m4-shell-design.md`
+(§8.5 built-note), `AGENTS.md` (one pattern), `SESSION-LOG.md`. Test
+count unchanged at 37; suite 249.5 s.
+
+**Sara's idea, with the geometry corrected, is built.** She proposed one
+click for SYNC and two for PHASE; it is the other way round, and the
+reason it is the strongest of her five ideas is §7.1's own apology —
+"a ppm eyeballed off thirty seconds of preview is worse than one fitted
+over the whole transmission". That is true of an eyeballed number
+because it has no baseline. **Two clicks a thousand rows apart do have
+one**, so this is sessions 5, 8 and 9's finding — precision is baseline,
+not averaging — reaching the operator's hand instead of only the
+decoder's fit. `ppm = (dcol/drow) / width * 1e6`.
+
+**One gesture, no mode and no hidden modifier.** A click sets PHASE and
+remembers where it landed; a second far enough away measures the slant.
+A mode toggle was rejected because this document's whole idiom is that
+"auto" is a value in the same list and never a separate mode; a
+shift-click was rejected because it is invisible and this surface is
+supposed to explain itself.
+
+**`min_baseline_rows` does two jobs with one number, which is why the
+design holds together.** It is the honest precision limit — one screen
+pixel of click error is `1/scale` columns, so the baseline must put the
+resulting ppm error an order of magnitude below the 30-180 ppm the
+control exists to remove (111 rows at 100%, 442 at 25%, 56 at 200%) —
+AND it is what disambiguates the gesture, because **a second click too
+close is not a bad measurement, it is the operator re-picking PHASE**.
+So it becomes a fresh first click. No cancel button, no mode to leave.
+
+**Three smaller decisions.** The measurement is a **residual** on the
+picture as drawn, so the box gets `shown_ppm + slant` — the same
+operation a stepper nudge performs, and now literally `sync_step`, with
+one difference stated in the code: a nudge starts from what the operator
+TYPED, but a slant is READ OFF THE PICTURE, which was drawn on the shown
+clock whatever sits unapplied in the box. The evidence outranks the
+draft. **PHASE takes the UPPER of the two clicks**, not the first: on a
+slanted chart the bottom column is wrong by exactly the slant being
+measured, which can exceed the `search_frac` the seed is refined within —
+found by running the gesture bottom-to-top and seeing PHASE land 40
+columns off. And **the reason line teaches the gesture**, naming the
+baseline the current zoom needs, because this is the one control on the
+surface with no widget of its own.
+
+**The finding, and it is the second test-shaped one this session.** The
+check "no half-made measurement survives the edit's end" was written as
+two `run_metrics` calls — and **passed against a build with the clearing
+deleted**. Two `--metrics` runs are two PROCESSES: the second began with
+nothing pending, so it would have passed whatever the code did. The rule
+fires on a TRANSITION and the seam could not express one, because
+`--state` builds the shell ALREADY in a state and never enters one. Hence
+`--then-state`, which drives a second state after the clicks. Registered
+in `AGENTS.md`: a test that spans two processes cannot observe a
+transition.
+
+**Validation.** Four defects reintroduced deliberately, and only after
+the seam was fixed did all four fail: the width dropped from the slant
+("40 columns over 400 rows at width 1810 is 55.2 ppm; got SYNC
+\"100000\""), the baseline test removed ("a second click 111 rows short
+of the baseline measured a slant"), PHASE keeping the first click
+("PHASE is \"300\" clicking down and \"340\" clicking up"), and the
+anchor outliving the edit ("an anchor survived into a surface with no
+correction to make"). 37/37, full suite, 249.5 s.
+
+**Contradictions found:** none in the tree. Noted for honesty: the
+gesture's disambiguation rule means a very short chart cannot be measured
+at all — at Fit on a 200-row preview the baseline wants 261 rows and
+every second click re-picks PHASE. That is correct behaviour (there is no
+baseline to measure over) but it has never been seen by a person, and on
+a real ~1200-line chart it does not arise.
+
+**Next step: ROADMAP M4 item 6** (a transmission arriving mid-edit
+[§8.2]: the background buffer and the compact receiving indicator) — it
+is independent of everything built this session and it is the one thing
+Sara's by-hand run could not observe, because there was no second
+transmission. It also turns item 4's stand-in edit-end into the
+operator's own action. **Or item 7** (m4a input via runtime ffmpeg),
+independent. **Before either, though: none of session 28 has been touched
+by a person** — not the steppers, not the crosshair, not whether clicking
+the dead sector lands where Sara means, and not whether the baseline rule
+feels like help or like a control refusing to work. Three sessions
+running, the by-hand run found what the suite could not; this session
+added three new interaction surfaces on that record. Registered, not
+scheduled: per-line segments (`Correction` as a list of
+`{from_line, phase, ppm}`, driven by the two-click gesture, needing a
+synthetic white-only fixture with a step at a known line, since such a
+step is undetectable by construction); the pulse-station SYNC override;
+Zoom keeping the vertical ROW; template white-window robustness.
+
+---
+
 ## 2026-08-15 — Session 28 (cont): the click, and a guard whose absence
 ## every check survived
 
