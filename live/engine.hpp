@@ -167,6 +167,58 @@ std::string image_filename(const std::string& utc_stamp,
 std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
                                bool phase_operator, bool sync_operator);
 
+// The two retained raw streams of docs/05 §3, read by thread 4. The rule
+// is stated by ROLE rather than by recency: the transmission currently
+// being RECEIVED, and the image currently DISPLAYED. Usually they are the
+// same object and only one exists; they diverge in the case §3 was written
+// for — the operator is adjusting the chart that just arrived when the next
+// transmission starts — and a third can never accumulate, because
+// "currently displayed" is one image by definition.
+// Two facts, kept apart on purpose. **Retention and reachability are not
+// the same question**, and building item 3 is what showed it: §3's rule
+// ("keep the stream behind the image the operator may be adjusting") and
+// §8.2's rule ("a transmission arriving mid-edit does not take the pane")
+// are one decision seen from two sides, and §8.2 is ROADMAP item 6, not
+// built. So the stream is retained by role exactly as §3 says, and while
+// the next transmission's PREVIEW owns the pane it is correctly not
+// offered — because the picture the operator is looking at then is the
+// preview, not the chart. `on_pane` is the half item 6 will change; the
+// retention above it does not move when it does.
+struct RetainedVideo {
+    // The frozen stream behind the most recently decoded image — §3's
+    // "the image currently displayed", which it is except in the window
+    // item 6 will close. Null when there is no such image.
+    std::shared_ptr<const std::vector<float>> decoded;
+    // Absolute sample index of decoded->front() in the session's stream,
+    // as the session handed it over: the offset that relates a PreviewRow's
+    // renderer-local positions to this stream.
+    long long decoded_start = 0;
+    // What produced that image, kept verbatim. A correction re-decodes THIS
+    // with the two §7.1 fields changed; Auto re-decodes it with them
+    // cleared. Keeping the record faithful is what lets both be derived
+    // from it rather than reconstructed.
+    DecodeOptions decoded_options;
+    // Is that image the one the pane is showing? False while a provisional
+    // preview owns the pane.
+    bool on_pane = false;
+    // Samples held for the transmission being received. Not frozen — it is
+    // still growing — and bounded by the pre-roll while monitoring.
+    std::size_t receiving_samples = 0;
+
+    // Why a correction cannot be offered, in the operator's words. §3:
+    // manual adjustment is "not offered and then found not to work", so a
+    // control that cannot act is disabled WITH THE REASON rather than
+    // silently inert. Empty when it can.
+    std::string unavailable_reason;
+
+    bool can_correct() const { return decoded != nullptr && on_pane; }
+    // What §3's cost analysis counts: 4 bytes a sample, both roles.
+    std::size_t bytes() const {
+        return (decoded ? decoded->size() : 0) * sizeof(float) +
+               receiving_samples * sizeof(float);
+    }
+};
+
 class LiveEngine {
 public:
     LiveEngine(int capture_rate, const EngineOptions& opt);
@@ -209,6 +261,13 @@ public:
     // snapshot of a prefix, never a torn image.
     bool copy_image(Image* out);
 
+    // The retained raw video [§3], by role. Safe from thread 4 at any
+    // time: the displayed snapshot is immutable once frozen, so this hands
+    // back a shared_ptr to it rather than a copy of 38 MB, and taking that
+    // reference is what guarantees a correction cannot have the stream
+    // pulled out from under it mid-decode.
+    RetainedVideo retained_video() const;
+
     unsigned long long overruns() const { return ring_.overruns(); }
     std::size_t ring_capacity() const { return ring_.capacity(); }
 
@@ -235,7 +294,7 @@ private:
     void emit(const SessionOutput& out);
     void post(EngineMessage m);
     void begin_batch(std::shared_ptr<const std::vector<float>> snap,
-                     const DecodeOptions& dopt);
+                     long long start, const DecodeOptions& dopt);
     void collect_batch();
     void append_display_rows();
     std::string save_image(const DecodeResult& r);
@@ -279,12 +338,37 @@ private:
     double prog_frac_ = 0.0;
     bool prog_new_ = false;
 
-    std::mutex img_mu_;
+    // Mutable because `retained_video` is a const question — "what is on
+    // the pane, and does it have a stream behind it" — that must still take
+    // the lock to ask it.
+    mutable std::mutex img_mu_;
     Image display_;
     // Identity of the preview `display_` was grown from. A new
     // transmission replaces the preview and restarts its image at row 0,
     // so the pane must start over rather than append to the old chart.
     const StreamPreview* display_src_ = nullptr;
+
+    // The retained video of §3. `pending_*` is the snapshot the decode
+    // running right now was started from; it becomes `displayed_*` at the
+    // moment that decode's image takes the pane, and the snapshot the
+    // OUTGOING image was decoded from is released there and only there —
+    // which is the whole of §3's "when the operator moves on, the older
+    // snapshot is released", because moving on is what puts another image
+    // on screen.
+    //
+    // Written by thread 2 (begin_batch, collect_batch), read by thread 4
+    // (retained_video). The mutex is held for a shared_ptr copy, never
+    // across a decode: §2's no-block rule is about thread 1.
+    mutable std::mutex retain_mu_;
+    std::shared_ptr<const std::vector<float>> pending_snap_;
+    long long pending_start_ = 0;
+    DecodeOptions pending_options_;
+    std::shared_ptr<const std::vector<float>> displayed_snap_;
+    long long displayed_start_ = 0;
+    DecodeOptions displayed_options_;
+    // Thread 2 publishes the size of the store the SESSION is still
+    // growing; thread 4 may not touch the session to ask.
+    std::atomic<std::size_t> receiving_samples_{0};
 
     // Thread 2 only, after the commands are drained.
     std::string label_;

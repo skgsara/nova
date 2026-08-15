@@ -403,6 +403,286 @@ void test_save(const char* wav_path, const char* tmp_dir) {
            saved_at, state_at);
 }
 
+// --- §3: the two retained snapshots, held by ROLE --------------------------
+// §3 retains two raw streams and names them by role rather than by
+// recency: the transmission being RECEIVED, and the image being DISPLAYED.
+// They are usually the same object; they diverge in the case the rule was
+// written for — the operator is adjusting the chart that just arrived when
+// the next transmission starts — and the first draft of §3, which released
+// the older one "when the next transmission's snapshot replaces it", would
+// have pulled the raw stream out from under exactly that edit.
+//
+// One recording cannot exhibit that case, so the feed here is a fixture
+// played TWICE with an operator Stop between the copies: two transmissions,
+// and between the second one's start tone and its decode there is a stretch
+// where the two roles name different streams. That stretch is what this
+// test is for. (The Stop is needed because a start tone arriving DURING a
+// picture is deliberately ignored — "one recording, one transmission, take
+// the first" — so a doubled recording is one transmission, not two. From
+// SAVED the next start tone opens normally, which is the path here.)
+//
+// The claims:
+//   1. before any decode there is no re-decodable stream, and the reason
+//      says which of the three "no" cases this is [§3: not offered and
+//      then found not to work];
+//   2. while a PREVIEW is on the pane there is none either — a provisional
+//      picture's stream is still being received, and offering the previous
+//      transmission's would be offering to re-decode a chart the operator
+//      is not looking at;
+//   3. after a decode the retained stream REPRODUCES the saved image, byte
+//      for byte, when re-decoded with the options kept beside it. This is
+//      the claim item 4 rests on: Auto means "re-render what was measured",
+//      and it is only true if the stream and the options both survived;
+//   4. the arrival of the next transmission does NOT take that stream
+//      away — not while it is being received, and not while it is being
+//      DECODED, which is the moment §3's rejected first draft ("release it
+//      when the next transmission's snapshot replaces it") would have
+//      released it. The pointer changes exactly once per decode, when that
+//      decode's own image takes the pane;
+//   5. never three. At the widest moment the store holds one frozen
+//      snapshot plus one growing one, and nothing else.
+//
+// **Retention and reachability are two questions, and building this showed
+// it.** While the next transmission's PREVIEW owns the pane, the stream is
+// still retained but a correction is correctly NOT offered — the picture
+// the operator is looking at then is the preview, not the chart. §8.2's
+// "an arriving transmission does not take the pane from an edit" is what
+// closes that window, and it is ROADMAP item 6. So claim 4 is checked on
+// the retained pointer (which is item 3's job) and claim 2 on what is
+// offered (which item 6 will widen), and they are deliberately not the
+// same check.
+struct RetainObs {
+    nova::SessionState state = nova::SessionState::kIdle;
+    bool can_correct = false;
+    bool on_pane = false;
+    std::string reason;
+    const void* decoded = nullptr;   // pointer identity of the retained stream
+    std::size_t decoded_n = 0;
+    std::size_t receiving = 0;
+};
+
+void test_retention(const char* wav_path, const char* tmp_dir) {
+    std::printf("the two retained snapshots [docs/05 §3]\n");
+    nova::Wav w = nova::read_wav(wav_path);
+    const std::vector<float> once =
+        nova::resample(w.samples, w.sample_rate, kInternalRate);
+
+    const std::string folder = std::string(tmp_dir) + "/retention";
+    std::error_code ec;
+    std::filesystem::create_directories(folder, ec);
+
+    nova::EngineOptions opt;
+    opt.image_folder = folder;
+    auto stamp_n = std::make_shared<int>(0);
+    opt.utc_now = [stamp_n] {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "20260814T00000%dZ", ++*stamp_n);
+        return std::string(buf);
+    };
+    opt.poll_ms = 1;
+    nova::LiveEngine eng(kInternalRate, opt);
+    eng.run();
+    eng.start_capture();
+
+    // Thread 4's job, done from the test's own thread: watch the retained
+    // video while the audio is being fed. Nothing here touches the session.
+    // The feed runs on this thread too, because the sequencing below has to
+    // know when thread 2 has caught up and a detached feeder cannot say.
+    std::vector<RetainObs> obs;
+    nova::SessionState state = nova::SessionState::kIdle;
+    double consumed = 0.0;
+
+    const auto observe = [&] {
+        for (const nova::EngineMessage& m : eng.drain()) {
+            if (m.kind == nova::EngineMsg::kStateChanged) state = m.state;
+            if (m.kind == nova::EngineMsg::kStats) consumed = m.consumed_sec;
+        }
+        const nova::RetainedVideo v = eng.retained_video();
+        RetainObs o;
+        o.state = state;
+        o.can_correct = v.can_correct();
+        o.on_pane = v.on_pane;
+        o.reason = v.unavailable_reason;
+        o.decoded = static_cast<const void*>(v.decoded.get());
+        o.decoded_n = v.decoded ? v.decoded->size() : 0;
+        o.receiving = v.receiving_samples;
+        obs.push_back(o);
+    };
+    const auto feed = [&](const std::vector<float>& v) {
+        std::size_t at = 0;
+        while (at < v.size()) {
+            const std::size_t n = std::min<std::size_t>(4096, v.size() - at);
+            const std::size_t took = eng.push_audio(v.data() + at, n);
+            at += took;
+            observe();
+            if (took < n)  // ring full: wait for thread 2 rather than drop
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    };
+    // Thread 2 stops emitting stats when the ring runs dry, so a plateau in
+    // consumed_sec is "everything fed has been through the session".
+    const auto settle = [&](int stable_for) {
+        double last = -1.0;
+        int stable = 0;
+        for (int i = 0; i < 4000 && stable < stable_for; i++) {
+            observe();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            if (consumed == last) {
+                stable++;
+            } else {
+                stable = 0;
+                last = consumed;
+            }
+        }
+    };
+
+    feed(once);
+    settle(25);
+    // The operator Stop of §4: the same freeze-decode-save path a stop tone
+    // takes. This fixture has no stop tone, and one transmission has to end
+    // before another can begin.
+    eng.stop_capture();
+    for (int i = 0; i < 4000 && state != nova::SessionState::kSaved; i++) {
+        observe();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    check(state == nova::SessionState::kSaved,
+          "the first transmission reached SAVED, so there is a chart on the "
+          "pane to be adjusted");
+    const std::size_t obs_after_first = obs.size();
+    // ...and now the next transmission arrives while that chart is still
+    // the one on screen. This is the case §3 was written for.
+    feed(once);
+    settle(25);
+    // And now the second transmission ENDS and is decoded, while the first
+    // one's chart is still the picture on the pane. This window is the one
+    // §3's rejected first draft got wrong — it released the older stream
+    // "when the next transmission's snapshot replaces it", which is here,
+    // with the operator still looking at (and possibly still correcting)
+    // the older chart. It has to be observed live: a decode that happens
+    // inside shutdown() is over before anything can look at it.
+    eng.stop_capture();
+    std::size_t obs_second_decode = 0;
+    for (int i = 0; i < 4000; i++) {
+        observe();
+        if (state == nova::SessionState::kDecoding && !obs_second_decode)
+            obs_second_decode = obs.size();
+        if (obs_second_decode && state == nova::SessionState::kSaved) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    eng.shutdown();
+    observe();
+
+    // --- 1: before any decode, no stream, and it says which "no" ----------
+    bool saw_no_image = false, saw_provisional = false;
+    std::size_t silent = 0;
+    for (const RetainObs& o : obs) {
+        if (!o.can_correct && o.reason == "no decoded image yet")
+            saw_no_image = true;
+        if (!o.can_correct &&
+            o.reason == "receiving — this picture is provisional")
+            saw_provisional = true;
+        // §3 forbids the silent version of this: a control that cannot act
+        // and does not say so.
+        if (!o.can_correct && o.reason.empty()) silent++;
+    }
+    checkf(silent == 0,
+           "every \"cannot correct\" carries a reason (%zu silent of %zu "
+           "observations)", silent, obs.size());
+    check(saw_no_image,
+          "before any decode: no re-decodable stream, and the reason is "
+          "\"no decoded image yet\"");
+    check(saw_provisional,
+          "while a preview is on the pane: none either, because a "
+          "provisional picture's stream is still being received");
+
+    // --- 4/5: the stream survives the next transmission arriving ----------
+    // Two decodes, so two distinct displayed streams, in order, each one
+    // held across everything that happened between it and the next.
+    std::vector<const void*> distinct;
+    for (const RetainObs& o : obs) {
+        if (!o.decoded) continue;
+        if (distinct.empty() || distinct.back() != o.decoded)
+            distinct.push_back(o.decoded);
+    }
+    checkf(distinct.size() == 2,
+           "the displayed stream changes hands exactly once per decode "
+           "(%zu distinct streams over two transmissions)", distinct.size());
+    // The strong form of 4: after the first transmission was saved, the
+    // second one is being received — the store is growing again — and the
+    // FIRST one's stream is still the one a correction would re-decode.
+    std::size_t held_across = 0, most_receiving = 0;
+    if (!distinct.empty())
+        for (std::size_t i = obs_after_first; i < obs.size(); i++) {
+            if (obs[i].decoded != distinct[0]) continue;
+            most_receiving = std::max(most_receiving, obs[i].receiving);
+            if (obs[i].receiving >
+                static_cast<std::size_t>(kInternalRate) * 20)
+                held_across++;
+        }
+    checkf(held_across > 0,
+           "the next transmission being received does NOT release the "
+           "displayed stream (%zu observations with >20 s of new video "
+           "already in the store; most seen %.1f s)",
+           held_across, static_cast<double>(most_receiving) / kInternalRate);
+    // The strongest form, and the one that separates this design from the
+    // draft §3 rejected: while the NEXT transmission is being DECODED, the
+    // chart on the pane still has its stream. The operator adjusting it
+    // does not lose the ability mid-correction because something else
+    // finished arriving.
+    std::size_t held_through_decode = 0, decoding_seen = 0;
+    if (!distinct.empty() && obs_second_decode)
+        for (std::size_t i = obs_second_decode; i < obs.size(); i++) {
+            if (obs[i].state != nova::SessionState::kDecoding) continue;
+            decoding_seen++;
+            if (obs[i].decoded == distinct[0]) held_through_decode++;
+        }
+    checkf(decoding_seen > 0 && held_through_decode == decoding_seen,
+           "...and it survives the next transmission being DECODED, which "
+           "is where §3's rejected first draft would have released it "
+           "(held through %zu of %zu observations of that decode)",
+           held_through_decode, decoding_seen);
+    // Never three: at every moment one frozen snapshot and one growing
+    // store, and the frozen one is never bigger than the transmission it
+    // came from.
+    std::size_t oversize = 0, widest = 0;
+    for (const RetainObs& o : obs) {
+        if (o.decoded_n > once.size() + 1) oversize++;
+        widest = std::max(widest, o.decoded_n + o.receiving);
+    }
+    checkf(oversize == 0 && widest <= 2 * once.size() + 2,
+           "two streams at the widest moment, never three (%zu oversize; "
+           "widest total %.1f s against a %.1f s recording)",
+           oversize, static_cast<double>(widest) / kInternalRate,
+           static_cast<double>(once.size()) / kInternalRate);
+
+    // --- 3: the retained stream reproduces the saved image ----------------
+    const nova::RetainedVideo fin = eng.retained_video();
+    check(fin.can_correct(),
+          "at the end, the image on the pane has its raw stream behind it");
+    if (fin.can_correct()) {
+        nova::Image again;
+        bool threw = false;
+        try {
+            nova::DecodeOptions d = fin.decoded_options;
+            d.hooks = nova::DecodeHooks{};
+            again = nova::decode_fax(*fin.decoded, kInternalRate, d).img;
+        } catch (const nova::DecodeError&) {
+            threw = true;
+        }
+        check(!threw, "...and it decodes");
+        // The image the engine last put on the pane is the one on disk
+        // [§8.5 item 1], so comparing against that is comparing against
+        // the file.
+        nova::Image on_pane;
+        const bool have = eng.copy_image(&on_pane);
+        std::string why;
+        checkf(have && same_image(again, on_pane, &why),
+               "...to the very same picture that is on the pane and on "
+               "disk (%s)", why.empty() ? "identical" : why.c_str());
+    }
+}
+
 // --- the operator provenance in the metadata -------------------------------
 void test_provenance() {
     std::printf("decode QA provenance [docs/05 §8.5 item 3]\n");
@@ -546,6 +826,9 @@ int main(int argc, char** argv) {
 
     test_capture_rate(argv[2], tmp);
     test_save(argv[argc - 1], tmp);
+    // The tone-driven fixture, because §3's two roles only diverge when a
+    // transmission STARTS on its own while another is on the pane.
+    test_retention(argv[2], tmp);
     test_provenance();
     test_filenames();
     test_overrun_counted(argv[argc - 1]);

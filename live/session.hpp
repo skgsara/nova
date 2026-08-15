@@ -215,6 +215,11 @@ public:
     const DecodeResult* saved_result() const {
         return have_result_ ? &result_ : nullptr;
     }
+    // How much video the store is holding for the transmission being
+    // received — the FIRST of §3's two retained snapshots, by role. It is
+    // not frozen: freezing is what ends the transmission. While monitoring
+    // this is the pre-roll bound, not an unbounded tail.
+    std::size_t retained_samples() const { return retained_.size(); }
     double consumed_sec() const {
         return static_cast<double>(total_in_) / fs_;
     }

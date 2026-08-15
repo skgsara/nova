@@ -691,11 +691,44 @@ one feature with several parts, plus one verification no test can do.
    recordings that need it. `DecodeResult` gained two provenance flags
    (`anchor_from_hint`, `clock_from_fallback`) so the PNG's QA header
    stops recording a typed-but-outranked SYNC as the operator's.
-3. **The second retained snapshot** [docs/05 §3]. Now unblocked: item 2
-   exists, so there is something to retain a snapshot *for* — the
-   displayed image keeps a raw stream behind it and the correction
-   controls stop being grey.
-4. **The post-decode edit lifecycle** [docs/05 §8.5 items 2–4]: Apply
+3. ~~**The second retained snapshot**~~ **Done (session 27)** [docs/05
+   §3]. `LiveEngine` holds the frozen stream of the most recently decoded
+   image with the offset and the `DecodeOptions` that produced it
+   (`RetainedVideo` / `retained_video()`), and it changes hands only when
+   another decode's image takes the pane — so the next transmission
+   arriving, or being decoded, does not take it away. Pinned by
+   `live_engine` on the fixture played twice with an operator Stop
+   between: the first transmission's stream is still the retained one
+   after 158 s of the second has arrived and through all 651 observations
+   of the second decode, and the retained stream re-decodes to the very
+   picture on the pane and on disk — which is the claim item 4 rests on.
+   §3's rejected first draft fails that check 0-for-640.
+   Three things the build found [all written into docs/05 §3]:
+   **retention and reachability are two questions** — §3's rule and
+   §8.2's "an arriving transmission does not take the pane" are one
+   decision seen from two sides, and §8.2 is item 6 below, so while the
+   next preview owns the pane the stream is retained but a correction is
+   correctly not offered; **the reason needs three sentences**, not §3's
+   one, and the one §3 names is the folder-open case, built and currently
+   unreachable; and **the order in `collect_batch` is load-bearing** —
+   the stream changes hands before the image reaches the pane, or thread
+   4 can see a new chart backed by the previous transmission's stream.
+   The correction controls do NOT stop being grey here: that is item 4,
+   and an active button with nothing behind it is the failure session 26
+   found. What session 27 adds is §3's honest half — the controls now say
+   why they cannot act, in a wrapped line under the Apply/Auto pair
+   (`gui_shell` pins that it is never blank, and that it has room to be
+   read).
+4. **The post-decode edit lifecycle** [docs/05 §8.5 items 2–4]. Unblocked
+   by item 3 as of session 27: the stream and the options are both
+   retained, so a re-render has everything it needs. One shape question
+   to settle FIRST, and not in code: an operator Apply after SAVED starts
+   a decode the session machine did not ask for, and today `LiveSession`
+   owns every decode. Either `LiveEngine` grows a re-decode entry point
+   through the same one-slot batch inbox (smaller, but the session stops
+   owning every decode), or `LiveSession` grows a state for it (truer to
+   §4, more surface).
+   The lifecycle itself: Apply
    re-renders AND overwrites the same file (one transmission, one file);
    Auto restores the measured values and re-renders; an edit begins at
    the first dirty control and ends at Apply, at Auto, or at a switch to

@@ -338,6 +338,56 @@ true start to the stop tone's start). What is NOT built: the second
 snapshot — "the image currently displayed" is the caller's shared_ptr by
 construction, so the two-role rule lands with the GUI wiring, not here.]
 
+**[BUILT session 27 — the second snapshot, in `LiveEngine`
+(`RetainedVideo` / `retained_video()`), pinned by `live_engine`.** The
+frozen stream of the most recently decoded image is held with the
+absolute offset it started at and the `DecodeOptions` that produced it,
+so a re-render can be derived from the record rather than reconstructed
+from memory. It changes hands in `collect_batch`, at the moment that
+decode's image takes the pane, and nowhere else — so the next
+transmission merely arriving, or being decoded, does not take it away.
+That is the case §3 was written for and it is now a check: measured on
+the fixture played twice with an operator Stop between, the first
+transmission's stream is still the retained one after 158 s of the
+second has arrived, and through all 651 observations of the second
+decode. The rejected first draft ("release it when the next
+transmission's snapshot replaces it") fails that check 0-for-640, which
+is how the check was verified to be one.
+
+Three things the build found that this section did not have.
+
+- **Retention and reachability are two questions.** §3 says "keep the
+  stream behind the image the operator may be adjusting"; §8.2 says "a
+  transmission arriving mid-edit does not take the pane". Those are one
+  decision seen from two sides, and §8.2 is ROADMAP item 6, *not built*.
+  So while the next transmission's preview owns the pane, the stream is
+  retained exactly as §3 asks but a correction is correctly NOT offered
+  — the picture the operator is looking at then is the preview, not the
+  chart. `RetainedVideo` therefore reports the two facts separately
+  (`decoded` and `on_pane`), and `can_correct()` is their conjunction.
+  Item 6 widens the second without touching the first.
+- **The reason needs three sentences, not one.** §3 names only "raw
+  stream no longer retained", which is the *folder-open* case — an image
+  whose snapshot was released because the operator moved on. Two others
+  exist and are different facts about the operator's situation: "no
+  decoded image yet", and "receiving — this picture is provisional". The
+  §3 string is built and is currently unreachable, because nothing can
+  yet put an image on the pane that this engine did not just decode; it
+  is the branch §8.3 item 6's folder view will reach.
+- **The order inside `collect_batch` is load-bearing, exactly as it is
+  for write-then-SAVED in §8.5 item 1.** The retained stream changes
+  hands BEFORE the image reaches the pane. Thread 4 may look between the
+  two, and the other order would show it a new chart on the pane backed
+  by the PREVIOUS transmission's stream — a correction taken in that
+  instant would re-decode the wrong transmission.
+
+**Where the reason is shown**: a wrapped italic line in the sidebar,
+directly under the Apply/Auto pair it explains, not in the sidebar's
+empty lower area, which §8's item 5 above already spoke for. Apply and
+Auto themselves stay grey after SAVED until item 4 gives them behaviour
+— an active button that does nothing is the failure session 26 found and
+this section will not reintroduce.]
+
 ---
 
 ## 4. The live session state machine

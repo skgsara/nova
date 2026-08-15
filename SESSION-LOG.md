@@ -7,6 +7,117 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 27 (cont): the second retained snapshot, and
+## retention turned out not to be the same question as reachability
+
+Agent: Claude. Code changed: `live/engine.hpp` / `live/engine.cpp`
+(`RetainedVideo`, `LiveEngine::retained_video()`, the pending→displayed
+handoff in `collect_batch`, `begin_batch` now receives the snapshot
+start it had been discarding), `live/session.hpp`
+(`retained_samples()`), `gui/nova-gui.cpp` (the reason line under
+Apply/Auto; five new `--metrics` values), `tests/test_live_engine.cpp`
+(`test_retention`, 11 checks), `tests/gui_shell.cmake` (the correction
+controls are grey and say why; the reason has somewhere to be read).
+Files changed: `docs/05-m4-shell-design.md` (§3 built-note),
+`ROADMAP.md` (item 3 done; item 4's shape question written down),
+`SESSION-LOG.md`. Test count unchanged at 37; the suite went 233 s →
+239 s.
+
+**Task as accepted:** ROADMAP M4 item 3, the build order Sara set at the
+top of the session — the second retained snapshot, alone, before item 4.
+
+**What it is.** `LiveEngine` now holds the frozen stream of the most
+recently decoded image, with the absolute offset it started at and the
+`DecodeOptions` that produced it, so a re-render is derived from a
+faithful record rather than reconstructed. It changes hands in
+`collect_batch` at the moment that decode's image takes the pane, and
+nowhere else — so the next transmission merely arriving, or being
+decoded, does not take it away. That is the case §3 was written for, and
+the first draft §3 itself rejected would have pulled the stream out from
+under exactly the operator it was protecting.
+
+**Measured.** The fixture played twice with an operator Stop between —
+one recording cannot exhibit two transmissions, because a start tone
+arriving DURING a picture is deliberately ignored ("one recording, one
+transmission, take the first"), so the second copy has to open from
+SAVED. The first transmission's stream is still the retained one after
+158.1 s of the second has arrived, and through all 651 observations of
+the second decode. The retained stream re-decodes to the very picture on
+the pane and on disk, byte for byte — which is the claim item 4 rests
+on: Auto means "re-render what was measured", and that is only true if
+the stream and the options both survived.
+
+**Instrument verified, and the first version of it was too weak.** The
+check was built, passed, and then §3's rejected first draft was
+introduced deliberately (`displayed_snap_.reset()` in `begin_batch`) —
+**and the test still passed.** The window it was watching, the next
+transmission being RECEIVED, closes before the release happens; the two
+designs only differ while that transmission is being DECODED, and a
+decode that happens inside `shutdown()` is over before anything can look
+at it. The test now ends the second transmission with a second operator
+Stop and polls through its decode. It catches the draft 0-for-640.
+
+**The finding, and it is a design finding rather than a bug.**
+**Retention and reachability are two questions.** §3 says "keep the
+stream behind the image the operator may be adjusting"; §8.2 says "a
+transmission arriving mid-edit does not take the pane". Those are one
+decision seen from two sides — and §8.2 is ROADMAP item 6, not built. So
+today, while the next transmission's preview owns the pane, the stream
+is retained exactly as §3 asks but a correction is correctly NOT
+offered, because the picture the operator is looking at then is the
+preview and not the chart. `RetainedVideo` reports the two facts
+separately and `can_correct()` is their conjunction; item 6 widens the
+second half without touching the first. The screamer checks them
+separately for the same reason.
+
+Two smaller ones. **§3's reason needs three sentences, not one:** the
+string §3 names — "raw stream no longer retained" — is the folder-open
+case, and it is built and currently unreachable, because nothing can yet
+put an image on the pane this engine did not just decode. The two
+reachable ones are "no decoded image yet" and "receiving — this picture
+is provisional". And **the order inside `collect_batch` is load-bearing,
+exactly as it is for write-then-SAVED in §8.5 item 1**: the stream
+changes hands BEFORE the image reaches the pane, because thread 4 may
+look between the two and the other order would show it a new chart on
+the pane backed by the previous transmission's stream. That one is
+reasoned, not pinned — it is a narrow race and I did not build a test
+that can lose it reliably.
+
+**What did NOT change, deliberately.** Apply and Auto are still grey
+after SAVED. Item 3 gives them something to act on; item 4 gives them
+behaviour, and an active button that does nothing is the failure session
+26 found and named. What session 27 adds is §3's honest half: the
+controls now say why they cannot act, in a wrapped line under the pair
+they explain, and `gui_shell` pins that it is never blank and has room
+to be read.
+
+**Contradictions found:** docs/05 §3's own sentence "the two-role rule
+lands with the GUI wiring" was half right — the rule landed in the
+engine, not the GUI, because thread 4 must be able to ask the question
+without touching the session. Amended in the built-note.
+
+**Validation.** 37/37, full suite. Baseline 37/37 before the edits.
+
+**Next step: ROADMAP M4 item 4** — the post-decode edit lifecycle
+[docs/05 §8.5 items 2–4]: Apply re-renders AND overwrites the same file
+(one transmission, one file); Auto restores the measured values and
+re-renders; an edit begins at the first dirty control or image click and
+ends at Apply, at Auto, or at a switch to the live view. A re-render's
+PNG text chunks must record PHASE/SYNC as operator-supplied, which
+`decode_qa` already takes flags for. **One shape question for Sara
+first, and it should not be smuggled into code:** an operator Apply
+after SAVED starts a decode the session machine did not ask for, and
+today `LiveSession` owns every decode. Either `LiveEngine` grows a
+re-decode entry point through the same one-slot batch inbox — smaller,
+but the session stops owning every decode — or `LiveSession` grows a
+state for it, truer to §4 and more surface. I lean to the former with
+the session told about it. Registered while here: whether Zoom should
+keep the vertical ROW rather than the pixel offset (session 27's first
+entry), and item 6 is what makes the retained stream reachable while the
+next transmission draws.
+
+---
+
 ## 2026-08-14 — Session 27: the pane that bounced, and the toolkit's own
 ## number was the liar
 

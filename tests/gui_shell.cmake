@@ -276,6 +276,54 @@ foreach(st "ready" "phasing" "decoding" "saved")
   message(STATUS "gui_shell PASS follow: nothing scrolls itself in ${st}")
 endforeach()
 
+# --- the correction controls are grey, and they SAY WHY [§3] ---------------
+# §3: "The PHASE/SYNC controls must then be visibly disabled with the
+# reason shown — not silently inert. Manual adjustment is not offered and
+# then found not to work." Session 27 retains the raw stream behind the
+# displayed image, so there is now something for a correction to act on;
+# the lifecycle that spends it is M4 item 4, so Apply and Auto stay grey
+# after SAVED ON PURPOSE — an active button that does nothing is the one
+# failure this shell must not have (session 26, finding 2). What is
+# checked here is that the greying is explained rather than mute.
+foreach(st "idle" "ready" "drawing" "decoding" "saved")
+  run_metrics(out --state ${st} --ioc 576 --rate 120)
+  # The post-decode pair is grey in every state, because item 4 is not
+  # built. When it is, this list is what says so out loud.
+  expect("post-decode ${st}" "${out}" auto_active "0")
+  # ...and the reason is never blank. An inspection run has no engine
+  # behind it, so it says the honest thing about itself.
+  shell_value(correct_reason "${out}" why)
+  if(why STREQUAL "")
+    message(FATAL_ERROR
+      "gui_shell FAIL correction ${st}: the controls are grey and say "
+      "nothing; §3 requires the reason to be shown")
+  endif()
+  message(STATUS "gui_shell PASS correction ${st}: grey, reason \"${why}\"")
+endforeach()
+
+# The reason has somewhere to be READ, not just somewhere to be stored: it
+# is a region of the panel, inside the sidebar, under the two buttons it
+# explains — not in the sidebar's empty lower area, which §8 already spoke
+# for (§8.2's receiving indicator).
+run_metrics(out --state saved --ioc 576 --rate 120)
+region(correct_why "${out}" wx wy ww wh)
+region(auto_button "${out}" ax ay aw ah)
+region(status_panel "${out}" sx sy sw sh)
+if(NOT wy GREATER ay)
+  message(FATAL_ERROR
+    "gui_shell FAIL: the reason (y=${wy}) is not below the Auto button "
+    "(y=${ay}) it explains")
+endif()
+math(EXPR panel_right "${sx} + ${sw}")
+math(EXPR why_right "${wx} + ${ww}")
+if(wx LESS sx OR why_right GREATER panel_right OR ww LESS 100)
+  message(FATAL_ERROR
+    "gui_shell FAIL: the reason is ${wx}..${why_right}, outside the panel "
+    "${sx}..${panel_right} or too narrow to read (${ww} px)")
+endif()
+message(STATUS
+  "gui_shell PASS: the reason has ${ww}x${wh} px under the buttons")
+
 # --- an inspection run brings up no capture, and the window says so --------
 # Until session 23 this passed because nothing in the program COULD
 # capture. It now can — nova-gui opens a real input stream and runs the

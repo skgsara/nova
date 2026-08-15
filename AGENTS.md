@@ -299,6 +299,19 @@ more likely right than one that agrees only with its own reasoning.
   it needs no window and no draw, because the divergence is in the widget
   positions. Same mechanism had been silently resetting the vertical
   scroll on every zoom change since session 23.
+- A test can watch the right thing at the wrong TIME and prove nothing
+  (session 27, the retained snapshot). The check for "the older raw stream
+  survives the next transmission" was built, passed, and then the rejected
+  design was introduced deliberately — and it still passed, because the
+  window it watched (the next transmission being RECEIVED) closes before
+  the two designs differ, which is while that transmission is being
+  DECODED. **The lesson for the next agent: when you introduce the bug to
+  verify the check, and the check still passes, the check is measuring a
+  different moment — find the moment the two designs actually disagree and
+  observe THAT.** A decode that runs inside `shutdown()` is over before
+  anything can look at it; the fix was a second operator Stop and polling
+  through the decode. Related: [session 23's rule that a mutation harness
+  must be verified before its verdict means anything].
 - Segmentation costs a full `detect_tones` pass over the recording (~9 s
   on the 61-minute JSC4, against a 37 s decode). Fine offline, unbudgeted
   for M4 live decode, where the scan wants to be incremental.

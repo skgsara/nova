@@ -166,8 +166,10 @@ LiveEngine::LiveEngine(int capture_rate, const EngineOptions& opt)
       session_(opt.internal_rate, opt.session) {
     if (!opt_.utc_now) opt_.utc_now = system_utc_stamp;
     session_.set_decode_callback(
-        [this](std::shared_ptr<const std::vector<float>> snap, long long,
-               const DecodeOptions& d) { begin_batch(std::move(snap), d); });
+        [this](std::shared_ptr<const std::vector<float>> snap, long long start,
+               const DecodeOptions& d) {
+            begin_batch(std::move(snap), start, d);
+        });
 }
 
 LiveEngine::~LiveEngine() { shutdown(); }
@@ -237,6 +239,50 @@ bool LiveEngine::copy_image(Image* out) {
     if (display_.width <= 0 || display_.height <= 0) return false;
     *out = display_;
     return true;
+}
+
+RetainedVideo LiveEngine::retained_video() const {
+    // Is the picture on the pane a DECODED one? `display_src_` names the
+    // preview a provisional picture is being grown from, and collect_batch
+    // clears it when a decode's image takes the pane. A preview has no
+    // frozen stream behind it BY CONSTRUCTION — its stream is still being
+    // received — and its corrections are §7's live, forward-only ones, not
+    // §7.1's re-decode. Reporting the previous transmission's snapshot
+    // while a new preview is on screen would offer to re-decode a chart the
+    // operator is not looking at, which is the one mistake this whole
+    // by-role rule exists to prevent.
+    //
+    // The two locks are taken in sequence and never nested, here or in
+    // collect_batch, so no order between them exists to get wrong.
+    RetainedVideo v;
+    bool any_image = false;
+    {
+        std::lock_guard<std::mutex> g(img_mu_);
+        any_image = display_.width > 0 && display_.height > 0;
+        v.on_pane = any_image && display_src_ == nullptr;
+    }
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        v.decoded = displayed_snap_;
+        v.decoded_start = displayed_start_;
+        v.decoded_options = displayed_options_;
+    }
+    v.receiving_samples = receiving_samples_.load(std::memory_order_acquire);
+    // §3: not offered and then found not to work. The three ways a
+    // correction can be impossible are different facts about the operator's
+    // situation, so they are different sentences.
+    if (!v.can_correct()) {
+        v.unavailable_reason =
+            !any_image ? "no decoded image yet"
+                       : (!v.on_pane
+                              ? "receiving — this picture is provisional"
+                              // §3's own words, for the case only the
+                              // not-yet-built folder-open path can reach:
+                              // an image whose snapshot has been released
+                              // because the operator moved on from it.
+                              : "raw stream no longer retained");
+    }
+    return v;
 }
 
 // --- lifecycle ------------------------------------------------------------
@@ -336,13 +382,23 @@ void LiveEngine::emit(const SessionOutput& out) {
 }
 
 void LiveEngine::begin_batch(std::shared_ptr<const std::vector<float>> snap,
-                             const DecodeOptions& dopt) {
+                             long long start, const DecodeOptions& dopt) {
     // Called on thread 2, from inside session_.push. One decode at a time
     // [§8.3 item 4]; a previous thread is joined before another starts.
     if (t3_.joinable()) t3_.join();
     {
         std::lock_guard<std::mutex> g(batch_mu_);
         batch_ready_ = false;
+    }
+    // §3: hold the snapshot this decode is running over. It is not the
+    // DISPLAYED one yet — the image on screen is still the previous
+    // transmission's, and so is the stream a correction would re-decode —
+    // it becomes displayed when its image takes the pane in collect_batch.
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        pending_snap_ = snap;
+        pending_start_ = start;
+        pending_options_ = dopt;
     }
     batch_running_.store(true, std::memory_order_release);
     const int fs = opt_.internal_rate;
@@ -402,6 +458,15 @@ void LiveEngine::collect_batch() {
     if (!ready) return;
 
     if (!ok) {
+        // A decode that produced no image puts no image on the pane, so
+        // §3's displayed snapshot does not change hands — the operator is
+        // still looking at the previous chart and may still correct it.
+        // The failed transmission's stream has nothing to be the stream
+        // OF, and is released.
+        {
+            std::lock_guard<std::mutex> g(retain_mu_);
+            pending_snap_.reset();
+        }
         EngineMessage m;
         m.kind = EngineMsg::kBatchFailed;
         m.error = err;
@@ -423,6 +488,31 @@ void LiveEngine::collect_batch() {
         }
     }
 
+    // §3's retained snapshot changes hands, and it does so BEFORE the image
+    // it belongs to reaches the pane. The order is the load-bearing part,
+    // exactly as it is for write-then-SAVED above: thread 4 may look
+    // between these two blocks. In THIS order it sees the new stream with
+    // the old picture still on the pane, which reads as "provisional" and
+    // offers nothing — harmless. In the other order it would see the new
+    // picture on the pane backed by the PREVIOUS transmission's stream, and
+    // a correction taken in that instant would re-decode the wrong
+    // transmission (or, on the first decode of a session, no stream at all,
+    // which is the one state §3 reserves for a snapshot genuinely
+    // released).
+    //
+    // The outgoing image's stream is released HERE and nowhere else: an
+    // operator correcting the chart that just arrived keeps its raw stream
+    // for as long as it is the one on screen, however long they take, and
+    // the next transmission merely ARRIVING does not take it away — that
+    // arrival is a `pending_` snapshot until its own picture replaces this
+    // one.
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        displayed_snap_ = std::move(pending_snap_);
+        displayed_start_ = pending_start_;
+        displayed_options_ = std::move(pending_options_);
+        pending_snap_.reset();
+    }
     // The saved image takes the pane from the provisional one. This is the
     // announced swap of §8.2 — the two pictures differ, and the one on
     // screen after a decode is the one on disk.
@@ -498,6 +588,11 @@ void LiveEngine::thread2() {
             const std::vector<float> video = demod_.push(mono);
             if (!video.empty()) emit(session_.push(video));
         }
+        // §3's FIRST retained snapshot, published for thread 4: thread 2
+        // owns the session and thread 4 may not ask it anything, so the
+        // one number the cost of the store can be read from crosses here.
+        receiving_samples_.store(session_.retained_samples(),
+                                 std::memory_order_release);
 
         if (since_stats >= stats_every) {
             EngineMessage m;

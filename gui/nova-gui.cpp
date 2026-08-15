@@ -615,6 +615,8 @@ struct Shell {
     Fl_Float_Input* sync_input = nullptr;
     Fl_Button* apply = nullptr;
     Fl_Button* autob = nullptr;
+    Fl_Box* correct_why = nullptr;   // §3's "with the reason shown"
+    std::string correct_reason;      // ...and the string it is showing
     LevelMeter* meter = nullptr;
     Fl_Box* status_bg = nullptr;
     Fl_Box* status_state = nullptr;
@@ -971,6 +973,19 @@ struct Shell {
         autob->deactivate();
         note("auto_button", autob);
 
+        // §3: "The PHASE/SYNC controls must then be visibly disabled with
+        // the reason shown — not silently inert. Manual adjustment [ISO
+        // §4.2.6, §5.4.3] ... is not offered and then found not to work."
+        // This is that sentence. It sits directly under the two buttons it
+        // explains rather than in the sidebar's empty lower area, which §8
+        // already spoke for (§8.2's receiving indicator).
+        correct_why = new Fl_Box(0, 0, 0, 0);
+        correct_why->labelsize(kFontSize - 1);
+        correct_why->labelfont(FL_HELVETICA_ITALIC);
+        correct_why->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_WRAP);
+        correct_why->labelcolor(FL_INACTIVE_COLOR);
+        note("correct_why", correct_why);
+
         // --- level meter and status line -------------------------------------
         meter = new LevelMeter(0, 0, 0, 0);
         note("level_meter", meter);
@@ -1058,6 +1073,8 @@ struct Shell {
         py += kPanelRowH + kPad;
         apply->resize(px + kPad, py, 70, 21);
         autob->resize(px + kPad + 74, py, 70, 21);
+        py += 24;
+        correct_why->resize(px + kPad, py, fw, 28);
 
         meter->resize(0, main_y + main_h, W, kMeterH);
         const int sy = main_y + main_h + kMeterH;
@@ -1176,13 +1193,24 @@ struct Shell {
         // next row — drawn rows are never revised — which is the whole
         // contract of the provisional renderer.
         //
-        // What is still NOT here, and is deactivated rather than
-        // pretended: correcting a picture that has already been decoded
-        // and saved. That needs DecodeOptions::phase_anchor_hint and
-        // clock_ppm_fallback [§7.1], which do not exist yet, so Auto —
-        // which means "put the measured values back and re-render" —
-        // stays grey. An image with no re-render behind it shows the
-        // control visibly disabled rather than silently inert [§3].
+        // Correcting a picture that has already been decoded and saved is
+        // the OTHER surface, and since session 27 the raw stream it needs
+        // is retained [§3]. What is still missing is the lifecycle that
+        // spends it — Apply re-rendering and overwriting the file, Auto
+        // restoring the measured values [§8.5 items 2-4, ROADMAP M4 item
+        // 4] — so the two buttons stay grey after SAVED, deliberately: an
+        // active button that does nothing is the one failure this shell
+        // must not have (session 26, finding 2). What session 27 adds is
+        // the honest half of §3 — the control says WHY it cannot act.
+        const nova::RetainedVideo retained =
+            engine ? engine->retained_video() : nova::RetainedVideo{};
+        correct_reason = engine ? retained.unavailable_reason
+                                : std::string("no capture running");
+        if (retained.can_correct())
+            correct_reason = "raw stream retained; correction lands in M4 "
+                             "item 4";
+        correct_why->copy_label(correct_reason.c_str());
+
         const bool overrides_live = capture && state ==
                                                    LiveState::kDrawingPreview;
         if (overrides_live) {
@@ -1653,6 +1681,16 @@ int print_metrics(const Shell& s) {
     // the transport's is.
     std::printf("  device_active        \"%d\"\n", s.device->active() ? 1 : 0);
     std::printf("  progress_active      \"%d\"\n", s.progress->active() ? 1 : 0);
+    // §3: the correction controls are disabled WITH THE REASON. Both halves
+    // are inspectable, because "grey" and "grey and says why" are different
+    // states and only the second one satisfies §3.
+    std::printf("  phase_active         \"%d\"\n",
+                s.phase_input->active() ? 1 : 0);
+    std::printf("  sync_active          \"%d\"\n",
+                s.sync_input->active() ? 1 : 0);
+    std::printf("  apply_active         \"%d\"\n", s.apply->active() ? 1 : 0);
+    std::printf("  auto_active          \"%d\"\n", s.autob->active() ? 1 : 0);
+    std::printf("  correct_reason       \"%s\"\n", s.correct_reason.c_str());
     std::printf("  ruler_active         \"%d\"\n", s.ruler->active() ? 1 : 0);
     std::printf("  zoom                 \"%s\"\n", s.zoom->text());
     std::printf("  image_cols           \"%d\"\n", v.image_cols);
