@@ -7,6 +7,69 @@ anything as our develop history").
 
 ---
 
+## 2026-08-14 — Session 27 (closing): the next step is a pair of hands,
+## not the next item
+
+Agent: Claude. Files changed: `README.md` (the manual-override paragraph
+listed the post-decode re-render as still outstanding — it was built
+earlier this session), `gui/nova-gui.cpp` (file header: the "`Auto` is
+still grey for everyone, because §7.1's two DecodeOptions fields do not
+exist yet" note was two sessions stale, and the flag list was missing
+`--follow` and `--correction`), `SESSION-LOG.md`. No code. 37/37 stands
+from cont 2.
+
+**Why this entry exists at all.** Sara asked whether to start ROADMAP M4
+item 5 in this session. The answer taken was **no, and the amended next
+step is the reason** — the previous entry's "item 5 or 6, Sara's pick" is
+correct about what is left to BUILD and wrong about what should happen
+next, so it is amended here rather than rewritten there.
+
+**Everything items 3 and 4 claim is verified against fixtures and against
+files on disk. Nothing about them has been verified by a person pressing
+a button.** The retention, the overwrite, the byte-for-byte Auto and the
+sixteen-row button table are all measured; Apply has never been clicked.
+This project's own record says that gap is where the real defects live:
+session 25's live run found a Device menu that had never had a callback,
+session 26's found a Start button that silently swallowed clicks, and
+this session opened by fixing a scroll that bounced on screen while the
+number the code checked read perfectly. Three for three, all with a green
+suite, none findable by a screamer.
+
+Item 5 — click-to-set-PHASE — feeds the very control the re-render
+lifecycle consumes, so building it first would stack new interaction
+surface on top of unverified interaction surface and tangle the two if
+anything is wrong. It is also the item where the operator's eye is the
+instrument: "click the dead sector and the picture lands where I meant"
+is a judgement about feel, not a number this suite can assert.
+
+**Next step: run `./build/nova-gui` against a chart and use the
+correction surface by hand.** Decode a transmission (or force-start one),
+then with the saved chart on the pane: type a PHASE column and press
+Apply — the file should be rewritten in place, the picture should move,
+and the Quality field should update; press Auto — the automatic decode
+should come back. While a re-render runs the progress bar should move and
+Start / Force Start / the Device menu should all be inert. Watch the
+reason line under the two buttons as the shell moves between states, and
+watch what the pane does when the NEXT transmission starts drawing while
+a chart is being corrected — that is where §8.2's unbuilt background
+buffer (item 6) will show itself as a felt problem rather than a
+paragraph.
+
+Then, with whatever that finds: **ROADMAP M4 item 5** (click-to-set-PHASE
+[§8.3 item 1] — the arithmetic exists and is pinned in `live/ruler.hpp` /
+`ruler_mapping`, so it is an `FL_PUSH` handler calling functions that
+exist, not new geometry), or **item 6** (the transmission arriving
+mid-edit [§8.2]: the background buffer and the compact receiving
+indicator — what makes the retained stream REACHABLE while the next
+transmission draws, and what turns item 4's stand-in edit-end into the
+operator's own action), or **item 7** (m4a input via runtime ffmpeg).
+They are independent and can be taken in any order. Registered, not
+scheduled: whether Zoom should keep the vertical ROW rather than the
+pixel offset (this session's first entry); template white-window
+robustness (session 26).
+
+---
+
 ## 2026-08-14 — Session 27 (cont 2): the post-decode edit lifecycle, and
 ## a "done" flag that fired before the file was on disk
 

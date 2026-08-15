@@ -23,9 +23,13 @@
 // inert]. On a machine with no input device there is no engine, and the
 // transport stays grey exactly as it did before the wiring landed — a
 // Start that greys itself is honest where a Start that does nothing is
-// not. `Auto` is still grey for everyone, because putting the measured
-// values back means re-rendering a decoded picture, and §7.1's two
-// DecodeOptions fields do not exist yet.
+// not. Since session 27 the same rule decides the correction surface with
+// something actually behind it: `correction_for` is a pure function of
+// four booleans, and with nothing typed and nothing applied both Apply and
+// Auto are grey, because the picture already IS the measured render and a
+// button that rewrites the same file is a button that does nothing. When a
+// correction is impossible the shell says WHY [§3], which is the half of
+// that rule a grey control cannot carry on its own.
 //
 // No column arithmetic is written inside a widget. The ruler's mapping —
 // zoom, scroll, tick step, and the left-edge retention of §8.4 item 2 —
@@ -45,6 +49,11 @@
 //   --zoom V      Fit | 25 | 50 | 100 | 200
 //   --ioc N       Auto | 576 | 288        (Force Start needs both explicit)
 //   --rate N      Auto | 60 | 90 | 120
+//   --follow BxR  drive the newest-row follow with B batches of R rows and
+//                 report where the picture ACTUALLY sits — the child's own
+//                 position, not Fl_Scroll's cached copy of it [session 27]
+//   --correction  the whole truth table of `correction_for`, so §8.5 item
+//                 4's edit boundary is checkable with nothing decoded
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
