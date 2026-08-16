@@ -739,6 +739,111 @@ private:
 // chart, and the alternative — drawing straight out of the live decode
 // thread's buffer — is holding a lock across an FLTK blit, which is the
 // one thing §2 says thread 4 must not do.
+// §8.2's compact receiving indicator: state name, line count, thumbnail —
+// what a transmission arriving BEHIND an edit gets instead of the pane.
+//
+// It is a widget rather than three fields because it is one control: the
+// whole of it is the click target that brings the buffered picture forward,
+// and §8.2 gives the pane exactly one way to change hands [Sara, session
+// 30]. It shows nothing at all when nothing is buffered — an empty frame
+// saying "not receiving" would be a permanent fixture reporting the normal
+// case, and the sidebar's lower area is small.
+class RecvIndicator : public Fl_Widget {
+public:
+    RecvIndicator(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+
+    // Nearest-neighbour into a small buffer rather than holding the whole
+    // picture and scaling on draw: the buffered chart is up to 1810 px wide
+    // and this is a 44 px thumbnail updated on every tick.
+    void set(bool active, const char* state, int rows, bool complete,
+             const nova::Image& src) {
+        active_ = active;
+        state_ = state ? state : "";
+        rows_ = rows;
+        complete_ = complete;
+        thumb_.clear();
+        rgb_.reset();
+        if (active_ && src.width > 0 && src.height > 0) {
+            thumb_w_ = kThumbW;
+            thumb_h_ = std::min(
+                kThumbH, std::max(1, static_cast<int>(
+                                         static_cast<long long>(src.height) *
+                                         kThumbW / src.width)));
+            thumb_.resize(static_cast<std::size_t>(thumb_w_) *
+                          static_cast<std::size_t>(thumb_h_));
+            for (int ty = 0; ty < thumb_h_; ty++) {
+                const int sy = static_cast<int>(
+                    static_cast<long long>(ty) * src.height / thumb_h_);
+                for (int tx = 0; tx < thumb_w_; tx++) {
+                    const int sx = static_cast<int>(
+                        static_cast<long long>(tx) * src.width / thumb_w_);
+                    thumb_[static_cast<std::size_t>(ty) *
+                               static_cast<std::size_t>(thumb_w_) +
+                           static_cast<std::size_t>(tx)] =
+                        src.px[static_cast<std::size_t>(sy) *
+                                   static_cast<std::size_t>(src.width) +
+                               static_cast<std::size_t>(sx)];
+                }
+            }
+            rgb_.reset(new Fl_RGB_Image(thumb_.data(), thumb_w_, thumb_h_, 1));
+        }
+        redraw();
+    }
+
+    bool active() const { return active_; }
+    int rows() const { return rows_; }
+    bool complete() const { return complete_; }
+    const std::string& state_name() const { return state_; }
+
+    // The whole widget is the target [§8.2: "switches to the live view when
+    // clicked"]. Inert when nothing is buffered, so a click on empty
+    // sidebar cannot promote — the same rule as session 29's unarmed
+    // picture click, for the same reason.
+    int handle(int e) override {
+        if (e == FL_PUSH && active_) {
+            do_callback();
+            return 1;
+        }
+        return 0;
+    }
+
+    void draw() override {
+        if (!active_) return;
+        draw_box(FL_UP_BOX, FL_BACKGROUND_COLOR);
+        const int pad = 4;
+        int tx = x() + w() - pad - kThumbW;
+        if (rgb_) {
+            rgb_->draw(tx, y() + pad);
+            fl_color(FL_INACTIVE_COLOR);
+            fl_rect(tx, y() + pad, thumb_w_, thumb_h_);
+        }
+        fl_color(FL_FOREGROUND_COLOR);
+        fl_font(FL_HELVETICA_BOLD, kFontSize - 1);
+        fl_draw("RECEIVING", x() + pad, y() + pad + 10);
+        fl_font(FL_HELVETICA, kFontSize - 2);
+        char buf[96];
+        // The count is of the BUFFERED picture, never of the one on the
+        // pane, so a glance says how much of the new transmission exists.
+        std::snprintf(buf, sizeof(buf), "%s \xc2\xb7 %d %s", state_.c_str(),
+                      rows_, rows_ == 1 ? "line" : "lines");
+        fl_draw(buf, x() + pad, y() + pad + 24);
+        fl_draw(complete_ ? "click to show (complete)" : "click to show",
+                x() + pad, y() + pad + 37);
+    }
+
+private:
+    static constexpr int kThumbW = 44;
+    static constexpr int kThumbH = 40;
+    bool active_ = false;
+    bool complete_ = false;
+    int rows_ = 0;
+    std::string state_;
+    std::vector<unsigned char> thumb_;
+    int thumb_w_ = 0;
+    int thumb_h_ = 0;
+    std::unique_ptr<Fl_RGB_Image> rgb_;
+};
+
 class ImageView : public Fl_Widget {
 public:
     ImageView(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
@@ -927,6 +1032,10 @@ struct Shell {
                                             nullptr};
     Fl_Button* apply = nullptr;
     Fl_Button* autob = nullptr;
+    // §8.2's receiving indicator, in the sidebar's lower area — the space
+    // §8.3 item 5 already reserved for it when it declined to reserve any
+    // for the M4.5 waterfall.
+    RecvIndicator* recv = nullptr;
     Fl_Box* correct_why = nullptr;   // §3's "with the reason shown"
     std::string correct_reason;      // ...and the string it is showing
 
@@ -1301,9 +1410,11 @@ struct Shell {
         // same reason: an image with no raw behind it shows them visibly
         // disabled rather than silently inert [§3].
         // Both captions are named regions from session 29, because the
-        // layout now makes a CLAIM through them: SYNC's caption owns a row
-        // of its own so the steppers can flank the box beneath it, and the
-        // arming button rides that row. A claim nobody can measure is a
+        // layout makes a CLAIM through them. The claim changed in session 30
+        // — the two controls are now matching caption/box/arm rows with
+        // SYNC's steppers adjacent beneath, rather than SYNC's caption
+        // holding a row alone so the steppers could flank the box — but the
+        // reason for measuring it did not: a claim nobody can measure is a
         // comment.
         cap_phase = caption("PHASE");
         note("cap_phase", cap_phase);
@@ -1385,6 +1496,13 @@ struct Shell {
         correct_why->labelcolor(FL_INACTIVE_COLOR);
         note("correct_why", correct_why);
 
+        // §8.2's receiving indicator [ROADMAP M4 item 6]. It draws nothing
+        // until a transmission is actually buffered behind an edit, so the
+        // sidebar looks exactly as it did before in the normal case.
+        recv = new RecvIndicator(0, 0, 0, 0);
+        recv->callback(cb_recv, this);
+        note("recv_indicator", recv);
+
         // --- level meter and status line -------------------------------------
         meter = new LevelMeter(0, 0, 0, 0);
         note("level_meter", meter);
@@ -1464,47 +1582,50 @@ struct Shell {
         py += kPanelRowH + kPad;
         rule->resize(px + kPad, py, fw, 2);
         py += 2 + kPad;
-        // The correction block, relaid out in session 29 [Sara]. The old
-        // shape put both boxes on their own rows and the four steppers on a
-        // full-width row beneath BOTH of them — and the first person to look
-        // at it read the steppers as PHASE's. They are SYNC's, and PHASE
-        // having no steppers is the deliberate asymmetry [see sync_step], so
-        // a layout that loses it loses the one thing it most had to carry.
+        // The correction block, relaid out in session 30 [Sara, after using
+        // session 29's version rather than only looking at it]. The two
+        // controls now read as two matching rows — caption, box, arming
+        // button — with SYNC's steppers on a row of their own beneath.
         //
-        // The fix is structural rather than another label: the steppers now
-        // FLANK the SYNC box, and a control touching a box on both sides can
-        // only belong to that box. That costs the SYNC caption its place on
-        // the box's row, so the caption takes the row above and brings the
-        // arming button with it. PHASE keeps caption, box and arm on one
-        // row — and the resulting asymmetry between the two blocks is a
-        // feature: what PHASE visibly lacks is what it is meant to lack.
+        // What this gives up, stated plainly because it was given up on
+        // purpose. Session 29 FLANKED the SYNC box with the steppers, on the
+        // reasoning that a control touching a box on both sides cannot be
+        // read as belonging to some other box; that was the fix for exactly
+        // this shape, whose earlier version Sara read as PHASE's steppers.
+        // Flanking cost the SYNC caption its place on the box's row, which
+        // left that row holding a caption, a dead gap and an arming button —
+        // and it was the gap, not the steppers, that made the block look
+        // heavy. So the tie between the steppers and SYNC is now ADJACENCY
+        // (directly under SYNC's box, two rows clear of PHASE's) rather than
+        // enclosure. Adjacency is the weaker claim and `gui_shell` now pins
+        // the weaker claim honestly instead of restating the old one.
+        //
+        // PHASE still has no steppers, and that is still the deliberate
+        // asymmetry rather than a hole in the layout [see sync_step]: a nudge
+        // smaller than the ±54-column window PHASE is refined within moves
+        // nothing at all. Its instrument is the click.
         // Same three rows as before, so nothing below moves.
         const int arm_w = 48;
         const int arm_x = px + kPanelW - kPad - arm_w;
+        const int box_x = px + kPad + 66;
+        const int box_w = 70;
         cap_phase->resize(px + kPad, py, 62, kPanelRowH);
-        phase_input->resize(px + kPad + 66, py + 1, 70, kPanelRowH - 2);
+        phase_input->resize(box_x, py + 1, box_w, kPanelRowH - 2);
         phase_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
         cap_sync->resize(px + kPad, py, 62, kPanelRowH);
+        sync_input->resize(box_x, py + 1, box_w, kPanelRowH - 2);
         sync_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
-        // Five cells across the panel's full width: -10 -1 [box] +1 +10.
-        // The coarse pair stays outside the fine pair so the row still reads
-        // as a scale, and the sign stays in the label because the direction
-        // has to be readable without the caption that is now a row away.
+        // Four equal cells across the panel's full width: -10 -1 +1 +10. The
+        // coarse pair stays outside the fine pair so the row reads as a
+        // scale, and the sign stays in the label because the direction has
+        // to be readable without a caption on the row.
         {
             const int gap = 3;
-            const int box_w = 56;
-            const int bw = (fw - 4 * gap - box_w) / kSyncSteps;
+            const int bw = (fw - (kSyncSteps - 1) * gap) / kSyncSteps;
             int bx = px + kPad;
             for (int i = 0; i < kSyncSteps; i++) {
-                if (i == kSyncSteps / 2) {
-                    sync_input->resize(bx, py + 1, box_w, kPanelRowH - 2);
-                    bx += box_w + gap;
-                }
-                // py + 1, the same inset the box takes: on a flanked row the
-                // two sit side by side and a one-pixel step between them
-                // reads as a mistake.
                 sync_step_btn[i]->resize(bx, py + 1, bw, kPanelRowH - 2);
                 bx += bw + gap;
             }
@@ -1514,6 +1635,13 @@ struct Shell {
         autob->resize(px + kPad + 74, py, 70, 21);
         py += 24;
         correct_why->resize(px + kPad, py, fw, 28);
+        py += 28 + kPad;
+        // The sidebar's lower area, which §8.3 item 5 kept clear for this
+        // and nothing else. Fixed height rather than "the rest of the
+        // panel": the indicator is compact by specification, and a click
+        // target that grows to fill a tall window would be a click target
+        // mostly made of empty space.
+        recv->resize(px + kPad, py, fw, 52);
 
         meter->resize(0, main_y + main_h, W, kMeterH);
         const int sy = main_y + main_h + kMeterH;
@@ -1688,6 +1816,44 @@ struct Shell {
             pending_row = -1;
             arm = Arm::kNone;
             slant_note.clear();
+        }
+
+        // §8.2 / ROADMAP M4 item 6: the edit holds the pane. The predicate
+        // lives on this thread because "an edit is in progress" is a fact
+        // about typed boxes and clicks [§8.5 item 4] that only thread 4 can
+        // see; the engine is told, and does the buffering.
+        //
+        // `retained.can_correct()` is part of the predicate rather than
+        // decoration: a dirty edit with no correctable surface behind it is
+        // not an edit anyone can finish, and holding the pane for it would
+        // freeze the live view with nothing to show for it.
+        // **Nothing promotes automatically** [Sara, session 30]. §8.2 said
+        // the buffered picture comes forward when the operator "switches or
+        // finishes", but §8.5 item 4 — written ten sessions later — made an
+        // edit END at Apply, and the two compose into something neither
+        // decided: the correction you just asked for is replaced by the
+        // incoming transmission at the moment it finishes rendering, so you
+        // never see it. Sara's call is that the pane changes hands ONLY at
+        // the indicator, which is also the plainest reading of §8.2's own
+        // purpose ("nothing interrupts a human mid-correction"). So this
+        // sets the hold and does not promote; `cb_recv` is the only caller
+        // of `promote_background` in the program.
+        const bool hold_pane = edit_dirty && retained.can_correct();
+        if (engine) engine->set_pane_held(hold_pane);
+
+        // The indicator reports the ENGINE's buffer, not the shell's
+        // predicate. They differ on purpose and the difference is the whole
+        // of Sara's decision: once a transmission is buffered the engine
+        // goes on buffering after `hold_pane` drops, until the click below
+        // promotes it. An indicator driven from `hold_pane` would go dark
+        // at Apply while the buffer it names was still there.
+        if (recv) {
+            const nova::LiveEngine::Background bg =
+                engine ? engine->background() : nova::LiveEngine::Background{};
+            nova::Image thumb;
+            if (bg.active && engine) engine->copy_background_image(&thumb);
+            recv->set(bg.active, state_text(state), bg.rows, bg.complete,
+                      thumb);
         }
 
         // One place decides all three, and it is a pure function so the
@@ -2200,6 +2366,34 @@ struct Shell {
     // not a third mode: "as measured" is the ABSENCE of the two values, so
     // Auto is the empty correction, and the boxes go back to blank because
     // blank is how this shell writes "measured" [§8.5 item 6].
+    // §8.2's one and only way for the pane to change hands [Sara, session
+    // 30]. Promotion is queued to thread 2 — the picture does not travel
+    // alone, and `saved_path_` is thread 2's — so the pane changes on a
+    // later tick, not inside this call.
+    //
+    // The edit ends here, and it ends because the operator LEFT it, which
+    // is §8.5 item 4's third ending ("or when the operator switches to the
+    // live view") finally being the operator's own action rather than the
+    // stand-in session 27 had to write. The values go back to blank because
+    // there is no memory between transmissions [§8.5 item 6], and the
+    // arming and pending anchor go with them: they name a picture that is
+    // about to stop being on screen.
+    static void cb_recv(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine || !s->recv->active()) return;
+        s->engine->promote_background();
+        s->edit_dirty = false;
+        s->applied = nova::Correction{};
+        s->phase_input->value("");
+        s->sync_input->value("");
+        s->pending_col = -1;
+        s->pending_row = -1;
+        s->arm = Arm::kNone;
+        s->slant_note.clear();
+        s->apply_state();
+        s->update_status();
+    }
+
     static void cb_auto(Fl_Widget*, void* p) {
         Shell* s = static_cast<Shell*>(p);
         if (!s->engine) return;
@@ -2566,6 +2760,16 @@ int print_metrics(const Shell& s) {
     // "a nudge is an edit" is a checkable claim and not just a comment on
     // `nudge_sync`. See --nudge.
     std::printf("  edit_dirty           \"%d\"\n", s.edit_dirty ? 1 : 0);
+    // §8.2's indicator [ROADMAP M4 item 6]. Read off the WIDGET rather than
+    // recomputed here: an inspection that restates the rule pins the
+    // restatement, which is this file's standing lesson.
+    std::printf("  recv_active          \"%d\"\n",
+                s.recv && s.recv->active() ? 1 : 0);
+    std::printf("  recv_rows            \"%d\"\n", s.recv ? s.recv->rows() : 0);
+    std::printf("  recv_complete        \"%d\"\n",
+                s.recv && s.recv->complete() ? 1 : 0);
+    std::printf("  pane_held            \"%d\"\n",
+                s.engine && s.engine->pane_held() ? 1 : 0);
     std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
     std::printf("  phase_value          \"%s\"\n", s.phase_input->value());
     // The image is a control now [§8.3 item 1], so whether it can act is

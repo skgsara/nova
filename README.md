@@ -181,11 +181,18 @@ starting at zero would make the operator's first click a jump of the
 entire error, away from correct. PHASE has no steppers on purpose — it
 is a seed the decoder refines within ±54 columns, so a smaller nudge
 would be refined straight back and the picture would not move. Its real
-instrument is the click. Since session 29 the steppers **flank** the SYNC
-box rather than sitting under both boxes, because the first person to look
-at the built panel read them as PHASE's — and a control touching a box on
-both sides cannot be misread that way, where another label could not have
-fixed what a label had already failed to prevent.
+instrument is the click. The steppers sit **directly beneath the SYNC
+box**, on a row of their own, with PHASE and SYNC above them as two
+matching rows of caption, box and arming button. Session 29 had instead
+made the steppers *flank* the SYNC box — a stronger way to say whose they
+are, since a control touching a box on both sides cannot be read as
+belonging to another box — after the first person to see the panel read
+them as PHASE's. Session 30 traded that back for the present shape at
+Sara's request, having by then used the window rather than only looked at
+it: flanking cost SYNC's caption its place beside its own box, and the
+resulting half-empty row was what actually made the block look heavy. The
+tie between the steppers and SYNC is now adjacency rather than enclosure,
+which is weaker, and `gui_shell` pins the weaker claim as such.
 
 **Both picture gestures are declared.** A small button beside PHASE arms
 "click the dead sector"; one beside SYNC arms "click the same feature

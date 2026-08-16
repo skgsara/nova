@@ -35,6 +35,7 @@ verbatim (checked against `mod_demod.c`).
 |---|---|---|
 | ACFax | fs/4 quadrature downconvert; 9-tap FIR tables (3 widths); amplitude-normalized delay discriminator; arcsin linearization idea; **retain raw demod stream → non-destructive post-adjustment** | 8-bit/8 kHz fixed point; `SHORT int` type punning; OSS audio |
 | HamFax | feature shape: IOC scaling, TX exists here only; **interaction shape: arm-then-click for the two post-decode corrections** (session 29) | Qt4, autotools, 8 kHz AU; the modal prompt dialog and disable-everything-else; `correctBegin`'s circular pixel shift |
+| JWX (again, session 30) | nothing taken; read as the counter-example that made §8.2's cost explicit | corrections gated on `!receiving_fax`, i.e. no edit may exist during a reception; `translate()` / `clock_correct_line` editing decoded pixels |
 | weatherfax_pi / KiwiSDR | fractional sample-rate tracking + fractional accumulator resampling; phasing wedge-fit over ~7% of line, median over ~40 lines, 10–90% spread rejection; false-start filtering | KiwiSDR runtime plumbing |
 | JWX | Goertzel start/stop detection (250 ms window) as reference; failure-mode catalogue: one-shot sync average, no per-line resync, hardcoded IOC 576/120, AFC abandoned | Java Sound workarounds |
 | Isobar | per-line sync lock approach; session/fixture doctrine | KG-FAX interop (out of scope) |
@@ -110,6 +111,42 @@ separation between the two clicks and divides by zero when they land on
 the same row. It is prior art for the gesture, not for the arithmetic —
 and the contrast is what turned Nova's own baseline number from a gate
 into a stated uncertainty [docs/05 §8.5, session 29].
+
+**What happens when a transmission arrives while the operator is
+correcting an earlier chart (session 30, M4 item 6).** Checked JWX
+`src/jwx/ImagePanel.java` from the local source tarball, prompted by
+session 29's lesson that the reasoning should be checked against prior art
+before it is built on.
+
+**JWX does not have this problem, because it forbids the overlap.** Both
+of its corrections are gated on the same flag — `manage_mouse_press`
+refuses the phase calibration with *"Cannot calibrate while receiving
+fax"*, and `clock_correct` silently does nothing under `if
+(!receiving_fax)`. So the mature answer in the corpus to "which picture
+owns the pane during an edit" is that an edit cannot exist during a
+reception at all.
+
+**Not taken, and worth being explicit about since it is the simplest
+answer available:** it would make Nova's §3 retention pointless. The whole
+reason Nova keeps the raw stream behind a saved chart is so a correction
+is possible *after* the transmission, indefinitely, and the operator on a
+schedule of back-to-back broadcasts is exactly the one who needs it. JWX's
+rule is affordable because JWX corrects the pixels in front of it; Nova
+re-decodes, so the thing being corrected is not the thing being received
+and there is no reason they cannot coexist. §8.2's background buffer is
+the cost of that difference.
+
+**Confirmed again, on a second program:** JWX's `translate()` circularly
+shifts already-decoded lines and `clock_correct_line` shears them, which
+is the same shape as HamFax's `correctBegin` and is not taken for the same
+reason — Nova's PHASE and SYNC are inputs to a re-decode, not edits to a
+picture.
+
+**Not checked:** HamFax's behaviour for this specific case. Session 29
+read `FaxWindow.cpp` / `FaxImage.cpp` for the gesture, not for the
+concurrency, and hamfax's single-transmission-at-a-time structure makes it
+unlikely to have an answer — but "unlikely" is reasoning, which is what
+session 29 was about. Recorded as a gap rather than assumed.
 
 **Control-tone detection and phasing (session 6, M3).** All three mature
 decoders were read before writing anything, and they disagree:

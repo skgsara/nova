@@ -36,8 +36,9 @@ back over the same file (one transmission, one file — there is no Save
 button). Auto puts the automatic decode back, byte for byte. When a
 correction is not possible the two buttons say why instead of just being
 grey.
-SYNC has four steppers flanking it — −10 −1 [box] +1 +10 — so a slant can
-be nulled by eye instead of by typing a number. From a blank box they
+PHASE and SYNC are two matching rows — caption, box, arming button — and
+SYNC has four steppers on the row beneath it, −10 −1 +1 +10, so a slant
+can be nulled by eye instead of by typing a number. From a blank box they
 start at the clock the picture was drawn on, not at zero: on a white-only
 station that is −70 to −118 ppm, and starting at zero would make the first
 click a jump of the whole error. PHASE has no steppers on purpose — it is
@@ -56,6 +57,15 @@ apart is ±55 ppm, which the reason line says, because that is your call to
 make and not the program's. Two clicks on the SAME row measure nothing —
 there is no baseline at all — and the gesture stays armed so you can just
 click again.
+Since session 30 a transmission arriving while you are correcting a chart
+does NOT take the screen from you: it draws into a background buffer
+behind a compact RECEIVING panel in the sidebar's lower area — state, line
+count, thumbnail — and the picture comes forward only when you click it.
+Nothing promotes on its own, so pressing Apply cannot replace your own
+correction with the incoming page. It is still saved to its own file the
+moment it finishes; the hold is on the pane, never on the disk. (This one
+needs two transmissions to see, so it has never been looked at by a
+person — `live_engine`'s `test_background_buffer` is what defends it.)
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

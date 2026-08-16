@@ -348,6 +348,7 @@ void LiveEngine::run_commands() {
             case CmdKind::kLabel: label_ = c.text; break;
             case CmdKind::kFolder: opt_.image_folder = c.text; break;
             case CmdKind::kRedecode: start_redecode(c.correction); break;
+            case CmdKind::kPromote: do_promote_background(); break;
         }
     }
 }
@@ -398,27 +399,148 @@ void LiveEngine::start_redecode(const Correction& c) {
     begin_batch(snap, start, d);
 }
 
+// Grow `dst` from the preview `p`'s image, restarting it when the preview
+// is a different one than the rows already there came from. Split out of
+// `append_display_rows` when §8.2's background buffer gave it a second
+// destination: the arithmetic is delicate enough that two copies of it
+// would be two chances to get the prefix wrong.
+//
+// Caller holds `img_mu_`.
+static void append_rows_locked(Image* dst, const StreamPreview** dst_src,
+                               const StreamPreview* p, const Image& src) {
+    if (p != *dst_src || dst->width != src.width) {
+        *dst = Image{};
+        dst->width = src.width;
+        dst->height = 0;
+        *dst_src = p;
+    }
+    if (src.height <= dst->height || src.width <= 0) return;
+    const std::size_t w = static_cast<std::size_t>(src.width);
+    dst->px.insert(dst->px.end(),
+                   src.px.begin() + static_cast<std::ptrdiff_t>(
+                                        w * static_cast<std::size_t>(
+                                                dst->height)),
+                   src.px.begin() + static_cast<std::ptrdiff_t>(
+                                        w * static_cast<std::size_t>(
+                                                src.height)));
+    dst->height = src.height;
+}
+
 void LiveEngine::append_display_rows() {
     const StreamPreview* p = session_.preview();
     if (!p) return;
     const Image& src = p->image();
     std::lock_guard<std::mutex> g(img_mu_);
-    if (p != display_src_ || display_.width != src.width) {
-        display_ = Image{};
-        display_.width = src.width;
-        display_.height = 0;
-        display_src_ = p;
+    // §8.2: the edit holds the pane. The rows go to the background buffer
+    // only when taking the pane would DISPLACE something — a decoded
+    // picture, which is the only kind an edit can be correcting. A held
+    // pane showing a provisional preview displaces nothing (that preview is
+    // this same transmission), so the hold does not apply and the rows land
+    // where they always did. Getting this test wrong in the permissive
+    // direction freezes the live view for an operator who has merely typed
+    // in a box, which is the opposite of the protection asked for.
+    const bool displaces_decoded =
+        display_src_ == nullptr && display_.width > 0 && display_.height > 0;
+    // **A buffer that exists keeps the pane held, whatever the edit is
+    // doing** [§8.2, Sara, session 30]. The pane changes hands ONLY when
+    // the operator clicks the indicator — that is the whole of the decision,
+    // and without this second term it would not survive the edit ending:
+    // the operator presses Apply, `pane_held_` goes false, and the very next
+    // batch of rows takes the pane that the indicator is still offering. The
+    // buffered picture would vanish into the pane by itself, which is the
+    // interruption §8.2 exists to prevent, arriving one Apply late.
+    const bool buffering = background_.width > 0 && background_.height > 0;
+    if ((pane_held_.load(std::memory_order_acquire) || buffering) &&
+        displaces_decoded) {
+        append_rows_locked(&background_, &background_src_, p, src);
+        // A preview that is still growing is not a parked decode, and if a
+        // parked decode were somehow overwritten by one, the indicator
+        // would call a whole chart a partial one.
+        background_complete_ = false;
+        return;
     }
-    if (src.height <= display_.height || src.width <= 0) return;
-    const std::size_t w = static_cast<std::size_t>(src.width);
-    display_.px.insert(display_.px.end(),
-                       src.px.begin() + static_cast<std::ptrdiff_t>(
-                                            w * static_cast<std::size_t>(
-                                                    display_.height)),
-                       src.px.begin() + static_cast<std::ptrdiff_t>(
-                                            w * static_cast<std::size_t>(
-                                                    src.height)));
-    display_.height = src.height;
+    append_rows_locked(&display_, &display_src_, p, src);
+}
+
+void LiveEngine::set_pane_held(bool held) {
+    pane_held_.store(held, std::memory_order_release);
+}
+
+LiveEngine::Background LiveEngine::background() const {
+    std::lock_guard<std::mutex> g(img_mu_);
+    Background b;
+    b.active = background_.width > 0 && background_.height > 0;
+    b.rows = background_.height;
+    b.width = background_.width;
+    b.complete = b.active && background_complete_;
+    return b;
+}
+
+bool LiveEngine::copy_background_image(Image* out) {
+    if (!out) return false;
+    std::lock_guard<std::mutex> g(img_mu_);
+    if (background_.width <= 0 || background_.height <= 0) return false;
+    *out = background_;
+    return true;
+}
+
+void LiveEngine::promote_background() {
+    std::lock_guard<std::mutex> g(cmd_mu_);
+    Cmd c;
+    c.kind = CmdKind::kPromote;
+    cmds_.push_back(std::move(c));
+}
+
+void LiveEngine::do_promote_background() {
+    // The two locks are taken in sequence and never nested, here as in
+    // `collect_batch` and `retained_video`, so no order between them exists
+    // to get wrong.
+    bool had_parked_snapshot = false;
+    {
+        std::lock_guard<std::mutex> g(img_mu_);
+        if (background_.width <= 0 || background_.height <= 0) return;
+        display_ = std::move(background_);
+        // A parked decode is a finished picture and has no preview growing
+        // it; a buffered preview is still being grown by `background_src_`,
+        // and the pane must go on appending to it from where it is.
+        display_src_ = background_complete_ ? nullptr : background_src_;
+        had_parked_snapshot = background_complete_;
+        background_ = Image{};
+        background_src_ = nullptr;
+        background_complete_ = false;
+    }
+    {
+        std::lock_guard<std::mutex> g(retain_mu_);
+        if (had_parked_snapshot) {
+            // The picture coming forward is the one on disk, and this is
+            // where its stream becomes the correctable one — the same
+            // handover `collect_batch` performs, deferred to the moment the
+            // operator actually gets the picture.
+            displayed_snap_ = std::move(parked_snap_);
+            displayed_start_ = parked_start_;
+            displayed_options_ = std::move(parked_options_);
+            // ...and so does the file it was written to, or the operator's
+            // next Apply overwrites the chart they were correcting with the
+            // one that just arrived [§8.5 item 2].
+            saved_path_ = parked_saved_path_;
+        } else {
+            // A provisional preview has no frozen stream by construction,
+            // so what comes forward is correctable by nothing. Releasing
+            // the outgoing snapshot here is §3's "the operator moved on":
+            // holding it would offer a re-decode of a chart no longer on
+            // the pane, which is the one mistake the by-role rule exists to
+            // prevent.
+            displayed_snap_.reset();
+            displayed_options_ = DecodeOptions{};
+            displayed_start_ = 0;
+            // A provisional picture is on no disk yet, so there is no file
+            // for a re-render to overwrite. Leaving the old path here would
+            // aim the next Apply at the previous transmission's PNG.
+            saved_path_.clear();
+        }
+        parked_snap_.reset();
+        parked_saved_path_.clear();
+    }
 }
 
 void LiveEngine::emit(const SessionOutput& out) {
@@ -570,12 +692,42 @@ void LiveEngine::collect_batch() {
     // §8.5 item 1: the decode completing is what writes the file, before
     // any editing is possible. The order is write-then-batch_done, so the
     // status line cannot read SAVED over a file that is not there.
+    // §8.2 / ROADMAP M4 item 6: is this decode arriving BEHIND an edit? The
+    // question has to be asked here, above the save, because the file this
+    // transmission is written to is one of the three things that must be
+    // parked with it rather than handed over [see promote_background]. The
+    // picture is still saved either way — §8.2's "nothing is lost by
+    // waiting" is about the pane, never about the disk.
+    //
+    // A RE-DECODE is excluded and must be: it is the operator's own Apply,
+    // whose entire purpose is to replace the displayed picture. Parking it
+    // would hide the result of the button they just pressed behind an
+    // indicator offering to show them their own correction.
+    bool park = false;
+    if (!was_redecode) {
+        std::lock_guard<std::mutex> g(img_mu_);
+        // The same two-term test `append_display_rows` uses, and for the
+        // same reason: a buffer that exists keeps the pane held until the
+        // operator promotes it [§8.2, Sara, session 30]. A transmission
+        // whose rows were diverted must not hand its finished picture to
+        // the pane merely because the edit ended while it was decoding.
+        const bool buffering =
+            background_.width > 0 && background_.height > 0;
+        park = (pane_held_.load(std::memory_order_acquire) || buffering) &&
+               display_src_ == nullptr && display_.width > 0 &&
+               display_.height > 0;
+    }
+
     std::string saved_path;
     std::string save_error;
     if (!opt_.image_folder.empty()) {
         try {
             saved_path = save_image(res, was_redecode);
-            saved_path_ = saved_path;
+            if (park) {
+                parked_saved_path_ = saved_path;
+            } else {
+                saved_path_ = saved_path;
+            }
         } catch (const std::exception& e) {
             save_error = e.what();
         }
@@ -599,20 +751,51 @@ void LiveEngine::collect_batch() {
     // the next transmission merely ARRIVING does not take it away — that
     // arrival is a `pending_` snapshot until its own picture replaces this
     // one.
-    {
-        std::lock_guard<std::mutex> g(retain_mu_);
-        displayed_snap_ = std::move(pending_snap_);
-        displayed_start_ = pending_start_;
-        displayed_options_ = std::move(pending_options_);
-        pending_snap_.reset();
-    }
-    // The saved image takes the pane from the provisional one. This is the
-    // announced swap of §8.2 — the two pictures differ, and the one on
-    // screen after a decode is the one on disk.
-    {
-        std::lock_guard<std::mutex> g(img_mu_);
-        display_ = res.img;
-        display_src_ = nullptr;
+    // §8.2, ROADMAP M4 item 6: a transmission that FINISHES behind an edit
+    // does not take the pane either, and this is the case with teeth in it.
+    // The paragraph above is the invariant — the outgoing stream is released
+    // when the incoming picture replaces it — so a decode that completes
+    // mid-edit would release the very stream the operator's Apply re-decodes
+    // from, and the correction surface would die under their hands with no
+    // visible cause. Deferring the whole handover is what prevents it: image
+    // and snapshot are parked TOGETHER and promoted TOGETHER, so
+    // `retained_video()` describes the picture actually on the pane at every
+    // instant, which is the invariant the correction surface is built on.
+    //
+    // `park` was decided above the save, because the saved path is parked
+    // with the picture rather than handed over.
+    if (park) {
+        {
+            std::lock_guard<std::mutex> g(retain_mu_);
+            parked_snap_ = std::move(pending_snap_);
+            parked_start_ = pending_start_;
+            parked_options_ = std::move(pending_options_);
+            pending_snap_.reset();
+        }
+        {
+            std::lock_guard<std::mutex> g(img_mu_);
+            background_ = res.img;
+            // A finished decode is grown by no preview: promotion must not
+            // append the next transmission's rows onto this chart.
+            background_src_ = nullptr;
+            background_complete_ = true;
+        }
+    } else {
+        {
+            std::lock_guard<std::mutex> g(retain_mu_);
+            displayed_snap_ = std::move(pending_snap_);
+            displayed_start_ = pending_start_;
+            displayed_options_ = std::move(pending_options_);
+            pending_snap_.reset();
+        }
+        // The saved image takes the pane from the provisional one. This is
+        // the announced swap of §8.2 — the two pictures differ, and the one
+        // on screen after a decode is the one on disk.
+        {
+            std::lock_guard<std::mutex> g(img_mu_);
+            display_ = res.img;
+            display_src_ = nullptr;
+        }
     }
 
     EngineMessage done;

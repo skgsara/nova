@@ -307,6 +307,58 @@ public:
     // pulled out from under it mid-decode.
     RetainedVideo retained_video() const;
 
+    // --- thread 4: the background buffer [§8.2, ROADMAP M4 item 6] ----------
+    // **The edit holds the pane.** While the operator is correcting a
+    // decoded chart, a transmission that arrives does not take the screen
+    // from them: its rows grow a SECOND image behind the one being
+    // corrected, and the shell shows a compact receiving indicator instead
+    // of swapping the pane [§8.2].
+    //
+    // The shell owns the predicate, not the engine: "an edit is in
+    // progress" is a fact about typed boxes and clicks [§8.5 item 4], which
+    // only thread 4 can see. The engine is told, and the telling is an
+    // atomic rather than a queued command because it is read by thread 2 on
+    // every batch of rows and must never be one tick stale — a tick late
+    // here is the operator's picture already gone.
+    void set_pane_held(bool held);
+    bool pane_held() const {
+        return pane_held_.load(std::memory_order_acquire);
+    }
+
+    // What the receiving indicator shows [§8.2: state, line count,
+    // thumbnail]. `rows`/`width` describe the buffered picture; `complete`
+    // means its own decode has finished and is parked whole, waiting to be
+    // brought forward.
+    struct Background {
+        bool active = false;
+        int rows = 0;
+        int width = 0;
+        bool complete = false;
+    };
+    Background background() const;
+    // The buffered picture itself, for the indicator's thumbnail. False
+    // while nothing is buffered.
+    bool copy_background_image(Image* out);
+
+    // The announced swap [§8.2]: the buffered picture comes forward when
+    // the edit ends, by Apply, by Auto, or because the operator clicked the
+    // indicator. Queued like every other control, and a no-op when there is
+    // nothing buffered — ask `background().active` first if the answer
+    // matters.
+    //
+    // **Three things travel with the picture, and every one of them would
+    // be a defect on its own.** A completed background decode carries a raw
+    // snapshot (`retained_video`'s displayed role) and a saved path
+    // (`saved_path_`, which a re-render OVERWRITES [§8.5 item 2]), and the
+    // picture it is waiting behind carries its own of each. Left to the
+    // default, a transmission finishing mid-edit takes all three: the
+    // operator's Apply then re-decodes from a stream that is not theirs and
+    // writes the result over the newly received chart's PNG. So image,
+    // snapshot and path are parked together and promoted together, which is
+    // what keeps `retained_video()` and `saved_path_` describing the picture
+    // actually on the pane at every instant.
+    void promote_background();
+
     unsigned long long overruns() const { return ring_.overruns(); }
     std::size_t ring_capacity() const { return ring_.capacity(); }
 
@@ -320,7 +372,7 @@ public:
 
 private:
     enum class CmdKind { kStart, kStop, kForce, kPhase, kSync, kLabel,
-                         kFolder, kRedecode };
+                         kFolder, kRedecode, kPromote };
     struct Cmd {
         CmdKind kind = CmdKind::kStart;
         int ioc = 0;
@@ -331,6 +383,11 @@ private:
 
     void thread2();
     void run_commands();
+    // Thread 2's half of `promote_background` [§8.2]. It runs here and not
+    // on thread 4 because the picture does not travel alone: `saved_path_`
+    // travels with it, and that is thread 2's, written where the file is
+    // written.
+    void do_promote_background();
     void emit(const SessionOutput& out);
     void post(EngineMessage m);
     void begin_batch(std::shared_ptr<const std::vector<float>> snap,
@@ -389,6 +446,19 @@ private:
     // so the pane must start over rather than append to the old chart.
     const StreamPreview* display_src_ = nullptr;
 
+    // §8.2's background buffer, guarded by `img_mu_` exactly as `display_`
+    // is — one lock for "what pictures exist", so no order between them can
+    // be got wrong. `background_complete_` distinguishes a preview still
+    // growing from a finished decode parked whole: the indicator says
+    // different things about the two, and only the second has a snapshot
+    // parked with it.
+    Image background_;
+    const StreamPreview* background_src_ = nullptr;
+    bool background_complete_ = false;
+    // Set by thread 4, read by thread 2 on every batch of rows [see
+    // set_pane_held].
+    std::atomic<bool> pane_held_{false};
+
     // The retained video of §3. `pending_*` is the snapshot the decode
     // running right now was started from; it becomes `displayed_*` at the
     // moment that decode's image takes the pane, and the snapshot the
@@ -407,6 +477,21 @@ private:
     std::shared_ptr<const std::vector<float>> displayed_snap_;
     long long displayed_start_ = 0;
     DecodeOptions displayed_options_;
+    // The third role, and it exists only while the pane is held: the
+    // snapshot of a transmission whose decode FINISHED behind an edit
+    // [§8.2]. It is not `displayed_*` because its picture is not displayed,
+    // and it is not `pending_*` because nothing is decoding it any more.
+    // Promotion moves it to `displayed_*` in the same breath as its image
+    // reaches the pane [see promote_background].
+    std::shared_ptr<const std::vector<float>> parked_snap_;
+    long long parked_start_ = 0;
+    DecodeOptions parked_options_;
+    // The parked picture's file, thread 2's like `saved_path_` itself. It
+    // is the third thing that travels with a picture [see
+    // promote_background] and the one whose loss is destructive rather than
+    // merely wrong: an Apply against a stale `saved_path_` overwrites a
+    // chart that was received correctly.
+    std::string parked_saved_path_;
     // Thread 2 publishes the size of the store the SESSION is still
     // growing; thread 4 may not touch the session to ask.
     std::atomic<std::size_t> receiving_samples_{0};

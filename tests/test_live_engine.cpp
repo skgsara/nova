@@ -880,6 +880,229 @@ void test_rerender(const char* wav_path, const char* tmp_dir) {
 }
 
 // --- the operator provenance in the metadata -------------------------------
+// ROADMAP M4 item 6 / docs/05 §8.2: **the edit holds the pane.**
+//
+// Three things travel with a picture — its pixels, its retained raw stream,
+// and the file it was saved to — and a transmission that arrives, or worse
+// FINISHES, while the operator is correcting an older chart will take all
+// three unless it is stopped. The third is destructive rather than merely
+// wrong: `saved_path_` is what a re-render overwrites [§8.5 item 2], so an
+// Apply against a stale one writes the corrected old chart over the newly
+// received chart's PNG. A file that was received correctly is destroyed by
+// an operation on a different transmission.
+//
+// **Two cautions for anyone adding to this.** The fixture is fed twice, so
+// the two charts may be pixel-identical: any check of the form "the pane is
+// still the first picture" can pass while the pane has in fact been taken,
+// which is session 29's "a rule exercised only where it cannot fail". Every
+// check below is therefore made against something that genuinely differs —
+// a PARTIAL background against a complete pane, the identity of the
+// retained snapshot pointer, or the bytes of a file that must not change.
+// And the promotion is QUEUED to thread 2, so nothing about it is true in
+// the statement after the call.
+void test_background_buffer(const char* wav_path, const char* tmp_dir) {
+    std::printf("the background buffer [docs/05 §8.2, ROADMAP M4 item 6]\n");
+    nova::Wav w = nova::read_wav(wav_path);
+    const std::vector<float> once =
+        nova::resample(w.samples, w.sample_rate, kInternalRate);
+
+    const std::string folder = std::string(tmp_dir) + "/background";
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    std::filesystem::create_directories(folder, ec);
+
+    nova::EngineOptions opt;
+    opt.image_folder = folder;
+    auto stamp_n = std::make_shared<int>(0);
+    opt.utc_now = [stamp_n] {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "20260816T0000%02dZ", ++*stamp_n);
+        return std::string(buf);
+    };
+    opt.poll_ms = 1;
+    nova::LiveEngine eng(kInternalRate, opt);
+    eng.run();
+    eng.start_capture();
+
+    nova::SessionState state = nova::SessionState::kIdle;
+    double consumed = 0.0;
+    std::vector<std::string> saved;
+    const auto pump = [&] {
+        for (const nova::EngineMessage& m : eng.drain()) {
+            if (m.kind == nova::EngineMsg::kStateChanged) state = m.state;
+            if (m.kind == nova::EngineMsg::kStats) consumed = m.consumed_sec;
+            if (m.kind == nova::EngineMsg::kSaved) saved.push_back(m.path);
+        }
+    };
+    const auto feed = [&](const float* p, std::size_t n) {
+        std::size_t at = 0;
+        while (at < n) {
+            const std::size_t k = std::min<std::size_t>(4096, n - at);
+            at += eng.push_audio(p + at, k);
+            pump();
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+    };
+    const auto settle = [&](int stable_for) {
+        double last = -1.0;
+        int stable = 0;
+        for (int i = 0; i < 4000 && stable < stable_for; i++) {
+            pump();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            if (consumed == last) {
+                stable++;
+            } else {
+                stable = 0;
+                last = consumed;
+            }
+        }
+    };
+    const auto read_file = [](const std::string& p) {
+        std::string out;
+        FILE* f = std::fopen(p.c_str(), "rb");
+        if (!f) return out;
+        char buf[4096];
+        std::size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+        std::fclose(f);
+        return out;
+    };
+
+    // --- one transmission, saved, on the pane, correctable -----------------
+    feed(once.data(), once.size());
+    settle(25);
+    eng.stop_capture();
+    for (int i = 0; i < 6000 && state != nova::SessionState::kSaved; i++) {
+        pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    check(state == nova::SessionState::kSaved && saved.size() == 1,
+          "the first transmission saved, so there is a chart to correct");
+    nova::Image first;
+    check(eng.copy_image(&first) && first.height > 0,
+          "...and its chart is the picture on the pane");
+    const nova::RetainedVideo r1 = eng.retained_video();
+    check(r1.can_correct(), "...with its raw stream behind it");
+    const void* const first_snap = r1.decoded.get();
+    const std::string first_path = saved.front();
+
+    // --- the operator starts an edit, and a transmission arrives ----------
+    eng.set_pane_held(true);
+    // HALF the recording: the discriminating moment. The buffered picture is
+    // partial here and the pane's is complete, so "the pane did not move" is
+    // a claim about two things that genuinely differ, whatever the pixels
+    // turn out to be.
+    feed(once.data(), once.size() / 2);
+    settle(15);
+    nova::Image pane;
+    eng.copy_image(&pane);
+    const nova::LiveEngine::Background mid = eng.background();
+    checkf(mid.active && mid.rows > 0,
+           "the arriving transmission draws into the background buffer "
+           "(%d rows)", mid.rows);
+    checkf(pane.height == first.height,
+           "...and the pane still holds the COMPLETE first chart (%d rows, "
+           "not the buffer's %d)", pane.height, mid.rows);
+    checkf(mid.rows < first.height,
+           "...the two being different pictures, so the check above can "
+           "fail (buffer %d < chart %d)", mid.rows, first.height);
+    check(eng.retained_video().decoded.get() == first_snap,
+          "...and the correction still names the first chart's stream");
+
+    // **The edit ENDS while the buffer exists** [Sara, session 30: the pane
+    // changes hands only at the indicator]. Without this the hold would be
+    // `pane_held` alone, and the rule would be exercised only where it
+    // cannot fail — the operator presses Apply, the hold drops, and the
+    // next rows walk into the pane the indicator is still offering. That is
+    // §8.2's interruption arriving one Apply late, and it is invisible to
+    // any check that keeps the pane held throughout.
+    eng.set_pane_held(false);
+    const int rows_at_release = eng.background().rows;
+    feed(once.data() + once.size() / 2, once.size() / 8);
+    settle(15);
+    nova::Image after_release;
+    eng.copy_image(&after_release);
+    const nova::LiveEngine::Background grown = eng.background();
+    checkf(grown.rows > rows_at_release,
+           "with the edit ended and the buffer still there, rows keep going "
+           "to the BUFFER (%d -> %d)", rows_at_release, grown.rows);
+    checkf(after_release.height == first.height,
+           "...and the pane is still the complete first chart (%d rows), "
+           "not the buffer's %d", after_release.height, grown.rows);
+    eng.set_pane_held(true);
+
+    // --- ...and it FINISHES, behind the edit -------------------------------
+    feed(once.data() + once.size() / 2 + once.size() / 8,
+         once.size() - once.size() / 2 - once.size() / 8);
+    settle(25);
+    eng.stop_capture();
+    for (int i = 0; i < 8000 && saved.size() < 2; i++) {
+        pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    check(saved.size() == 2,
+          "the second transmission is SAVED to its own file — §8.2 holds the "
+          "pane, never the disk");
+    const nova::LiveEngine::Background done = eng.background();
+    check(done.active && done.complete,
+          "...and parks complete behind the indicator");
+    const nova::RetainedVideo r2 = eng.retained_video();
+    check(r2.can_correct() && r2.decoded.get() == first_snap,
+          "...while the correction STILL re-decodes the first chart's "
+          "stream, which is the invariant a finished decode would break");
+
+    // --- the destructive case: whose file does a correction overwrite? -----
+    const std::string second_path = saved[1];
+    const std::string second_before = read_file(second_path);
+    check(!second_before.empty() && second_path != first_path,
+          "the two transmissions are two files");
+    eng.redecode(nova::Correction{});
+    for (int i = 0; i < 8000; i++) {
+        pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        if (i > 25 && !eng.redecoding()) break;
+    }
+    settle(15);
+    // **The PATH, not the bytes.** The bytes cannot answer this: the
+    // fixture is fed twice, so the re-decoded first chart and the second
+    // transmission's chart are the same picture, and comparing the second
+    // file's content before and after would compare identical bytes with
+    // identical bytes whichever file was written. A mutation that handed
+    // `saved_path_` over anyway survived exactly that check. What a
+    // re-render announces is the file it WROTE, and that is unambiguous.
+    checkf(saved.size() == 3,
+           "the re-render announced a save (%zu announcements)", saved.size());
+    if (saved.size() == 3) {
+        checkf(saved[2] == first_path,
+               "a correction made behind the indicator overwrites ITS OWN "
+               "file, not the newly received chart's [%s, not %s]",
+               saved[2].c_str(), second_path.c_str());
+        check(saved[2] != second_path,
+              "...which is the destructive case: an Apply on one "
+              "transmission must never write over another's PNG");
+    }
+    check(read_file(second_path) == second_before,
+          "...and the newly received chart's bytes are untouched");
+    check(!read_file(first_path).empty(),
+          "...while its own file still exists");
+
+    // --- the operator clicks the indicator ---------------------------------
+    eng.promote_background();
+    for (int i = 0; i < 4000; i++) {
+        pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        if (!eng.background().active) break;
+    }
+    check(!eng.background().active,
+          "clicking the indicator brings the buffered picture forward");
+    const nova::RetainedVideo r3 = eng.retained_video();
+    check(r3.can_correct() && r3.decoded.get() != first_snap,
+          "...and the retained stream becomes the promoted picture's, so a "
+          "correction now acts on what is actually on the pane");
+
+    eng.shutdown();
+}
+
 void test_provenance() {
     std::printf("decode QA provenance [docs/05 §8.5 item 3]\n");
     nova::DecodeResult r;
@@ -1029,6 +1252,9 @@ int main(int argc, char** argv) {
     // file and the metadata, not about the picture, so the cheapest
     // recording that decodes is the right one.
     test_rerender(argv[argc - 1], tmp);
+    // The tone-driven fixture again: §8.2's case needs a second
+    // transmission to START on its own behind the first one's chart.
+    test_background_buffer(argv[2], tmp);
     test_provenance();
     test_filenames();
     test_overrun_counted(argv[argc - 1]);

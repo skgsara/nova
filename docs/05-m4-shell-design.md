@@ -1602,7 +1602,9 @@ Found by hand on the built code, before the screamer ran. The clearing of
 the anchor, the arming and the measurement's note is now separate from the
 clearing of the VALUES, and guarded only on the surface being gone.
 
-*Layout.* The steppers now FLANK the SYNC box — two buttons either side,
+*Layout.* **[SUPERSEDED session 30 — see the amendment at the end of this
+paragraph; the flanking described here is no longer what is built.]** The
+steppers now FLANK the SYNC box — two buttons either side,
 `-10 -1 [box] +1 +10` — because a control touching a box on both sides
 cannot be read as belonging to another box, and a label could not have
 fixed a misreading a label had already failed to prevent. That costs the
@@ -1610,7 +1612,29 @@ SYNC caption its place on the box's row, so the caption takes the row
 above and carries SYNC's arming button; PHASE keeps caption, box and arm
 on one row. The resulting asymmetry between the two blocks is the point:
 what PHASE visibly lacks is what it is meant to lack. Same three rows as
-before, so nothing below moved.]**
+before, so nothing below moved.
+
+**[AMENDED session 30, Sara — flanking reverted, and this time by someone
+who had USED the panel.** Sara ran the built window, confirmed the
+flanking did now read as SYNC's (the fix worked), and then asked for a
+different shape anyway: two matching rows of caption/box/arm for PHASE and
+SYNC, with the four steppers on a full-width row beneath. Her proposal
+also gave PHASE its own steppers; that half was **not taken**, because
+PHASE is a seed refined within ±54 columns, so a ±1 or ±10 nudge is
+refined straight back and the picture does not move — four buttons that
+visibly do nothing.
+
+What was traded, stated so nobody re-derives it as a discovery: the tie
+between the steppers and SYNC drops from ENCLOSURE to ADJACENCY, which is
+the weaker claim, and it is the same class of tie whose earlier version
+was misread in the first place. Against that, flanking had left SYNC's
+caption stranded on a row with a dead gap in the middle of it, and that
+gap — not the steppers — was what made the block read as heavy. The call
+is the operator's and she had the evidence the original misreading did
+not: she had used the thing. `gui_shell` now pins adjacency AS adjacency
+(nearer SYNC's box than PHASE's, with no clear row between), and pins the
+absence of PHASE steppers as a count, so the asymmetry cannot be restored
+by accident. Both guards were mutation-proven.]**
 
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to

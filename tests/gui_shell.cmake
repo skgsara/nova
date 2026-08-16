@@ -26,8 +26,11 @@
 #   - the CORRECTION surface [§7, §7.1, §8.5, added sessions 27-29]: all
 #     sixteen combinations of `correction_for` checked against the rules
 #     rather than against a copy of the table; the SYNC steppers active
-#     exactly where the box is, FLANKING the box they step, and starting a
-#     nudge at the clock the picture was DRAWN on rather than at zero;
+#     exactly where the box is, sitting on their own row DIRECTLY BENEATH
+#     the box they step and nearer it than PHASE's, and starting a nudge
+#     at the clock the picture was DRAWN on rather than at zero; that
+#     PHASE has no steppers AT ALL, checked as a count because that
+#     asymmetry is deliberate and is the thing a tidy-up would undo;
 #     the click naming the column the ruler names at that x and naming
 #     nothing past the image's right edge;
 #   - the two ARMED GESTURES [session 29]: that an unarmed click does
@@ -55,6 +58,24 @@
 # runs at a parameter's identity value is not checking that parameter** —
 # session 29 found two rules that survived mutation because every
 # measurement check ran at 100% zoom, where the scale is 1.0.
+#
+# A third, from session 30, learned on the engine's side of the same
+# feature: **a check whose two sides are equal by construction cannot
+# fail.** A mutation that pointed a re-render at the wrong PNG survived a
+# byte-comparison of that PNG, because the fixture was fed twice and both
+# transmissions decoded to identical bytes. The instrument had to be the
+# path the re-render announces. Before adding a comparison here, ask what
+# would make the two sides differ, and if the answer is "nothing in this
+# setup", the check is scenery.
+#
+# **What this file does NOT cover, as of session 30**: the receiving
+# indicator of §8.2 [ROADMAP M4 item 6]. `recv_indicator` has a region and
+# `recv_active` / `recv_rows` / `recv_complete` / `pane_held` are printed,
+# but nothing here drives them — putting the shell into a buffered state
+# needs a sound card and two transmissions, and no inspection flag reaches
+# it yet. The engine's half is defended by `live_engine`'s
+# `test_background_buffer`; the WIDGET's rules are not defended anywhere.
+# Do not read the metrics existing as the behaviour being checked.
 #
 # --state drives the shell into a live state exactly as nova-live will,
 # and --then-state drives a SECOND state so that rules firing on a
@@ -457,51 +478,64 @@ foreach(st "idle" "ready" "drawing" "decoding" "saved")
     "gui_shell PASS steppers ${st}: ${ss} active, box ${sa}")
 endforeach()
 
-# ...and the steppers FLANK the SYNC box they step [session 29, Sara].
+# ...and the steppers sit DIRECTLY BENEATH the SYNC box they step
+# [session 30, Sara; session 29 flanked them instead].
 #
-# This is a layout check that earns its place, which most do not. The old
-# layout put the four steppers on a full-width row beneath BOTH boxes, and
-# the first person to look at the built window read them as PHASE's — an
-# understandable misreading that costs the deliberate asymmetry between the
-# two controls (PHASE has no steppers ON PURPOSE, because a nudge smaller
-# than the ±54-column search window it is refined within moves nothing).
-# Two buttons on either side of the box cannot be misread that way, and
-# "cannot be misread" is the whole claim, so it is worth pinning.
+# Read the claim this makes before adding to it, because it is deliberately
+# weaker than the one it replaces. PHASE has no steppers ON PURPOSE — a
+# nudge smaller than the ±54-column window PHASE is refined within moves
+# nothing — so the layout has to say whose the four buttons are. Session 29
+# said it by ENCLOSURE: two buttons either side of the SYNC box, which
+# cannot be read as PHASE's whatever else moves. Session 30 says it by
+# ADJACENCY: the steppers are nearer SYNC's box than PHASE's, and nothing
+# stronger. Adjacency is a real tie and it is the one Sara chose after
+# using the window; it is also the same class of tie whose earlier version
+# she misread, which is why it is pinned rather than assumed. If a row is
+# ever inserted between SYNC and the steppers, this check is what should
+# fail, and the failure is a design question and not a number to update.
 run_metrics(out --state saved --ioc 576 --rate 120)
 region(sync_input "${out}" six siy siw sih)
 region(phase_input "${out}" pix piy piw pih)
 region(status_panel "${out}" spx spy spw sph)
 math(EXPR panel_r "${spx} + ${spw}")
-math(EXPR sync_r "${six} + ${siw}")
+math(EXPR sync_bottom "${siy} + ${sih}")
+math(EXPR phase_bottom "${piy} + ${pih}")
 set(prev_r 0)
-set(left 0)
-set(right 0)
 foreach(tag sync_step_m10 sync_step_m1 sync_step_p1 sync_step_p10)
   region(${tag} "${out}" bx by bw bh)
   math(EXPR br "${bx} + ${bw}")
-  # On the SAME ROW as the box, which is what "flanking" means and what a
-  # row below could never claim.
-  if(NOT by EQUAL siy OR NOT bh EQUAL sih)
+  # BELOW the SYNC box, not on its row: the steppers have a row of their
+  # own now, which is what makes the two control rows match.
+  if(by LESS sync_bottom)
     message(FATAL_ERROR
-      "gui_shell FAIL steppers: ${tag} is ${bw}x${bh} at y=${by}, not on the "
-      "SYNC box's row (y=${siy} h=${sih})")
+      "gui_shell FAIL steppers: ${tag} at y=${by} is not below the SYNC box "
+      "(bottom ${sync_bottom}); the steppers have a row of their own")
   endif()
-  if(br LESS_EQUAL six)
-    math(EXPR left "${left} + 1")
-  elseif(bx GREATER_EQUAL sync_r)
-    math(EXPR right "${right} + 1")
-  else()
+  # Nearer SYNC than PHASE, which is the whole of the adjacency claim. The
+  # gap to SYNC's box is measured from the bottom of each, so a taller
+  # stepper row cannot quietly buy itself distance.
+  math(EXPR to_sync "${by} - ${sync_bottom}")
+  math(EXPR to_phase "${by} - ${phase_bottom}")
+  if(NOT to_sync LESS to_phase)
     message(FATAL_ERROR
-      "gui_shell FAIL steppers: ${tag} (${bx}..${br}) overlaps the SYNC box "
-      "(${six}..${sync_r})")
+      "gui_shell FAIL steppers: ${tag} at y=${by} is ${to_sync} px below the "
+      "SYNC box and ${to_phase} px below the PHASE box; the steppers are "
+      "SYNC's and the layout has to say so")
+  endif()
+  # A whole row of clear space between SYNC and its steppers would break
+  # the adjacency without moving anything below the PHASE box.
+  if(to_sync GREATER_EQUAL sih)
+    message(FATAL_ERROR
+      "gui_shell FAIL steppers: ${tag} is ${to_sync} px under the SYNC box, "
+      "a clear row (${sih} px) or more; that is no longer adjacency")
   endif()
   if(bx LESS spx OR br GREATER panel_r)
     message(FATAL_ERROR
       "gui_shell FAIL steppers: ${tag} (${bx}..${br}) leaves the panel "
       "(${spx}..${panel_r})")
   endif()
-  # Left to right in the order they are labelled, so the row still reads as
-  # a scale: -10 -1 [box] +1 +10.
+  # Left to right in the order they are labelled, so the row reads as a
+  # scale: -10 -1 +1 +10.
   if(NOT bx GREATER prev_r AND NOT prev_r EQUAL 0)
     message(FATAL_ERROR
       "gui_shell FAIL steppers: ${tag} at x=${bx} does not follow the "
@@ -509,29 +543,32 @@ foreach(tag sync_step_m10 sync_step_m1 sync_step_p1 sync_step_p10)
   endif()
   set(prev_r ${br})
 endforeach()
-if(NOT left EQUAL 2 OR NOT right EQUAL 2)
-  message(FATAL_ERROR
-    "gui_shell FAIL steppers: ${left} left of the SYNC box and ${right} "
-    "right of it; flanking is two and two")
-endif()
-# The steppers must not reach the PHASE box's row either — the misreading
-# this layout exists to prevent is precisely "these belong to PHASE".
-foreach(tag sync_step_m10 sync_step_p10)
-  region(${tag} "${out}" bx by bw bh)
-  math(EXPR phase_bottom "${piy} + ${pih}")
-  if(by LESS phase_bottom)
-    message(FATAL_ERROR
-      "gui_shell FAIL steppers: ${tag} at y=${by} reaches the PHASE box's "
-      "row (bottom ${phase_bottom}); PHASE has no steppers on purpose")
+# ...and PHASE still has none. The count is the asymmetry itself, so it is
+# checked as a count and not inferred from the four above having moved.
+set(phase_steppers 0)
+foreach(tag phase_step_m10 phase_step_m1 phase_step_p1 phase_step_p10)
+  if(out MATCHES "[ \t]${tag}[ \t]")
+    math(EXPR phase_steppers "${phase_steppers} + 1")
   endif()
 endforeach()
-message(STATUS "gui_shell PASS steppers: 2 + [box] + 2, on one row, in panel")
+if(NOT phase_steppers EQUAL 0)
+  message(FATAL_ERROR
+    "gui_shell FAIL steppers: ${phase_steppers} PHASE steppers exist; PHASE "
+    "is a seed refined within ±54 columns, so a ±1 or ±10 nudge moves "
+    "nothing and the button would be a control that visibly does not work")
+endif()
+message(STATUS
+  "gui_shell PASS steppers: four under the SYNC box, none for PHASE")
 
 # Each arming button sits on the row of the box its gesture fills in, and
 # inside the panel. A button beside the wrong box would name the wrong
 # value — the same misreading as the steppers, on a control where it would
 # move the operator's data rather than merely confuse them.
-foreach(pair "phase_arm;phase_input" "sync_arm;cap_sync")
+# Both anchors are the BOX now. Session 29 had to anchor sync_arm to the
+# caption, the box having been moved a row away by the flanking; session
+# 30 gives SYNC its box back on its own row, so the check can make the
+# same claim for both gestures instead of a weaker one for SYNC.
+foreach(pair "phase_arm;phase_input" "sync_arm;sync_input")
   list(GET pair 0 btn)
   list(GET pair 1 anchor)
   region(${btn} "${out}" bx by bw bh)

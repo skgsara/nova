@@ -7,6 +7,130 @@ anything as our develop history").
 
 ---
 
+## 2026-08-16 — Session 30: the layout Sara wanted after USING it, and the
+## third thing that travels with a picture
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (the correction block
+relaid out; `RecvIndicator`; the `hold_pane` predicate; `cb_recv`; the
+`recv_*` and `pane_held` metrics), `live/engine.hpp` / `live/engine.cpp`
+(`set_pane_held`, `background()`, `copy_background_image`,
+`promote_background` + `do_promote_background` and a `kPromote` command,
+`append_rows_locked`, the park branch in `collect_batch`, the
+`parked_*` role), `tests/gui_shell.cmake` (the stepper checks rewritten
+for adjacency; the PHASE-stepper count; both arm anchors),
+`tests/test_live_engine.cpp` (`test_background_buffer`, 19 checks). Files
+changed: `README.md`, `START-HERE.md`, `docs/05-m4-shell-design.md` (§8.5
+amended), `docs/00-prior-art-survey.md` (the JWX re-read and a ledger
+row), `ROADMAP.md` (item 11 amended, item 12 added, item 6 rewritten),
+`SESSION-LOG.md`. Test count unchanged at 37.
+
+**Sara ran session 29's window and confirmed all three of its open
+judgement calls** — arming reads as protection, ±1/±10 are the right
+steps, the flanked steppers do read as SYNC's — and then asked for a
+different layout anyway: PHASE and SYNC as two matching rows of caption,
+box and arming button, with the four steppers full-width beneath. Built as
+asked. **Her proposal's other half was refused**: PHASE steppers. PHASE is
+a seed refined within ±54 columns at IOC 576, so ±1 and ±10 both land
+inside the window and move nothing — four buttons that visibly do not
+work.
+
+**What the relayout costs, recorded because it is a knowing trade.**
+Session 29 tied the steppers to SYNC by ENCLOSURE, which cannot be
+misread; session 30 ties them by ADJACENCY, which can. That is the same
+class of tie whose earlier version Sara misread in the first place. What
+it buys is the removal of the half-empty row flanking forced on SYNC's
+caption — the gap, not the steppers, was what made the block look heavy.
+`gui_shell` now pins adjacency AS adjacency rather than restating the
+stronger claim, and pins the PHASE stepper count at zero so the asymmetry
+cannot be restored by accident. Session 29's text was AMENDED, not
+rewritten: it is a dated statement, and a SUPERSEDED marker goes at the
+top where the reader meets the old shape first.
+
+**Item 6, and the finding that matters. "Cheap by construction" was half
+right.** §8.2 predicted the rows would be cheap and they were — the
+renderer does not know whether anyone is looking, so diverting it is one
+branch. What was not cheap is a buffered transmission FINISHING. **Three
+things travel with a picture**: its pixels, its retained raw stream (what
+Apply re-decodes from) and its saved path (what a re-render overwrites).
+The default hands over all three, so a transmission completing behind an
+edit takes the correction surface out from under the operator AND aims
+their next Apply at its own PNG — the corrected old chart written over the
+newly received one. Destructive, silent, one line away. Parked as a unit,
+promoted as a unit; promotion became a thread-2 queued command because
+`saved_path_` is thread 2's.
+
+**A contradiction between two decisions, found by building them
+together.** §8.2 (session 17) says the buffered picture comes forward when
+the operator "switches or finishes". §8.5 item 4 (session 27) says an edit
+ENDS at Apply. Compose them and pressing Apply replaces your correction
+with the incoming transmission at the moment it renders — you never see
+what you asked for. Neither decision chose that. **Sara's call: nothing
+promotes automatically; the pane changes hands only at the indicator.** A
+consequence that was not obvious until it was built — the hold cannot be
+`edit_dirty` alone, or the buffer walks into the pane on the next batch of
+rows after Apply, which is §8.2's interruption arriving one Apply late. A
+buffer that exists keeps the pane held until promoted.
+
+**Finding, from the mutations, and it is session 29's third category
+again.** Five mutations against the engine; four died at once and **the
+destructive one survived** — the very case flagged as mattering most. Not
+an equivalent mutant, not code to delete: the fixture is fed twice, so
+both transmissions decode to identical PNG bytes, and a check comparing
+the second file's content before and after compares identical bytes with
+identical bytes whichever file was written. **The check could not fail.**
+The instrument had to be the PATH the re-render announces, not the
+content. With that, D dies and names the file it wrongly wrote.
+
+**Finding, about the harness again, and it is a new one.** A full-suite
+run was launched BEFORE a mutation harness that then rebuilt `nova-gui`
+three times underneath it. Those 37 passes were meaningless — some tests
+ran against mutated binaries — and the run was killed and repeated. The
+carry-forward: **a mutation harness invalidates every concurrent build
+product, not only its own.** Do not have a suite in flight while mutating.
+
+**Validation.** Layout: baseline survived, three mutations each killed by
+the intended check (a PHASE stepper existing, a clear row under SYNC,
+steppers on PHASE's row) — attributions verified, because a row-shifting
+mutation can easily be killed by an unrelated geometry check. Engine:
+baseline survived, five mutations all killed after D's gap was closed.
+Full suite 37/37 from a clean rebuild.
+
+**Closing sweep — prior art, checked because session 29 taught that.** JWX
+was read for item 6's actual question, and **it does not have the problem
+because it forbids the overlap**: both its corrections are gated on
+`!receiving_fax`, refusing with "Cannot calibrate while receiving fax".
+That is the simplest answer in the corpus and it is not available to Nova
+— it would make §3's retention pointless, since the point of keeping the
+raw stream is a correction that outlives the transmission. JWX can afford
+it because it edits the pixels in front of it; Nova re-decodes, so the
+chart being corrected and the one being received are different objects and
+there is no reason they cannot coexist. §8.2's buffer is the cost of that
+difference, and the ledger now says so. HamFax was NOT re-checked for this
+case and that is recorded as a gap rather than assumed away.
+Also swept: `gui_shell.cmake`'s header had gone stale again in exactly the
+way session 29 predicted — it still said the steppers FLANK the box, one
+session after they stopped doing so. Rewritten, with the session-30
+caution added and, more importantly, an explicit statement of what the
+file does NOT cover, so nobody reads the indicator's metrics existing as
+its behaviour being checked. `CMakeLists.txt`'s counts were verified
+correct this time (35 +2, unchanged: item 6's checks went into an existing
+suite).
+
+**Next step: `gui_shell` cannot reach the indicator, and that is the
+honest hole in item 6.** `RecvIndicator` is built, laid out at
+`784,344,192,52` and metered (`recv_active`, `recv_rows`,
+`recv_complete`, `pane_held`), but nothing drives it: putting the shell
+into a buffered state needs a sound card and two transmissions. An
+inspection flag for that is the next piece — the widget's own rules (inert
+when nothing is buffered, the click being the only promoter, the count
+naming the BUFFERED picture) currently rest on reading. **Then a by-hand
+run**, which is the only thing that can say whether an indicator is what
+an operator wants instead of their picture being taken. Sessions 25-27
+each found a defect on the air that a green suite could not see, and the
+relayout is also unlooked-at by anyone but Sara's original sketch.
+
+---
+
 ## 2026-08-15 — Session 29: the gestures are declared, and hamfax had the
 ## answer session 28 reasoned its way past
 

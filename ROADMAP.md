@@ -773,12 +773,46 @@ one feature with several parts, plus one verification no test can do.
    *afterwards* while having acted wrongly. `click_phase` now returns what
    it did and `--click` reports it, which is what makes the guard
    observable at all. Three defects reintroduced, three caught.
-6. **A transmission arriving mid-edit** [docs/05 §8.2]: the background
-   buffer plus the compact receiving indicator (state, line count,
-   thumbnail) that switches the pane when clicked. Cheap by construction
-   — the renderer already pushes rows through the queue and does not know
-   whether anyone is looking — but it is the last piece of the "edit
-   holds the pane" decision.
+6. **A transmission arriving mid-edit** [docs/05 §8.2] — **Engine and
+   surface done (session 30); the GUI half is not under test.**
+   "Cheap by construction" was half right. The rows were cheap, exactly as
+   §8.2 predicted: the renderer pushes through the queue and does not know
+   whether anyone is looking, so diverting them into a second image is one
+   branch in `append_display_rows`. **What was not cheap is what happens
+   when the buffered transmission FINISHES.**
+   A completed decode carries three things, and the default hands over all
+   three: its pixels, its retained raw stream (`displayed_snap_`, which the
+   operator's Apply re-decodes FROM) and its saved path (`saved_path_`,
+   which a re-render OVERWRITES [§8.5 item 2]). Left alone, a transmission
+   finishing behind an edit takes the correction surface out from under the
+   operator's hands, and their next Apply writes the corrected old chart
+   **over the newly received chart's PNG** — destructive, silent, and one
+   line from happening by default. So image, snapshot and path are parked
+   as a unit and promoted as a unit, and promotion became a thread-2 queued
+   command because `saved_path_` is thread 2's.
+   **Sara's decision, session 30: nothing promotes automatically.** §8.2
+   said the buffered picture comes forward when the operator "switches or
+   finishes", but §8.5 item 4 — written ten sessions later — made an edit
+   END at Apply, and the two compose into something neither decided: the
+   correction you just asked for is replaced by the incoming transmission
+   the moment it renders, so you never see it. The pane now changes hands
+   ONLY at the indicator. A consequence worth stating because it is not
+   obvious: the hold cannot be `edit_dirty` alone, or the buffer would walk
+   into the pane on the next batch of rows after Apply — a buffer that
+   exists keeps the pane held until it is promoted.
+   **Defended by `live_engine`'s `test_background_buffer`**: 19 checks, and
+   five mutations each killed by the intended check against a surviving
+   baseline (rows never diverting, the buffer not holding past the edit, a
+   finished decode never parking, the saved path handed over anyway, and
+   promotion dropping the snapshot).
+   **What is NOT done:** the receiving indicator is built, laid out and
+   metered (`recv_indicator`, `recv_active`, `recv_rows`, `recv_complete`,
+   `pane_held`) but **nothing in `gui_shell` drives it**, because there is
+   no way yet to put the shell into a buffered state without a sound card
+   and two transmissions. Until an inspection flag exists for that, the
+   widget's own rules — inert when nothing is buffered, the click being the
+   only promoter, the count naming the BUFFERED picture — rest on reading
+   rather than on a screamer. That is the next piece of item 6.
 7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
 8. ~~**The KiwiSDR browser hop**~~ **Done (session 26)** (found by item 1,
    session 25; scope set by Sara: **the browser stays the audio source**).
@@ -974,7 +1008,30 @@ one feature with several parts, plus one verification no test can do.
    a box on both sides cannot be read as another box's. SYNC's caption
    moves to the row above and carries its arming button; PHASE keeps
    caption, box and arm on one row, and the asymmetry between the two
-   blocks is the point.
+   blocks is the point. **[Layout AMENDED session 30 — see item 12; the
+   flanking above is not what is built. The rest of item 11 stands.]**
+
+12. **The correction block relaid out** **Done (session 30)** — Sara's,
+   after running session 29's window rather than looking at a screenshot
+   of it. She confirmed all three of session 29's open judgement calls
+   (arming reads as protection, ±1/±10 are the right steps, the flanking
+   did read as SYNC's) and then asked for a different shape regardless:
+   PHASE and SYNC as two matching rows of caption, box and arming button,
+   with the four steppers full-width beneath. Built as asked.
+   **Her proposal's other half was not taken**: PHASE steppers. PHASE is
+   a seed refined to the best feature within ±54 columns at IOC 576
+   [`core/fax.cpp`, `stage_dead_sector`], so ±1 and ±10 both land inside
+   the window, get refined back onto the same feature, and move nothing —
+   a control that visibly does not work. PHASE's instrument is the click.
+   **What it costs**, recorded because it is a knowing trade and not an
+   oversight: the steppers' tie to SYNC weakens from enclosure to
+   adjacency, the same class of tie whose earlier version was misread in
+   session 28. What it buys is the removal of the half-empty row flanking
+   forced on SYNC's caption, which is what made the block look heavy.
+   `gui_shell` pins adjacency honestly as adjacency and pins the PHASE
+   stepper count at zero; three mutations (a PHASE stepper existing, a
+   clear row opening under SYNC, the steppers landing on PHASE's row) were
+   each killed by the intended check, against a surviving baseline.
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
 next. Items 5, 6, 7 and 8 are independent and can be taken in any order.
