@@ -957,6 +957,38 @@ That is what a receiver with one sheet of paper has to do, and it would
 interrupt the operator during the one interaction ISO §4.2.6 exists to
 guarantee.
 
+**[BUILT sessions 30 (engine) + 31 (the shell half, and what building it
+found).** Session 30 amended "when the operator switches or finishes" to
+*only at the indicator* [Sara]: composed with §8.5 item 4's "an edit ends
+at Apply", the original wording replaced the operator's correction with
+the incoming transmission at the moment it rendered, so they never saw
+what they asked for. Neither decision chose that.
+
+Session 31 wrote the first instrument that could reach this state at all
+— an offline capture, since the case needs a receiver and two
+transmissions — and the state turned out to contain two defects, both
+invisible to every check that existed:
+
+- **The surface question was answered by the session, not by the pane.**
+  §7's live corrections and §7.1/§8.5's post-decode re-render were told
+  apart by `state == DRAWING`, which rests on a premise this very section
+  breaks: that a picture is either being drawn or has been decoded, never
+  both. With a transmission buffered, the shell answered "live" about a
+  preview behind the indicator, so Apply re-rendered nothing, the edit
+  never ended, and the operator's typed column was delivered to a picture
+  they could not see. **The surface follows the pane.**
+- **The promotion announced nothing.** §8.2's "switches to the live view
+  when clicked" was unbuildable as written, because promotion is queued
+  to thread 2 while the shell re-read the state immediately — so the pane
+  kept the old chart and the indicator stayed lit, permanently on a
+  transmission that had finished. The one way the pane changes hands has
+  to post a message like every other change to it.
+
+The lesson worth carrying past this section: **both defects were in the
+one case the design had reasoned about most carefully and tested least.**
+Reasoning is what produced the design; it is not what produced the
+evidence.]
+
 **The spectrum/waterfall is not in M4** [DECIDED 2026-08-13, Sara,
 session 17]. It ships in M4.5. What stays in its place is a slim input
 level meter, and the distinction is worth stating because it is not the

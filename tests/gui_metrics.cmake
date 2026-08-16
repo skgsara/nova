@@ -37,6 +37,61 @@ function(region NAME TEXT OUT_X OUT_Y OUT_W OUT_H)
   set(${OUT_H} "${CMAKE_MATCH_5}" PARENT_SCOPE)
 endfunction()
 
+# --- the offline capture's trace [session 31] ------------------------------
+# `nova-gui --mark NAME` prints one line per mark, WHERE IT IS ASKED FOR in
+# the action sequence:
+#
+#   mark buffered  recv_active=1 recv_rows=84 ... pane_rows=246 saves=1 ...
+#
+# One process, several marks, because §8.2's rules are transitions — a
+# buffer that survives an Apply, a pane that changes hands at a click — and
+# a check spanning two processes cannot observe a transition [session 28].
+#
+# Unlike run_metrics this does NOT pass --metrics: the marks are the output.
+function(run_actions OUT)
+  execute_process(
+    COMMAND ${NOVA_GUI} ${ARGN}
+    RESULT_VARIABLE rv
+    OUTPUT_VARIABLE out
+    ERROR_VARIABLE err)
+  if(NOT rv EQUAL 0)
+    message(FATAL_ERROR
+      "nova-gui ${ARGN} exited ${rv}\nstdout:\n${out}\nstderr:\n${err}")
+  endif()
+  set(${OUT} "${out}" PARENT_SCOPE)
+endfunction()
+
+# One mark's whole line, so a field can never be read out of the wrong mark.
+function(mark_line NAME TEXT OUT)
+  string(REGEX MATCH "(^|\n)mark ${NAME} +([^\n]*)" m "${TEXT}")
+  if(NOT m)
+    message(FATAL_ERROR "mark '${NAME}' not found in output:\n${TEXT}")
+  endif()
+  set(${OUT} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+endfunction()
+
+# One field of one mark, as a value — for carrying a number from one moment
+# to another, which is how "the pane now holds the picture that WAS buffered"
+# gets asked about two different numbers instead of about itself.
+function(mark_get NAME FIELD TEXT OUT)
+  mark_line("${NAME}" "${TEXT}" line)
+  string(REGEX MATCH "(^| )${FIELD}=([^ ]+)" m "${line}")
+  if(NOT m)
+    message(FATAL_ERROR "field '${FIELD}' not in mark '${NAME}': ${line}")
+  endif()
+  set(${OUT} "${CMAKE_MATCH_2}" PARENT_SCOPE)
+endfunction()
+
+function(mark_expect LABEL TEXT NAME FIELD WANT)
+  mark_get("${NAME}" "${FIELD}" "${TEXT}" got)
+  if(NOT got STREQUAL WANT)
+    mark_line("${NAME}" "${TEXT}" line)
+    message(FATAL_ERROR
+      "gui_shell FAIL ${LABEL}: at mark '${NAME}', ${FIELD} is \"${got}\", "
+      "want \"${WANT}\"\n  ${line}")
+  endif()
+endfunction()
+
 # Reads a quoted value from the "# shell state" block.
 function(shell_value NAME TEXT OUT)
   string(REGEX MATCH "(^|\n)  ${NAME} +\"([^\"]*)\"" m "${TEXT}")

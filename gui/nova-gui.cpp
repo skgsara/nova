@@ -61,6 +61,26 @@
 //                 SEQUENCE (one click sets PHASE, a second one far
 //                 enough down measures the slant). --click-rows N
 //                 gives the pane a picture to be clicked on first
+//   --feed W,PCT  an OFFLINE CAPTURE [session 31]: push the next PCT% of
+//                 WAV through the real engine, with no sound card and no
+//                 window. The cursor per file wraps, so `--feed w,100
+//                 --feed w,50` is the whole recording and then the first
+//                 half of a second pass — which is how one fixture makes
+//                 TWO transmissions. Needs --image-folder [see feed_wav]
+//   --image-folder DIR   where a capture saves, overriding the operator's
+//                 remembered folder. --feed REFUSES without it, because a
+//                 test run must never write into a real image folder
+//   --stop-capture   press Stop, which is what ends a transmission early
+//   --type phase|sync V  type into a correction box through the real edit
+//                 callback, so the edit BEGINS the way §8.5 item 4 says
+//   --apply / --auto     press Apply / Auto
+//   --recv-click  click the receiving indicator [§8.2], the one and only
+//                 thing that brings a buffered picture forward
+//   --mark NAME   print the indicator's state HERE, mid-sequence. §8.2's
+//                 rules are about transitions — a buffer that survives an
+//                 Apply, a count that names the buffered picture and not
+//                 the pane's — and a check spanning two processes cannot
+//                 observe a transition [session 28]
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -78,15 +98,19 @@
 
 #include <RtAudio.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include "../core/wav.hpp"
 #include "engine.hpp"
 #include "ruler.hpp"
 #include "session.hpp"
@@ -1109,6 +1133,23 @@ struct Shell {
     int rows_drawn = 0;
     std::string last_saved;
     std::string last_error;
+    // How far thread 2 has got through the audio, and how many saves it has
+    // announced. Neither is shown to the operator: they are what the offline
+    // capture waits on [see settle, stop_capture_and_wait], and they are read
+    // off the SAME message stream the panel is, so an inspection cannot wait
+    // on a progress signal the shell itself does not see.
+    double consumed_sec = 0.0;
+    int saves_seen = 0;
+
+    // One fixture, its samples, and how far into it the capture has fed
+    // [see feed_wav]. The cursor is what lets one recording be two
+    // transmissions.
+    struct Feed {
+        std::vector<float> samples;
+        int rate = 0;
+        std::size_t at = 0;
+    };
+    std::map<std::string, Feed> feeds;
     // Fl_Widget::label stores the POINTER, not the text, so every
     // formatted label needs storage that outlives the call.
     char quality_buf[64] = "--";
@@ -1175,6 +1216,35 @@ struct Shell {
         layout(win_w, win_h);
         populate_devices();
         apply_state();
+    }
+
+    // Which of the two surfaces the correction boxes serve RIGHT NOW: the
+    // live preview being drawn [§7], or a decoded picture to be re-rendered
+    // [§7.1, §8.5]. **One definition, because `apply_state` and `cb_apply`
+    // must never disagree about it** — a reason line reading "applies from
+    // the next row drawn" over a button that re-renders a file is two
+    // answers to one question, and the operator only sees one of them.
+    //
+    // **The buffer is part of the question** [session 31]. Until session 30
+    // the answer was the session state alone, resting on a premise stated in
+    // `apply_state` and true for thirteen sessions: a picture is either
+    // being drawn or has been decoded, never both. §8.2's background buffer
+    // is exactly the case where both hold — a decoded chart on the pane, a
+    // transmission drawing behind the indicator — and the old rule then
+    // answered "live" about a preview THE OPERATOR CANNOT SEE. Measured, not
+    // reasoned: with a transmission buffered, Apply left `edit_dirty` set
+    // and re-rendered nothing, while Auto — which never asked the question —
+    // correctly re-rendered the held chart. Two buttons side by side giving
+    // one state two answers is a defect, not a decision.
+    //
+    // So the surface follows THE PANE, not the session: while anything is
+    // buffered the pane is showing a decoded picture, whatever the session
+    // is doing. `background().active` and not `pane_held` deliberately —
+    // the buffer outlives the hold [Sara, session 30: it stays buffered
+    // until the indicator is clicked], and so does the pane's contents.
+    bool live_surface() const {
+        return capture && state == LiveState::kDrawingPreview &&
+               !(engine && engine->background().active);
     }
 
     // --- the two dropdowns the transport reads ------------------------------
@@ -1763,6 +1833,7 @@ struct Shell {
         status_state->label(state_text(state));
         field_val[3]->label(state_text(state));
 
+        // (The surface question itself is `live_surface`, above.)
         // The two manual corrections go live exactly where they have a
         // picture to correct [docs/05 §7]: while the preview is being
         // drawn. PHASE reports where the dead sector IS, as a column;
@@ -1780,8 +1851,7 @@ struct Shell {
         const nova::RetainedVideo retained =
             engine ? engine->retained_video() : nova::RetainedVideo{};
         const bool busy = rerendering;
-        const bool overrides_live = capture && state ==
-                                                   LiveState::kDrawingPreview;
+        const bool overrides_live = live_surface();
         const bool can_rerender = retained.can_correct() && !busy;
 
         // §8.5 item 4's other end: the edit ends when the pane stops showing
@@ -2051,6 +2121,133 @@ struct Shell {
         engine.reset();
     }
 
+    // --- the offline capture [session 31, ROADMAP M4 item 6] ----------------
+    // The real engine, fed from a file instead of a sound card.
+    //
+    // **This is not a second live path, and the distinction is the whole
+    // reason it is allowed to exist.** The engine is the one `start_live`
+    // builds, from the same `EngineOptions`; the samples go in through the
+    // same `push_audio` the realtime callback calls; the messages come out
+    // through the same `drain()` the tick calls, into the same `apply_state`.
+    // RtAudio and the FLTK timer are the only things missing and neither of
+    // them is a RULE — one is a source of samples and the other is a clock.
+    //
+    // Why it had to be built: §8.2's receiving indicator needs a
+    // transmission arriving BEHIND an edit, which needs a receiver and two
+    // transmissions, so `gui_shell` could not reach the state at all. Every
+    // cheaper seam considered would have made the indicator's rules pass
+    // vacuously — with no engine, `cb_recv` returns at its first line and
+    // `recv->active()` is false forever, so "a click with nothing buffered
+    // promotes nothing" would be true of a program that promotes on every
+    // click. A check that cannot reach the state is not checking it
+    // [session 30's standing lesson].
+    //
+    // The cursor wraps, so one fixture makes two transmissions: a second
+    // pass begins with the same start tone, and a start tone is what ENDS
+    // the transmission before it. Feeding a FRACTION is what makes the
+    // buffered picture partial while the pane's is complete — the two
+    // numbers the indicator's line count has to be told apart by.
+    bool feed_wav(const std::string& path, int pct) {
+        auto it = feeds.find(path);
+        if (it == feeds.end()) {
+            nova::Wav w = nova::read_wav(path);
+            if (w.samples.empty()) return false;
+            it = feeds.emplace(path, Feed{std::move(w.samples), w.sample_rate,
+                                          0})
+                     .first;
+        }
+        Feed& f = it->second;
+        if (!engine) {
+            nova::EngineOptions opt;
+            opt.image_folder = image_folder;
+            // The engine's own poll interval, not the GUI's: this loop
+            // drains as fast as it can push, and the default would make a
+            // capture wait on a clock nothing here is running.
+            opt.poll_ms = 1;
+            audio_rate = static_cast<unsigned int>(f.rate);
+            engine.reset(new nova::LiveEngine(f.rate, opt));
+            engine->run();
+            engine->start_capture();
+            capture = true;
+        } else if (static_cast<unsigned int>(f.rate) != audio_rate) {
+            // One engine is built for one capture rate. Two fixtures at
+            // two rates through one engine would resample nothing and
+            // report a timebase error as if the band had caused it.
+            return false;
+        }
+        if (f.at >= f.samples.size()) f.at = 0;
+        const std::size_t want =
+            static_cast<std::size_t>(static_cast<double>(f.samples.size()) *
+                                     std::max(0, std::min(100, pct)) / 100.0);
+        const std::size_t end = std::min(f.samples.size(), f.at + want);
+        while (f.at < end) {
+            const std::size_t k = std::min<std::size_t>(4096, end - f.at);
+            // push_audio returns what the ring ACCEPTED. A realtime
+            // callback has nothing to do with the shortfall; a fixture
+            // does, and pretending otherwise would drop samples and call
+            // the resulting timebase error a finding.
+            f.at += engine->push_audio(f.samples.data() + f.at, k);
+            drain();
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+        settle(25);
+        return true;
+    }
+
+    // Pump until thread 2 stops making progress. `consumed_sec` is the only
+    // honest quiescence signal available here: kStats keeps arriving while
+    // the engine lives, so "no messages" never happens and would settle
+    // instantly on a capture that had not started.
+    void settle(int stable_for) {
+        double last = -1.0;
+        int stable = 0;
+        for (int i = 0; i < 4000 && stable < stable_for; i++) {
+            drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            if (consumed_sec == last) {
+                stable++;
+            } else {
+                stable = 0;
+                last = consumed_sec;
+            }
+        }
+    }
+
+    // Wait for a re-render to finish. `settle` CANNOT do this and the
+    // difference is not academic: settle waits on `consumed_sec`, which is
+    // audio, and a re-render consumes no audio — so on a shell with nothing
+    // being fed it returns at once, before thread 3 has started, and every
+    // question asked afterwards is asked too early. That is how the first
+    // control run of session 31 reported "no save" for a re-render that had
+    // simply not happened yet.
+    //
+    // The grace period is why this cannot just poll `redecoding()`:
+    // `redecode` is QUEUED to thread 2, so the flag is still false for the
+    // first few ticks and a naive wait would fall straight through.
+    void wait_rerender() {
+        if (!engine) return;
+        for (int i = 0; i < 8000; i++) {
+            drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            if (i > 25 && !engine->redecoding()) break;
+        }
+        settle(15);
+    }
+
+    // Stop, then wait for the transmission to come down the freeze-decode-
+    // save path. Bounded: a capture that never reaches SAVED is a failure to
+    // report, not a reason to hang the inspection [live_ring, session 23].
+    void stop_capture_and_wait() {
+        if (!engine) return;
+        cb_start(nullptr, this);
+        const int before = saves_seen;
+        for (int i = 0; i < 8000 && saves_seen == before; i++) {
+            drain();
+            std::this_thread::sleep_for(std::chrono::milliseconds(4));
+        }
+        settle(15);
+    }
+
     // Thread 4's one drain point [§2.3]: everything the worker threads
     // have to say arrives here, on a timer, and the window repaints at
     // most once per tick.
@@ -2079,6 +2276,7 @@ struct Shell {
                 case nova::EngineMsg::kStats:
                     level_dbfs = m.level_dbfs;
                     overruns = m.overruns;
+                    consumed_sec = m.consumed_sec;
                     meter->set_level(level_dbfs, true);
                     break;
                 case nova::EngineMsg::kBatchProgress:
@@ -2098,7 +2296,10 @@ struct Shell {
                 case nova::EngineMsg::kBatchFailed:
                     last_error = "decode failed";
                     break;
-                case nova::EngineMsg::kSaved: last_saved = m.path; break;
+                case nova::EngineMsg::kSaved:
+                    last_saved = m.path;
+                    saves_seen++;
+                    break;
                 case nova::EngineMsg::kSaveFailed:
                     last_error = "not saved: " + m.detail;
                     break;
@@ -2334,7 +2535,10 @@ struct Shell {
         const bool has_phase = s->typed_phase(&frac);
         const bool has_sync = s->typed_sync(&ppm);
 
-        if (s->state == LiveState::kDrawingPreview) {
+        // The same question `apply_state` asked to write the reason line, so
+        // the button cannot do one thing while the line above it says
+        // another [see live_surface].
+        if (s->live_surface()) {
             // The live surface: "touch once and wait several lines before
             // judging". The row where each takes effect is marked, so the
             // operator can see where their correction began.
@@ -2712,6 +2916,25 @@ int print_devices() {
     return 0;
 }
 
+// A one-line snapshot of §8.2's indicator, printed WHERE IT IS ASKED FOR in
+// the action sequence [see --mark]. The indicator's rules are all about
+// transitions — a buffer that survives an Apply, a count that follows the
+// buffered picture while the pane holds still — and a transition is exactly
+// what a run that only prints at the end cannot show.
+//
+// Read off the widget and the engine, never recomputed: an inspection that
+// restates a rule pins the restatement, which is this file's standing lesson.
+void print_mark(const char* name, const Shell& s) {
+    std::printf("mark %-12s recv_active=%d recv_rows=%d recv_complete=%d "
+                "pane_held=%d pane_rows=%d edit_dirty=%d saves=%d state=%s\n",
+                name, s.recv && s.recv->active() ? 1 : 0,
+                s.recv ? s.recv->rows() : 0,
+                s.recv && s.recv->complete() ? 1 : 0,
+                s.engine && s.engine->pane_held() ? 1 : 0,
+                s.view ? s.view->image_rows() : 0, s.edit_dirty ? 1 : 0,
+                s.saves_seen, state_token(s.state));
+}
+
 int print_metrics(const Shell& s) {
     // Real FLTK geometry, so docs/05 §8 is checked against pixels rather
     // than against the HTML mockup that predicted them.
@@ -2770,6 +2993,24 @@ int print_metrics(const Shell& s) {
                 s.recv && s.recv->complete() ? 1 : 0);
     std::printf("  pane_held            \"%d\"\n",
                 s.engine && s.engine->pane_held() ? 1 : 0);
+    // The picture actually ON the pane, which is the number `recv_rows` has
+    // to be told apart from. Without it the indicator's line count could
+    // only be compared with itself, and "the count names the BUFFERED
+    // picture" would be a claim with nothing on the other side of it —
+    // session 30's identity trap, which is worth suspecting hardest on the
+    // check one cares about most.
+    std::printf("  pane_rows            \"%d\"\n",
+                s.view ? s.view->image_rows() : 0);
+    // How many files the capture has announced, and the last one's name.
+    // A transmission buffered behind an edit is still SAVED — §8.2 holds
+    // the pane, never the disk — so a count that stops rising here is the
+    // shape that defect would take.
+    std::printf("  saves_seen           \"%d\"\n", s.saves_seen);
+    std::printf("  last_saved           \"%s\"\n",
+                s.last_saved.empty()
+                    ? ""
+                    : s.last_saved.substr(s.last_saved.find_last_of('/') + 1)
+                          .c_str());
     std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
     std::printf("  phase_value          \"%s\"\n", s.phase_input->value());
     // The image is a control now [§8.3 item 1], so whether it can act is
@@ -2942,12 +3183,30 @@ int main(int argc, char** argv) {
     // general form of this the hard way (a check spanning two processes
     // cannot observe a transition); this is the same lesson applied before
     // the fact rather than after it.
+    // Session 31 puts the offline capture into the SAME list, for the same
+    // reason and one step further: §8.2's rules are transitions, so what has
+    // to be expressible is "feed, edit, feed, mark, apply, mark, click,
+    // mark" — an interleaving no set of separate lists can say.
     struct Action {
-        enum Kind { kArm, kClick } kind;
+        enum Kind {
+            kArm,
+            kClick,
+            kFeed,
+            kStopCapture,
+            kType,
+            kApply,
+            kAuto,
+            kRecvClick,
+            kMark
+        } kind;
         Arm arm = Arm::kNone;   // kArm
         int x = 0, y = 0;       // kClick
+        std::string text;       // kFeed path, kType value, kMark name
+        int pct = 0;            // kFeed
+        bool is_sync = false;   // kType
     };
     std::vector<Action> actions;
+    std::string image_folder_arg;
     LiveState then_state = LiveState::kIdle;
     bool then_state_given = false;
     int win_w = kWinW;
@@ -3026,6 +3285,60 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--click-rows") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%d", &click_rows) == 1)
             ;
+        else if (!std::strcmp(argv[i], "--image-folder") && i + 1 < argc)
+            image_folder_arg = argv[++i];
+        else if (!std::strcmp(argv[i], "--feed") && i + 1 < argc) {
+            Action a;
+            a.kind = Action::kFeed;
+            // PATH,PCT — the comma last, so a path may contain anything but
+            // a trailing ",<digits>".
+            const std::string spec = argv[++i];
+            const std::size_t comma = spec.find_last_of(',');
+            if (comma == std::string::npos ||
+                std::sscanf(spec.c_str() + comma + 1, "%d", &a.pct) != 1 ||
+                a.pct <= 0 || a.pct > 100) {
+                bad = true;
+            } else {
+                a.text = spec.substr(0, comma);
+                actions.push_back(a);
+            }
+        }
+        else if (!std::strcmp(argv[i], "--stop-capture")) {
+            Action a;
+            a.kind = Action::kStopCapture;
+            actions.push_back(a);
+        }
+        else if (!std::strcmp(argv[i], "--type") && i + 2 < argc) {
+            Action a;
+            a.kind = Action::kType;
+            const char* which = argv[++i];
+            if (!std::strcmp(which, "phase")) a.is_sync = false;
+            else if (!std::strcmp(which, "sync")) a.is_sync = true;
+            else bad = true;
+            a.text = argv[++i];
+            if (!bad) actions.push_back(a);
+        }
+        else if (!std::strcmp(argv[i], "--apply")) {
+            Action a;
+            a.kind = Action::kApply;
+            actions.push_back(a);
+        }
+        else if (!std::strcmp(argv[i], "--auto")) {
+            Action a;
+            a.kind = Action::kAuto;
+            actions.push_back(a);
+        }
+        else if (!std::strcmp(argv[i], "--recv-click")) {
+            Action a;
+            a.kind = Action::kRecvClick;
+            actions.push_back(a);
+        }
+        else if (!std::strcmp(argv[i], "--mark") && i + 1 < argc) {
+            Action a;
+            a.kind = Action::kMark;
+            a.text = argv[++i];
+            actions.push_back(a);
+        }
         else if (!std::strcmp(argv[i], "--then-state") && i + 1 < argc &&
                  parse_state(argv[++i], &then_state))
             then_state_given = true;
@@ -3061,11 +3374,33 @@ int main(int argc, char** argv) {
                      "                [--nudge N] [--click X,Y ...] [--click-rows N]\n"
                      "                [--arm phase|sync|none ...] "
                      "[--then-state NAME]\n"
+                     "                [--image-folder DIR] [--feed WAV,PCT "
+                     "...] [--stop-capture]\n"
+                     "                [--type phase|sync V] [--apply] "
+                     "[--auto] [--recv-click]\n"
+                     "                [--mark NAME]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
         return 2;
     }
+    // **A capture WRITES, and the folder it writes to is remembered from the
+    // operator's own settings.** Every other inspection flag is read-only —
+    // that is why they can be run on anyone's machine without asking — and
+    // --feed is the first one that is not. Refusing without an explicit
+    // folder keeps that property true by construction rather than by the
+    // test scripts remembering to pass one.
+    bool any_feed = false;
+    for (const Action& a : actions)
+        if (a.kind == Action::kFeed) any_feed = true;
+    if (any_feed && image_folder_arg.empty()) {
+        std::fprintf(stderr,
+                     "nova-gui: --feed needs --image-folder DIR; a capture "
+                     "saves images and must never write to the remembered "
+                     "folder\n");
+        return 2;
+    }
+
     if (devices_only) return print_devices();
     // Before the Shell is built: it is a pure function, and asking about it
     // must not need a window any more than it needs a sound card.
@@ -3074,6 +3409,9 @@ int main(int argc, char** argv) {
 
     Shell shell;
     shell.build(win_w, win_h, argv[0]);
+    // Before anything can feed: `build` has just read the remembered folder
+    // out of prefs, and this is what replaces it.
+    if (!image_folder_arg.empty()) shell.image_folder = image_folder_arg;
     shell.ioc->value(ioc_index);
     shell.rate->value(rate_index);
     shell.zoom->value(zoom_index);
@@ -3119,6 +3457,57 @@ int main(int argc, char** argv) {
             shell.set_arm(a.arm);
             continue;
         }
+        if (a.kind == Action::kFeed) {
+            if (!shell.feed_wav(a.text, a.pct)) {
+                std::fprintf(stderr, "nova-gui: cannot feed %s\n",
+                             a.text.c_str());
+                return 3;
+            }
+            continue;
+        }
+        if (a.kind == Action::kStopCapture) {
+            shell.stop_capture_and_wait();
+            continue;
+        }
+        if (a.kind == Action::kType) {
+            // Through the box AND the box's own callback, in that order,
+            // because that is what typing is. Setting the value alone
+            // would move the number and leave `edit_dirty` false — the
+            // same omission `nudge_sync` exists to make checkable, and a
+            // §8.2 scenario built on it would never hold the pane at all.
+            Fl_Input* box = a.is_sync
+                                ? static_cast<Fl_Input*>(shell.sync_input)
+                                : static_cast<Fl_Input*>(shell.phase_input);
+            box->value(a.text.c_str());
+            Shell::cb_edit(box, &shell);
+            continue;
+        }
+        if (a.kind == Action::kApply) {
+            Shell::cb_apply(shell.apply, &shell);
+            shell.wait_rerender();
+            continue;
+        }
+        if (a.kind == Action::kAuto) {
+            Shell::cb_auto(shell.autob, &shell);
+            shell.wait_rerender();
+            continue;
+        }
+        if (a.kind == Action::kRecvClick) {
+            // The indicator's own callback, so the guard that makes a click
+            // on an empty sidebar inert is the one under test rather than a
+            // condition restated here.
+            Shell::cb_recv(shell.recv, &shell);
+            // Promotion is QUEUED to thread 2 [see promote_background], so
+            // it lands on a later drain and not inside the click. An
+            // inspection that looked immediately would see the pane
+            // unchanged and call the click broken.
+            shell.settle(15);
+            continue;
+        }
+        if (a.kind == Action::kMark) {
+            print_mark(a.text.c_str(), shell);
+            continue;
+        }
         const Shell::ClickResult r = shell.click_image(a.x, a.y);
         switch (r.action) {
             case Shell::ClickAction::kNone: click_action = "none"; break;
@@ -3139,6 +3528,10 @@ int main(int argc, char** argv) {
         shell.apply_state();
     }
     if (metrics_only) {
+        // Before the shutdown below, never after: taking the engine down
+        // clears `pane_held` and leaves the indicator naming a buffer that
+        // no longer exists, so a capture's final metrics have to be read
+        // while the capture is still standing.
         const int rc = print_metrics(shell);
         if (!actions.empty()) {
             std::printf("  click_action         \"%s\"\n", click_action);
@@ -3146,10 +3539,20 @@ int main(int argc, char** argv) {
             std::printf("  click_ppm            \"%s\"\n",
                         sync_text(click_ppm).c_str());
         }
+        shell.stop_live();
         return rc;
     }
     if (follow_batches > 0)
         return print_follow(shell, follow_batches, follow_rows);
+    // An offline capture is an inspection like all the others: it never
+    // reaches the window, and it brings its engine down the same way
+    // closing the window does — through the flush that decodes and saves a
+    // transmission still in progress [§8.3 item 6], rather than by letting
+    // a destructor find the threads still running.
+    if (any_feed) {
+        shell.stop_live();
+        return 0;
+    }
 
     shell.win->show();
     // The live half comes up only now — after the window exists and after

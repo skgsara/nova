@@ -68,14 +68,29 @@
 # would make the two sides differ, and if the answer is "nothing in this
 # setup", the check is scenery.
 #
-# **What this file does NOT cover, as of session 30**: the receiving
-# indicator of §8.2 [ROADMAP M4 item 6]. `recv_indicator` has a region and
-# `recv_active` / `recv_rows` / `recv_complete` / `pane_held` are printed,
-# but nothing here drives them — putting the shell into a buffered state
-# needs a sound card and two transmissions, and no inspection flag reaches
-# it yet. The engine's half is defended by `live_engine`'s
-# `test_background_buffer`; the WIDGET's rules are not defended anywhere.
-# Do not read the metrics existing as the behaviour being checked.
+# **SUPERSEDED (session 31).** What follows was true when written and is
+# kept because it is a dated statement:
+#
+#   > What this file does NOT cover, as of session 30: the receiving
+#   > indicator of §8.2 [ROADMAP M4 item 6]. `recv_indicator` has a region
+#   > and `recv_active` / `recv_rows` / `recv_complete` / `pane_held` are
+#   > printed, but nothing here drives them — putting the shell into a
+#   > buffered state needs a sound card and two transmissions, and no
+#   > inspection flag reaches it yet. The engine's half is defended by
+#   > `live_engine`'s `test_background_buffer`; the WIDGET's rules are not
+#   > defended anywhere. Do not read the metrics existing as the behaviour
+#   > being checked.
+#
+# Session 31 built the flag that reaches it — `--feed`, an offline capture
+# through the real engine — and the indicator's rules are checked at the
+# end of this file. That note was right about the risk, too: driven for the
+# first time, the shell turned out to have TWO defects in that state, one of
+# them delivering the operator's typed correction to a transmission they
+# could not see. Nothing here had been wrong; nothing here had been looked
+# at.
+#
+# **What this file still does NOT cover**: whether an operator wants an
+# indicator instead of their picture. That needs a receiver and a person.
 #
 # --state drives the shell into a live state exactly as nova-live will,
 # and --then-state drives a SECOND state so that rules firing on a
@@ -1359,6 +1374,167 @@ run_metrics(out --ioc 576 --rate 120)
 expect("no capture" "${out}" start_active "0")
 expect("no capture" "${out}" force_active "0")
 message(STATUS "gui_shell PASS: transport inert with no capture behind it")
+
+# --- §8.2's receiving indicator [ROADMAP M4 item 6, session 31] ------------
+# Until session 31 this file could not reach the indicator at all, and said
+# so: putting the shell into a buffered state needs a receiver and two
+# transmissions. `--feed` is that seam — the real engine, fed from a fixture
+# instead of a sound card, through the same `push_audio` the realtime
+# callback calls and the same `drain` the tick calls.
+#
+# **Why it had to be a real capture rather than a cheap fake.** With no
+# engine, `cb_recv` returns at its first line and `recv_active` is false
+# forever, so "a click with nothing buffered promotes nothing" would be true
+# of a program that promotes on every click. The check below is not vacuous
+# because the SAME PROCESS later clicks the indicator and the pane changes
+# hands — the click is shown to work before it is required not to.
+#
+# ONE process, because every rule here is a transition.
+if(NOT DEFINED NOVA_FIXTURE OR NOT DEFINED NOVA_TMP)
+  message(FATAL_ERROR
+    "gui_shell: -DNOVA_FIXTURE=<wav> and -DNOVA_TMP=<dir> required")
+endif()
+
+# A capture WRITES. Refusing without an explicit folder is what keeps every
+# other inspection flag's read-only property true by construction, rather
+# than by every test script remembering to pass one — so it is checked here
+# before anything is fed, and checked by its EXIT CODE, since a refusal that
+# printed a warning and captured anyway would look identical in the log.
+execute_process(
+  COMMAND ${NOVA_GUI} --feed ${NOVA_FIXTURE},100 --mark x
+  RESULT_VARIABLE rv OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(rv EQUAL 0)
+  message(FATAL_ERROR
+    "gui_shell FAIL: --feed without --image-folder was accepted; a capture "
+    "must never write to the operator's remembered folder\n${out}${err}")
+endif()
+message(STATUS "gui_shell PASS: a capture refuses to run without a folder")
+
+file(REMOVE_RECURSE "${NOVA_TMP}")
+file(MAKE_DIRECTORY "${NOVA_TMP}")
+
+# The fixture fed twice makes two transmissions: a second pass opens with
+# the same start tone, and a start tone is what ends the transmission before
+# it. The second is fed in FRACTIONS so the buffered picture is partial
+# while the pane's is complete — two genuinely different row counts, which
+# is what stops "the count names the buffered picture" from comparing a
+# number with itself [session 30's third caution, above].
+run_actions(cap
+  --image-folder ${NOVA_TMP}
+  --feed ${NOVA_FIXTURE},100 --stop-capture --mark saved
+  --recv-click --mark click_empty
+  --type phase 900 --mark editing
+  --recv-click --mark click_empty_editing
+  --feed ${NOVA_FIXTURE},50 --mark buffered
+  --apply --mark after_apply
+  --feed ${NOVA_FIXTURE},25 --stop-capture --mark complete
+  --recv-click --mark promoted)
+
+# A chart on the pane, saved, with nothing buffered behind it.
+mark_expect("indicator" "${cap}" saved recv_active "0")
+mark_expect("indicator" "${cap}" saved recv_rows "0")
+mark_expect("indicator" "${cap}" saved saves "1")
+mark_expect("indicator" "${cap}" saved state "SAVED")
+mark_get(saved pane_rows "${cap}" first_rows)
+if(first_rows LESS 2)
+  message(FATAL_ERROR
+    "gui_shell FAIL indicator: the capture decoded no chart (pane_rows "
+    "${first_rows}); every check below would then be about an empty shell")
+endif()
+
+# **Inert when nothing is buffered.** A click on empty sidebar cannot
+# promote — the same rule as session 29's unarmed picture click, for the
+# same reason: a stray click must not move the operator's picture. Every
+# field is required to be unchanged, not just the interesting one.
+foreach(f recv_active recv_rows pane_rows edit_dirty saves state)
+  mark_get(saved ${f} "${cap}" before)
+  mark_expect("empty click" "${cap}" click_empty ${f} "${before}")
+endforeach()
+
+# The edit begins at the first change to a correction box [§8.5 item 4] and
+# the hold follows from it — the shell owns that predicate, not the engine.
+mark_expect("indicator" "${cap}" editing edit_dirty "1")
+mark_expect("indicator" "${cap}" editing pane_held "1")
+mark_expect("indicator" "${cap}" editing recv_active "0")
+
+# **The empty click checked where it can actually do damage.** The check
+# above runs with no edit in progress, and `cb_recv` does more than promote:
+# it ends the edit and blanks both boxes. So with nothing to promote it had
+# nothing to be caught doing — the guard could have been deleted and every
+# field would still have matched. Here the operator is mid-correction with
+# an empty sidebar, and a stray click must not wipe what they typed.
+# [Session 29's lesson in its third form: a rule exercised only where it
+# cannot fail is not under test.]
+mark_expect("empty click mid-edit" "${cap}" click_empty_editing edit_dirty "1")
+mark_expect("empty click mid-edit" "${cap}" click_empty_editing pane_held "1")
+mark_expect("empty click mid-edit" "${cap}" click_empty_editing recv_active "0")
+
+# **A transmission arriving behind the edit does not take the screen.**
+mark_expect("indicator" "${cap}" buffered recv_active "1")
+mark_expect("indicator" "${cap}" buffered recv_complete "0")
+mark_expect("indicator" "${cap}" buffered pane_rows "${first_rows}")
+mark_get(buffered recv_rows "${cap}" buf_rows)
+if(buf_rows LESS 1)
+  message(FATAL_ERROR "gui_shell FAIL indicator: nothing was buffered")
+endif()
+# ...and the count names the BUFFERED picture, checked against a DIFFERENT
+# number. If these two were ever equal the check above would be scenery.
+if(NOT buf_rows LESS first_rows)
+  message(FATAL_ERROR
+    "gui_shell FAIL indicator: the buffered picture (${buf_rows} rows) must "
+    "be shorter than the chart on the pane (${first_rows}), or 'the count "
+    "names the buffered picture' is comparing a number with itself")
+endif()
+
+# **Apply re-renders the HELD chart, and the buffer survives it.**
+# Two rules in one moment, and session 31 found both broken:
+#   - the surface follows the pane, not the session [see live_surface]. With
+#     a transmission drawing, the shell used to answer "live" about a
+#     preview the operator cannot see: Apply then re-rendered nothing, left
+#     the edit open, and delivered the typed column to the wrong picture.
+#     `saves` rising and `edit_dirty` clearing are what a real re-render of
+#     the held chart looks like; both stood still before the fix.
+#   - nothing promotes on its own [Sara, session 30]. The hold DROPS here —
+#     the edit ended — and the buffer must stay anyway, or §8.2's
+#     interruption simply arrives one Apply late.
+mark_expect("apply held" "${cap}" after_apply edit_dirty "0")
+mark_expect("apply held" "${cap}" after_apply saves "2")
+mark_expect("apply held" "${cap}" after_apply pane_rows "${first_rows}")
+mark_expect("only the click promotes" "${cap}" after_apply pane_held "0")
+mark_expect("only the click promotes" "${cap}" after_apply recv_active "1")
+mark_expect("only the click promotes" "${cap}" after_apply recv_rows "${buf_rows}")
+
+# The buffered transmission FINISHES behind the indicator: parked complete,
+# and saved to its own file — §8.2 holds the pane, never the disk.
+mark_expect("indicator" "${cap}" complete recv_active "1")
+mark_expect("indicator" "${cap}" complete recv_complete "1")
+mark_expect("indicator" "${cap}" complete saves "3")
+mark_expect("indicator" "${cap}" complete pane_rows "${first_rows}")
+mark_get(complete recv_rows "${cap}" done_rows)
+if(NOT done_rows LESS first_rows)
+  message(FATAL_ERROR
+    "gui_shell FAIL indicator: the parked chart (${done_rows} rows) and the "
+    "pane's (${first_rows}) must differ, or the promotion check below "
+    "cannot fail")
+endif()
+
+# **The click is the one and only way the pane changes hands**, and it has
+# to actually work: until session 31 it could not. `promote_background` is
+# queued to thread 2 while `cb_recv` re-read the state on the spot, and the
+# promotion announced nothing, so the pane kept the old chart and the
+# indicator stayed lit — forever, on a transmission that had finished.
+# The instrument is the pane's ROW COUNT becoming the parked picture's, not
+# merely the indicator going dark: an indicator cleared over an unchanged
+# pane is precisely the defect that was there.
+mark_expect("promotion" "${cap}" promoted recv_active "0")
+mark_expect("promotion" "${cap}" promoted recv_rows "0")
+mark_expect("promotion" "${cap}" promoted pane_rows "${done_rows}")
+message(STATUS
+  "gui_shell PASS: the receiving indicator — inert empty, holds the pane, "
+  "counts the buffered picture (${buf_rows} then ${done_rows} against the "
+  "pane's ${first_rows}), survives Apply, and hands over at the click")
+
+file(REMOVE_RECURSE "${NOVA_TMP}")
 
 # --- the preference file [§8.4 item 1] -------------------------------------
 # Plain text, next to the executable, read at startup. Any existing file

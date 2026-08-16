@@ -63,9 +63,14 @@ behind a compact RECEIVING panel in the sidebar's lower area — state, line
 count, thumbnail — and the picture comes forward only when you click it.
 Nothing promotes on its own, so pressing Apply cannot replace your own
 correction with the incoming page. It is still saved to its own file the
-moment it finishes; the hold is on the pane, never on the disk. (This one
-needs two transmissions to see, so it has never been looked at by a
-person — `live_engine`'s `test_background_buffer` is what defends it.)
+moment it finishes; the hold is on the pane, never on the disk. Since
+session 31 Apply also does the right thing while that is going on — it
+re-renders the chart you are looking at, not the one arriving behind the
+indicator — and clicking the indicator actually hands the pane over,
+which until then it could not. (This one needs two transmissions to see,
+so it has still never been looked at by a person; what defends it is
+`live_engine`'s `test_background_buffer` and `gui_shell`'s §8.2 block,
+which drives the whole sequence through an offline capture.)
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when
@@ -73,6 +78,18 @@ it does: `./build/nova-gui --devices` lists the input devices, `--metrics`
 prints the real geometry of every region and the shell's state, and
 `--state decoding` shows the transport rules (the button greys, still
 reading "Start").
+Since session 31 it can also run a whole capture from a FILE — no sound
+card, no window, the real engine and the real handlers — which is the only
+way the two-transmission case above gets checked at all. It writes images,
+so it refuses to run until told where to put them:
+```
+./build/nova-gui --image-folder /tmp/nova-out \
+  --feed fixtures/vmw-phasing-image-160s.wav,100 --stop-capture --mark saved \
+  --type phase 900 --feed fixtures/vmw-phasing-image-160s.wav,50 --mark buffered \
+  --apply --mark after-apply --recv-click --mark promoted
+```
+Each `--mark` prints a line: whether anything is buffered, how many rows it
+has, how many the PANE has, and whether the edit is still open.
 No FLTK or RtAudio? The build says `nova-gui: SKIPPED` and everything else
 builds and passes as before.
 Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav out.pgm`

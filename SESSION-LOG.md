@@ -7,6 +7,118 @@ anything as our develop history").
 
 ---
 
+## 2026-08-16 — Session 31: the indicator gets an instrument, and the state
+## it opened had two defects in it
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (the offline capture —
+`feed_wav`, `settle`, `wait_rerender`, `stop_capture_and_wait`, the `Feed`
+cursor, `consumed_sec` / `saves_seen`; `live_surface`; seven new actions
+plus `--image-folder`; `print_mark`; `pane_rows` / `saves_seen` /
+`last_saved` in `--metrics`), `live/engine.cpp` (`do_promote_background`
+announces the promotion), `tests/gui_metrics.cmake` (`run_actions`,
+`mark_line`, `mark_get`, `mark_expect`), `tests/gui_shell.cmake` (the
+§8.2 block; the session-30 "not covered" note superseded),
+`CMakeLists.txt` (NOVA_FIXTURE / NOVA_TMP). Files changed: `README.md`,
+`START-HERE.md`, `ROADMAP.md` (item 6), `docs/05` §8.2 built-note,
+`SESSION-LOG.md`. Test count unchanged at 37; `gui_shell` 8.1s → 17.7s.
+
+**The seam had to be a real capture, and that decision is the session.**
+§8.2's receiving indicator needs a transmission arriving behind an edit,
+which needs a receiver and two transmissions, so `gui_shell` could not
+reach the state at all. Every cheap fake considered would have made the
+rules pass VACUOUSLY: with no engine, `cb_recv` returns at its first line
+and `recv_active` is false forever, so "a click with nothing buffered
+promotes nothing" is true of a program that promotes on every click. So
+`--feed WAV,PCT` builds the engine `start_live` builds and feeds it from a
+fixture through the same `push_audio` the realtime callback calls and the
+same `drain` the tick calls — RtAudio and the FLTK timer are the only
+things missing and neither of them is a rule. The cursor WRAPS, so one
+recording is two transmissions; feeding the second in FRACTIONS is what
+makes the buffered picture partial while the pane's is complete. `--feed`
+refuses without `--image-folder`: every other inspection flag is
+read-only, and this is the first that is not.
+
+**Finding 1: Apply was aimed at the wrong transmission.** Which surface
+the two boxes serve was decided by the session state, resting on a premise
+written in `apply_state` and true for thirteen sessions — *a picture is
+either being drawn or has been decoded, never both*. §8.2's buffer is
+exactly the case where both hold, and the shell then answered "live" about
+a preview THE OPERATOR CANNOT SEE: Apply re-rendered nothing, the edit
+never ended, and the typed column went to the incoming picture. Measured
+against a control — same fixture, same value, one difference: with nothing
+arriving, `edit_dirty` 1→0 and a save announced; with a transmission
+buffered, both stood still. **What settled it as a defect rather than a
+decision is that Auto did the right thing in the identical state**,
+because `cb_auto` never asks the question. Two buttons side by side
+giving one state two answers. The surface now follows THE PANE, in one
+`live_surface` both readers call.
+
+**Finding 2: the click that promotes could never have worked.** `cb_recv`
+queues `promote_background` to thread 2 and then calls `apply_state` on
+the spot, and `do_promote_background` posted nothing — so the shell asked
+whether the buffer was gone before thread 2 could have answered, and
+nothing ever made it ask again. The pane kept the old chart, the indicator
+stayed lit. **Structural, not racy: it loses every time**, and on a
+FINISHED transmission there is no later batch of rows to hide it behind,
+so it lasts forever. The promotion now posts `kRowsDrawn` with the
+promoted picture's height, which is literally what happened.
+
+**Both defects sat in the one case the design had reasoned about hardest
+and tested least.** Session 30 got the engine's half right by reasoning —
+three things travel with a picture — and every one of these two is on the
+shell's side of the same feature, reached the first time anything drove
+it.
+
+**Validation.** `gui_shell`'s §8.2 block is ONE process and eight marks,
+because every rule here is a transition. Baseline survived; five
+mutations, all killed by the intended check with the FAIL line read back:
+the surface ignoring the buffer (dies at `after_apply`, `edit_dirty`), the
+promotion silent again (dies at `promoted`, `recv_active`), the indicator
+driven from the hold instead of the buffer (dies at `after_apply`), the
+count naming the pane (dies on the buffered-vs-pane comparison), the
+empty-click guard removed (dies at `click_empty_editing`).
+
+**A check that only existed because a mutation was being written for it.**
+The first empty-click check ran with no edit in progress — and `cb_recv`
+does more than promote: it ends the edit and blanks both boxes. With
+nothing typed there was nothing to catch it doing, so the guard could have
+been deleted and every field would still have matched. The check that
+matters puts the operator mid-correction with an empty sidebar. That is
+session 29's third category found in advance for once, and only because
+"what mutation would kill this?" was asked before the code was believed.
+
+**Findings about the harness, and there were three.** (1) The first
+version pre-escaped its patterns AND passed them through `\Q…\E`, so four
+of five substitutions silently did not apply — and the witness for one of
+them was a line present either way, so it reported a SURVIVOR for a
+mutation that had never been made. The witness must be the CHANGED text:
+the file must differ, the replacement be present, the original be gone.
+(2) `|` is not a safe field separator for C++ containing `||`. Patterns
+now travel in the ENVIRONMENT, never through shell quoting. (3) Two kills
+in the second pass were credited to the wrong check — `hold_pane` driving
+the indicator dies at `editing`, long before the Apply rule it was written
+to prove — so both mutations were narrowed to differ ONLY at the moment
+their rule owns. Attribution is not bookkeeping; a mutation killed early
+leaves the later rule exactly as unproven as if it had survived.
+
+**And one of mine.** `gui_shell.cmake` was edited (comments only) while a
+mutation pass was running it. The verdicts looked fine and were discarded
+anyway, and the whole pass was re-run on a stable tree. Session 30's rule
+was "no suite in flight while mutating"; the general form is that a
+mutation run owns the tree, and that includes the test scripts.
+
+**Next step: the by-hand run, and it is now the only thing left in item
+6.** Two transmissions through a real receiver, with an edit open when the
+second arrives — whether an indicator is what an operator wants instead of
+their picture, whether the RECEIVING panel is noticed at all, and whether
+handing the pane over at a click reads as control or as a lost page.
+Sessions 25-27 each found a defect on the air that a green suite could not
+see, and session 31 has just added two that a green suite did not see
+either. Also unlooked-at by anyone: session 30's relayout of the
+correction block.
+
+---
+
 ## 2026-08-16 — Session 30: the layout Sara wanted after USING it, and the
 ## third thing that travels with a picture
 

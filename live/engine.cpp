@@ -496,9 +496,11 @@ void LiveEngine::do_promote_background() {
     // `collect_batch` and `retained_video`, so no order between them exists
     // to get wrong.
     bool had_parked_snapshot = false;
+    int promoted_rows = 0;
     {
         std::lock_guard<std::mutex> g(img_mu_);
         if (background_.width <= 0 || background_.height <= 0) return;
+        promoted_rows = background_.height;
         display_ = std::move(background_);
         // A parked decode is a finished picture and has no preview growing
         // it; a buffered preview is still being grown by `background_src_`,
@@ -541,6 +543,26 @@ void LiveEngine::do_promote_background() {
         parked_snap_.reset();
         parked_saved_path_.clear();
     }
+
+    // **A promotion has to ANNOUNCE itself** [session 31]. Everything else
+    // thread 4 learns, it learns from this queue, and until now this was the
+    // one change to the pane that arrived silently. The click was therefore
+    // structurally unable to work, not merely racy: `cb_recv` queues the
+    // promotion and then calls `apply_state` on the spot, so the shell asked
+    // the question before thread 2 could have answered it — and with nothing
+    // to make it ask again, the pane kept the old chart and the indicator
+    // stayed lit. On a transmission that has FINISHED there is no later
+    // batch of rows to hide the defect behind, so it lasts forever.
+    //
+    // kRowsDrawn rather than a message of its own, because that is what
+    // literally happened: the picture on the pane is a different picture and
+    // has a different number of rows, which is also what the line counter
+    // should now be naming. `m.rows` stays empty — no NEW rows were drawn,
+    // and the shell re-copies the whole image on any row message.
+    EngineMessage m;
+    m.kind = EngineMsg::kRowsDrawn;
+    m.rows_total = promoted_rows;
+    post(std::move(m));
 }
 
 void LiveEngine::emit(const SessionOutput& out) {

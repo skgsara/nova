@@ -191,7 +191,8 @@ STILL OPEN, and small:
   threshold at the far level; below that, rows fall back to the ±120 px
   picture placement, which cannot reach a large move.
 
-## M3 — full auto sequencing  [done except manual override, which needs M4]
+## M3 — full auto sequencing  [DONE — the manual override it was waiting on
+## landed session 24 as `phase_anchor_hint` / `clock_ppm_fallback`]
 
 Done (session 13) — the pre-M4 standards audit closed the last silent
 automatic-selection gap: the 300/675 Hz start tone now selects IOC 576/288
@@ -272,7 +273,9 @@ Pending:
 - Manual override for everything [ISO §4.2.6 "facility for manual
   adjustment"] — still untouched, needs the GUI (M4).
 
-## M4 — GUI + live audio  [live end to end session 23; the edit lifecycle remains]
+## M4 — GUI + live audio  [live end to end session 23; the edit lifecycle
+## done session 27; item 6 done session 31. Item 7 (m4a input) and two
+## BY-HAND runs are all that remain]
 - Core seams (session 14, done): log/progress callback, cooperative
   cancellation, structured DecodeError kinds, decode_fax split into nine
   named stages (core/hooks.hpp; screamers in `hooks`).
@@ -773,8 +776,8 @@ one feature with several parts, plus one verification no test can do.
    *afterwards* while having acted wrongly. `click_phase` now returns what
    it did and `--click` reports it, which is what makes the guard
    observable at all. Three defects reintroduced, three caught.
-6. **A transmission arriving mid-edit** [docs/05 §8.2] — **Engine and
-   surface done (session 30); the GUI half is not under test.**
+6. **A transmission arriving mid-edit** [docs/05 §8.2] — **Done
+   (sessions 30 + 31); the by-hand run is what remains.**
    "Cheap by construction" was half right. The rows were cheap, exactly as
    §8.2 predicted: the renderer pushes through the queue and does not know
    whether anyone is looking, so diverting them into a second image is one
@@ -805,14 +808,54 @@ one feature with several parts, plus one verification no test can do.
    baseline (rows never diverting, the buffer not holding past the edit, a
    finished decode never parking, the saved path handed over anyway, and
    promotion dropping the snapshot).
-   **What is NOT done:** the receiving indicator is built, laid out and
-   metered (`recv_indicator`, `recv_active`, `recv_rows`, `recv_complete`,
-   `pane_held`) but **nothing in `gui_shell` drives it**, because there is
-   no way yet to put the shell into a buffered state without a sound card
-   and two transmissions. Until an inspection flag exists for that, the
-   widget's own rules — inert when nothing is buffered, the click being the
-   only promoter, the count naming the BUFFERED picture — rest on reading
-   rather than on a screamer. That is the next piece of item 6.
+   **Session 31 built the missing instrument, and the state it opened had
+   two defects in it.** The indicator's rules could not be checked because
+   the shell could not be put into a buffered state without a sound card
+   and two transmissions. `--feed WAV,PCT` is that seam: an OFFLINE
+   CAPTURE, building the engine `start_live` builds and feeding it from a
+   fixture through the same `push_audio` the realtime callback calls and
+   the same `drain` the tick calls. The fixture's cursor wraps, so one
+   recording is two transmissions; feeding the second in fractions is what
+   makes the buffered picture partial while the pane's is complete, which
+   is what stops "the count names the buffered picture" from comparing a
+   number with itself. `--feed` REFUSES without `--image-folder`, keeping
+   every other inspection flag's read-only property true by construction.
+   - **Apply was aimed at the wrong transmission.** Which surface the
+     correction boxes serve was decided by the session state
+     (`state == kDrawingPreview`), resting on a premise stated in the code
+     and true for thirteen sessions: a picture is either being drawn or has
+     been decoded, never both. §8.2's buffer is exactly the case where both
+     hold, and the shell then answered "live" about a preview THE OPERATOR
+     CANNOT SEE — Apply re-rendered nothing, the edit never ended, and the
+     typed column went to the incoming picture. Measured against a control:
+     with nothing arriving, Apply took `edit_dirty` 1→0 and announced a
+     save; with a transmission buffered, both stood still. What settles it
+     as a defect and not a decision is that **Auto, in the identical state,
+     did the right thing** — it never asks the question. The surface now
+     follows THE PANE, in one place both readers call [`live_surface`].
+   - **The click that promotes could never have worked.** `cb_recv` queues
+     `promote_background` to thread 2 and then calls `apply_state` on the
+     spot, and `do_promote_background` announced nothing — so the shell
+     asked whether the buffer was gone before thread 2 could have answered,
+     and nothing ever made it ask again. The pane kept the old chart and
+     the indicator stayed lit. Structural, not racy: it loses every time,
+     and on a FINISHED transmission there is no later batch of rows to hide
+     it behind. The promotion now posts `kRowsDrawn` with the promoted
+     picture's height, which is literally what happened.
+   **Defended by `gui_shell`'s §8.2 block**, one process and eight marks,
+   because every rule here is a transition: inert with nothing buffered
+   *and* inert mid-edit (the guard does more than promote — it ends the
+   edit and blanks both boxes, so the first check alone had nothing to
+   catch it doing); the pane unmoved while the buffer grows; the count
+   naming the buffered picture against a DIFFERENT number; Apply
+   re-rendering the held chart and the buffer surviving it with the hold
+   dropped; the buffered transmission saved to its own file; and the pane's
+   row count becoming the parked picture's at the click. Baseline survived;
+   five mutations, all killed by the intended check (the surface ignoring
+   the buffer, the promotion silent again, the indicator driven from the
+   hold, the count naming the pane, the empty-click guard removed).
+   **What is NOT done:** whether an operator wants an indicator instead of
+   their picture. That needs a receiver and a person.
 7. **m4a input via runtime ffmpeg**, listed above; independent of 1–6.
 8. ~~**The KiwiSDR browser hop**~~ **Done (session 26)** (found by item 1,
    session 25; scope set by Sara: **the browser stays the audio source**).

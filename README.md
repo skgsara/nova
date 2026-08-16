@@ -216,6 +216,31 @@ error bar attached. The one thing refused is two clicks on the same row,
 which has no baseline at all; the gesture stays armed so they can simply
 click again.
 
+**A transmission arriving while you are correcting a chart does not take
+the screen.** It draws into a buffer behind a compact receiving panel —
+state, line count, thumbnail — and comes forward only when that panel is
+clicked. Nothing promotes on its own, so pressing Apply cannot replace
+your own correction with the incoming page; and the hold is on the pane
+and never on the disk, so the new transmission is still saved to its own
+file the moment it finishes. Three things travel with a picture and every
+one of them would be a defect alone: its pixels, the raw stream a
+correction re-decodes from, and the file a re-render overwrites. They are
+parked as a unit and handed over as a unit, or an Apply meant for the
+chart in front of you would write over the chart that just arrived.
+
+That case needs a receiver and two transmissions to reach, so for one
+session it was the best-reasoned and least-tested thing in the program.
+Given an instrument — a capture driven from a recording, through the real
+engine, with no sound card — it turned out to hold two defects. Apply
+asked the *session* which surface it was correcting rather than asking
+the *pane*, so with a transmission arriving it re-rendered nothing and
+delivered the typed correction to a picture the operator could not see.
+And the click that hands the pane over could never have worked at all:
+the promotion happens on another thread and announced nothing, so the
+window asked whether it had happened before it could have, and never
+asked again. Both are fixed and pinned. Neither was a hard problem; both
+were simply in the one place nothing had ever run.
+
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen
 commercial weather-fax receiver manuals — which is where Nova's two

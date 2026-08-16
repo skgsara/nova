@@ -568,8 +568,16 @@ if(NOVA_BUILD_GUI)
     # --click / --nudge / --then-state, so it needs no window and no
     # audio device; guarded with nova-gui, the second of the two
     # in "35 (+2 with the GUI)".
+    # NOVA_FIXTURE and NOVA_TMP arrived with session 31's offline capture:
+    # §8.2's receiving indicator needs a transmission arriving behind an
+    # edit, so this suite now feeds a real recording through the real
+    # engine. It still opens no audio device and no window, and the only
+    # thing it writes is under the build tree — `--feed` REFUSES without an
+    # explicit folder, which is itself one of the checks.
     add_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
       -DNOVA_GUI=$<TARGET_FILE:nova-gui>
+      -DNOVA_FIXTURE=${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
+      -DNOVA_TMP=${CMAKE_CURRENT_BINARY_DIR}/gui-shell-capture
       -P ${CMAKE_SOURCE_DIR}/tests/gui_shell.cmake)
     message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
                    "${NOVA_RTAUDIO_VERSION})")
