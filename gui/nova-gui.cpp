@@ -307,6 +307,59 @@ SyncStep sync_step(const char* typed, double shown_ppm, bool shown_valid,
     return s;
 }
 
+// --- arming a gesture [Sara, session 29; hamfax's shape] -------------------
+// The image is one surface and there are two things an operator can mean by
+// clicking it, so the click has to be declared. `Arm` is that declaration:
+// nothing acts on the picture unless one of these is set.
+//
+// **This reverses session 28's decision, and the reversal is evidenced.**
+// Session 28 built the two gestures undeclared — a click set PHASE, a
+// second click far enough away measured a slant — and rejected a mode
+// toggle on the grounds that this document's idiom is "auto is a value in
+// the same list, never a separate mode", and rejected a shift-click on the
+// grounds that it is INVISIBLE and this surface is supposed to explain
+// itself. Sara asked, session 29, what hamfax does. It arms: Image ->
+// "Adjust IOC (change width)" prompts "select first point of vertical
+// line", disables the rest of the controls, takes two clicks, and ends;
+// "set beginning of line" prompts, takes one click, and ends. Twenty years
+// of a shipping program doing exactly this gesture.
+//
+// Three things that settles, none of which the session-28 reasoning had:
+//   - The lifecycle objection was wrong. "A one-shot arming button breaks
+//     the two-click gesture, because you would re-arm between clicks" —
+//     no: you arm the GESTURE, not the click. One press covers both, and
+//     the arming ends when the measurement completes.
+//   - It is not a mode you can be stuck in, which is what the idiom was
+//     protecting against. It is per-gesture and self-clearing.
+//   - It is VISIBLE, which is the criterion session 28 itself stated when
+//     it rejected shift-click. A button satisfies that test better than
+//     the undeclared gesture that got built.
+//
+// And it buys the thing that could not be bought otherwise: an accidental
+// click on the picture cannot move the operator's data, because an
+// unarmed click does not act at all. That was Sara's objection to the
+// session-28 surface and it has no answer inside an undeclared gesture.
+//
+// What is deliberately NOT taken from hamfax: the modal prompt dialog and
+// disabling every other control. Nova already has the surface for saying
+// what is going on — the reason line under Apply/Auto — and the cursor
+// already carries the affordance. So the armed state shows in three
+// places that cannot disagree, because all three read this one value: the
+// button is pushed, the reason line says what to click, and the crosshair
+// appears. The crosshair is the biggest gain: until session 29 it was on
+// whenever a correction was possible, which made it ambient decoration;
+// now it means "this click will act".
+enum class Arm { kNone, kPhase, kSync };
+
+const char* arm_token(Arm a) {
+    switch (a) {
+        case Arm::kPhase: return "phase";
+        case Arm::kSync: return "sync";
+        case Arm::kNone: break;
+    }
+    return "none";
+}
+
 // --- what a click on the image NAMES [docs/05 §8.3 item 1] ----------------
 // PHASE is typed as an image column because that is what the ruler reads,
 // and the surveyed affordance is clicking the dead sector rather than
@@ -356,14 +409,39 @@ int clicked_column(const nova::RulerView& v, double x) {
 // One screen pixel of click error is `1/scale` columns, so the shortest
 // baseline worth measuring over is the one that puts the resulting ppm
 // error an order of magnitude below the errors this control exists to
-// remove (30-180 ppm; session 5). Below that the operator's two clicks
-// are measuring their own aim.
+// remove (30-180 ppm; session 5).
+//
+// **Session 29 demoted this number from a GATE to a REFERENCE**, and the
+// reason is the arming buttons [see Arm]. Until session 29 the gesture was
+// undeclared, so this one number had to do two jobs at once: it was the
+// precision limit AND it was what told "measure the slant" apart from "the
+// operator is re-picking PHASE". Arming answers the second question
+// outright — the operator has said which gesture this is — so the number
+// goes back to being only what it honestly is, a statement about how good
+// the answer will be. A short baseline now MEASURES, and says what it is
+// worth [see slant_error_ppm]; Sara, session 29: her judgement, with the
+// honesty attached rather than a refusal.
 constexpr double kSlantPrecisionPpm = 5.0;
 
 int min_baseline_rows(double scale, int image_cols) {
     if (scale <= 0.0 || image_cols <= 0) return 0;
     const double n = 1e6 / (kSlantPrecisionPpm * scale * image_cols);
     return static_cast<int>(std::ceil(n));
+}
+
+// What the measurement the operator just made is actually worth, in the
+// same unit as the measurement. One screen pixel of aim is `1/scale`
+// columns, spread over `drow` rows of baseline. This is `min_baseline_rows`
+// solved for the error instead of for the rows, so the two cannot disagree
+// about what the precision limit means — at exactly the baseline it
+// returns kSlantPrecisionPpm.
+//
+// It exists because hamfax, which is where this gesture comes from, has no
+// baseline notion at all: two clicks on the same row divide by zero there.
+// Nova takes the gesture and keeps its own arithmetic honest.
+double slant_error_ppm(double scale, int drow, int image_cols) {
+    if (scale <= 0.0 || drow == 0 || image_cols <= 0) return 0.0;
+    return 1e6 / (scale * std::abs(drow) * image_cols);
 }
 
 // Signed both ways on purpose: clicking bottom-then-top flips dcol and
@@ -712,12 +790,24 @@ public:
     // That is §3's "not offered and then found not to work" for a surface
     // with no button to grey — the reason line under Apply/Auto is still
     // the words, this is the affordance.
+    // Session 29: this now follows the ARMING rather than "a correction is
+    // possible" [see Arm]. The crosshair used to be on for the whole of a
+    // correctable chart, which made it scenery; now it appears when a
+    // gesture is waiting for a click and vanishes when the gesture is done,
+    // so it says something true about the very next click.
     void set_click_enabled(bool e) { click_enabled_ = e; }
     bool click_enabled() const { return click_enabled_; }
 
     int handle(int event) override {
         switch (event) {
             case FL_ENTER:
+            // FL_MOVE too, because arming happens while the pointer is
+            // somewhere else entirely (on the button) and the operator may
+            // come back onto the picture without crossing a boundary FLTK
+            // reports as an enter — the cursor would then still be the
+            // arrow over an armed picture, which is the affordance saying
+            // the opposite of the truth.
+            case FL_MOVE:
                 fl_cursor(click_enabled_ ? FL_CURSOR_CROSS
                                          : FL_CURSOR_DEFAULT);
                 return 1;
@@ -824,6 +914,11 @@ struct Shell {
     Fl_Int_Input* phase_input = nullptr;
     Fl_Box* cap_sync = nullptr;
     Fl_Float_Input* sync_input = nullptr;
+    // The two arming buttons [see Arm]. One per gesture, beside the box the
+    // gesture fills in, because that is the only place they can be that
+    // says which value the click is going to move.
+    Fl_Button* phase_arm = nullptr;
+    Fl_Button* sync_arm = nullptr;
     // Coarse and fine, either way [see sync_step]. They follow the BOX,
     // never the buttons: a stepper is only ever offered where the value it
     // steps can be typed.
@@ -842,11 +937,21 @@ struct Shell {
     // (ROADMAP item 6) gives the operator a second picture to switch away
     // from. A typed-but-not-applied value is an edit in progress.
     bool edit_dirty = false;
+    // Which gesture the next click on the picture belongs to, or kNone for
+    // "the picture is not listening" [see Arm]. Session 29: this is now the
+    // ONLY thing that lets a click act.
+    Arm arm = Arm::kNone;
     // The first click of a two-click SYNC measurement, in image
-    // coordinates; -1 for none. Not a mode — see click_image — just where
-    // the last click landed, so the next one can be measured against it.
+    // coordinates; -1 for none. Only ever set while `arm` is kSync, so it
+    // is a step within a declared gesture rather than a mode of its own.
     int pending_col = -1;
     int pending_row = -1;
+    // What the last completed slant measurement was worth, as a sentence,
+    // or empty. Session 29: a short baseline MEASURES and says what it is
+    // worth [see slant_error_ppm], so this is the "says what it is worth"
+    // half and it has to outlive the click that produced it — the operator
+    // reads it after the number lands in the box, not during.
+    std::string slant_note;
     bool was_rerendering = false;   // so drain notices one start or finish
     // What the picture on the pane was last re-rendered WITH, so Auto knows
     // whether it has anything to undo. Empty means the picture is the
@@ -1195,7 +1300,13 @@ struct Shell {
         // has no batch decode to hand them to. They stay deactivated for the
         // same reason: an image with no raw behind it shows them visibly
         // disabled rather than silently inert [§3].
+        // Both captions are named regions from session 29, because the
+        // layout now makes a CLAIM through them: SYNC's caption owns a row
+        // of its own so the steppers can flank the box beneath it, and the
+        // arming button rides that row. A claim nobody can measure is a
+        // comment.
         cap_phase = caption("PHASE");
+        note("cap_phase", cap_phase);
         phase_input = new Fl_Int_Input(0, 0, 0, 0);
         phase_input->textsize(kFontSize);
         phase_input->when(FL_WHEN_CHANGED);
@@ -1203,12 +1314,35 @@ struct Shell {
         phase_input->deactivate();
         note("phase_input", phase_input);
         cap_sync = caption("SYNC");
+        note("cap_sync", cap_sync);
         sync_input = new Fl_Float_Input(0, 0, 0, 0);
         sync_input->textsize(kFontSize);
         sync_input->when(FL_WHEN_CHANGED);
         sync_input->callback(cb_edit, this);
         sync_input->deactivate();
         note("sync_input", sync_input);
+
+        // The two arming buttons [see Arm]. FL_TOGGLE_BUTTON because armed
+        // is a state the operator can see and leave, not an action: the
+        // pushed box IS the third witness that the gesture is live, beside
+        // the reason line and the crosshair. The tooltip carries what the
+        // symbol cannot, because a circle is not self-explaining and this
+        // surface's rule is that it explains itself.
+        phase_arm = new Fl_Button(0, 0, 0, 0, "@circle");
+        phase_arm->type(FL_TOGGLE_BUTTON);
+        phase_arm->labelsize(kFontSize - 3);
+        phase_arm->tooltip("Click the dead sector on the picture to set PHASE");
+        phase_arm->callback(cb_arm_phase, this);
+        phase_arm->deactivate();
+        note("phase_arm", phase_arm);
+        sync_arm = new Fl_Button(0, 0, 0, 0, "@circle");
+        sync_arm->type(FL_TOGGLE_BUTTON);
+        sync_arm->labelsize(kFontSize - 3);
+        sync_arm->tooltip(
+            "Click one feature twice, far apart, to measure the slant");
+        sync_arm->callback(cb_arm_sync, this);
+        sync_arm->deactivate();
+        note("sync_arm", sync_arm);
 
         // The four steppers [see sync_step]. Labels carry the sign so the
         // direction is readable without the caption, and the coarse pair
@@ -1330,22 +1464,50 @@ struct Shell {
         py += kPanelRowH + kPad;
         rule->resize(px + kPad, py, fw, 2);
         py += 2 + kPad;
+        // The correction block, relaid out in session 29 [Sara]. The old
+        // shape put both boxes on their own rows and the four steppers on a
+        // full-width row beneath BOTH of them — and the first person to look
+        // at it read the steppers as PHASE's. They are SYNC's, and PHASE
+        // having no steppers is the deliberate asymmetry [see sync_step], so
+        // a layout that loses it loses the one thing it most had to carry.
+        //
+        // The fix is structural rather than another label: the steppers now
+        // FLANK the SYNC box, and a control touching a box on both sides can
+        // only belong to that box. That costs the SYNC caption its place on
+        // the box's row, so the caption takes the row above and brings the
+        // arming button with it. PHASE keeps caption, box and arm on one
+        // row — and the resulting asymmetry between the two blocks is a
+        // feature: what PHASE visibly lacks is what it is meant to lack.
+        // Same three rows as before, so nothing below moves.
+        const int arm_w = 48;
+        const int arm_x = px + kPanelW - kPad - arm_w;
         cap_phase->resize(px + kPad, py, 62, kPanelRowH);
         phase_input->resize(px + kPad + 66, py + 1, 70, kPanelRowH - 2);
+        phase_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
         cap_sync->resize(px + kPad, py, 62, kPanelRowH);
-        sync_input->resize(px + kPad + 66, py + 1, 70, kPanelRowH - 2);
+        sync_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
-        // The steppers get their own row rather than the SYNC row's tail:
-        // 56 px are left beside the box, and four buttons in 56 px are
-        // 14 px each, which is not a target an operator can hit. Full
-        // width, four equal cells.
+        // Five cells across the panel's full width: -10 -1 [box] +1 +10.
+        // The coarse pair stays outside the fine pair so the row still reads
+        // as a scale, and the sign stays in the label because the direction
+        // has to be readable without the caption that is now a row away.
         {
-            const int gap = kPad;
-            const int bw = (fw - 3 * gap) / kSyncSteps;
-            for (int i = 0; i < kSyncSteps; i++)
-                sync_step_btn[i]->resize(px + kPad + i * (bw + gap), py,
-                                         bw, kPanelRowH - 2);
+            const int gap = 3;
+            const int box_w = 56;
+            const int bw = (fw - 4 * gap - box_w) / kSyncSteps;
+            int bx = px + kPad;
+            for (int i = 0; i < kSyncSteps; i++) {
+                if (i == kSyncSteps / 2) {
+                    sync_input->resize(bx, py + 1, box_w, kPanelRowH - 2);
+                    bx += box_w + gap;
+                }
+                // py + 1, the same inset the box takes: on a flanked row the
+                // two sit side by side and a one-pixel step between them
+                // reads as a mistake.
+                sync_step_btn[i]->resize(bx, py + 1, bw, kPanelRowH - 2);
+                bx += bw + gap;
+            }
         }
         py += kPanelRowH + kPad;
         apply->resize(px + kPad, py, 70, 21);
@@ -1498,17 +1660,34 @@ struct Shell {
         // the chart it was correcting, and the controls go back to
         // measured-or-blank, because there is no memory between
         // transmissions [§8.5 item 6].
-        if (!retained.can_correct() && !overrides_live &&
+        const bool no_surface = !retained.can_correct() && !overrides_live;
+        if (no_surface &&
             (edit_dirty || applied.phase_set || applied.sync_set)) {
             edit_dirty = false;
             applied = nova::Correction{};
             phase_input->value("");
             sync_input->value("");
-            // The pending anchor is part of the edit, so it ends with it.
-            // A click remembered from a chart no longer on the pane would
-            // complete a slant measured across two different pictures.
+        }
+        // The anchor, the arming and the measurement's note die with the
+        // surface REGARDLESS of whether an edit was dirty — and that
+        // separation is session 29's, found by hand on the built code.
+        //
+        // Session 28 cleared the anchor inside the block above, which was
+        // correct then and became wrong here without anything touching it:
+        // back then the first click of a slant also SET PHASE, so an anchor
+        // could not exist without a dirty edit and the guard was free.
+        // Declared gestures broke that coupling — the SYNC gesture's first
+        // click changes no value the operator can see, deliberately, so it
+        // does not dirty the edit — and the anchor started surviving into
+        // states with no picture behind it. It was still unreachable,
+        // because arming clears it and arming is the only way to a second
+        // click; net-correct for an incidental reason is not correct, and
+        // the reason was one refactor away from going.
+        if (no_surface) {
             pending_col = -1;
             pending_row = -1;
+            arm = Arm::kNone;
+            slant_note.clear();
         }
 
         // One place decides all three, and it is a pure function so the
@@ -1532,10 +1711,34 @@ struct Shell {
             else
                 sync_step_btn[i]->deactivate();
         }
-        // ...and so is the image, for the same reason: clicking it sets
-        // PHASE, so it can act exactly where PHASE can be typed. One rule,
-        // three surfaces [§8.3 item 1].
-        view->set_click_enabled(cu.inputs_active);
+        // The two arming buttons follow the boxes for exactly the reason
+        // the steppers do: a live arm over a dead box would offer a gesture
+        // that cannot deliver its result anywhere [§3].
+        if (cu.inputs_active) {
+            phase_arm->activate();
+            sync_arm->activate();
+        } else {
+            phase_arm->deactivate();
+            sync_arm->deactivate();
+            // No `arm = kNone` here, deliberately: `no_surface` above is
+            // exactly `!cu.inputs_active`, so this branch would be a SECOND
+            // place holding the same rule, and two places holding one rule
+            // is how they come to disagree. The clearing happens once,
+            // where the anchor's does.
+        }
+        // Session 29: the image listens only while a gesture is ARMED, not
+        // wherever a correction is possible. That is the whole of Sara's
+        // accidental-click objection — an unarmed click cannot move her
+        // data because it never reaches the handler's effect [see Arm] —
+        // and it is what turns the crosshair from ambient decoration into a
+        // statement that THIS click will act.
+        view->set_click_enabled(arm != Arm::kNone);
+        // The buttons show the arming too, and they are set from `arm`
+        // rather than trusted to hold it: `set_arm` is not the only way it
+        // changes — completing a gesture and losing the surface both clear
+        // it, and neither goes near a widget.
+        phase_arm->value(arm == Arm::kPhase ? 1 : 0);
+        sync_arm->value(arm == Arm::kSync ? 1 : 0);
         if (cu.apply_active) apply->activate(); else apply->deactivate();
         if (cu.auto_active) autob->activate(); else autob->deactivate();
 
@@ -1554,17 +1757,36 @@ struct Shell {
         // measures a slant or re-picks PHASE.
         const int need_rows =
             min_baseline_rows(view_state().scale, image_cols());
-        // No `engine` term: a pending anchor can only exist if a click
-        // was allowed to act, which already implies a live surface. Adding
-        // one would be redundant in production and would suppress the hint
-        // on the inspection path, where it is the only way to check it.
-        if (pending_row >= 0 && need_rows > 0 && !busy) {
+        // No `engine` term on the armed branches: an arming can only exist
+        // where the boxes are live, which already implies a surface. Adding
+        // one would be redundant in production and would suppress the
+        // prompt on the inspection path, where it is the only way to check
+        // it.
+        //
+        // Session 29 order-of-precedence, and it is a ranking of how
+        // PERISHABLE each sentence is. An armed gesture is waiting on the
+        // operator's very next click, so it outranks everything; the note
+        // on a just-finished measurement outranks the standing description
+        // of Apply, because it describes something that happened once and
+        // will be gone as soon as anything else does; the rest is the
+        // situation, which is still true a minute from now.
+        if (arm == Arm::kPhase && !busy) {
+            correct_reason = "click the dead sector on the picture";
+        } else if (arm == Arm::kSync && pending_row < 0 && !busy) {
+            correct_reason = "click one end of a slanted feature";
+        } else if (arm == Arm::kSync && !busy) {
+            // The baseline is no longer a gate [see min_baseline_rows], so
+            // this names it as ADVICE rather than as a requirement: any
+            // second click measures, and this is what it takes for the
+            // answer to be worth +/-5 ppm at the current zoom.
             char why[128];
             std::snprintf(why, sizeof why,
-                          "PHASE set; click the same feature %d+ rows away "
-                          "to measure the slant",
+                          "now click the same feature again; %d+ rows apart "
+                          "for +/-5 ppm",
                           need_rows);
             correct_reason = why;
+        } else if (!slant_note.empty() && !busy) {
+            correct_reason = slant_note;
         } else if (!engine)
             correct_reason = "no capture running";
         else if (busy)
@@ -1969,6 +2191,8 @@ struct Shell {
         s->edit_dirty = false;   // the edit ends at Apply [§8.5 item 4]
         s->pending_col = -1;     // ...and so does a half-made measurement
         s->pending_row = -1;
+        s->arm = Arm::kNone;     // ...and a gesture armed for the old values
+        s->slant_note.clear();
         s->apply_state();
     }
 
@@ -1986,6 +2210,8 @@ struct Shell {
         s->edit_dirty = false;   // ...and at Auto [§8.5 item 4]
         s->pending_col = -1;
         s->pending_row = -1;
+        s->arm = Arm::kNone;
+        s->slant_note.clear();
         s->apply_state();
     }
 
@@ -2012,6 +2238,36 @@ struct Shell {
         apply_state();
     }
 
+    // --- arming [see Arm] --------------------------------------------------
+    // One entry point for both buttons, so the two can never drift into
+    // different lifecycles. Pressing the armed gesture again disarms;
+    // pressing the other one switches, because "switch directly" is what an
+    // operator who pressed the wrong button will try and there is no reason
+    // to make them press twice.
+    //
+    // Any half-made measurement dies here. Re-arming SYNC mid-gesture is
+    // the operator saying "start again", and an anchor that survived it
+    // would silently pair their fresh first click with a stale one — the
+    // same across-two-pictures failure the edit-end rule exists to stop,
+    // one gesture earlier and just as plausible-looking.
+    void set_arm(Arm want) {
+        arm = (arm == want) ? Arm::kNone : want;
+        pending_col = -1;
+        pending_row = -1;
+        // The measurement's quality note belongs to the measurement. Once
+        // the operator arms anything, the number in the box is about to be
+        // replaced and a note describing the OLD one is a false label.
+        slant_note.clear();
+        apply_state();
+    }
+
+    static void cb_arm_phase(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->set_arm(Arm::kPhase);
+    }
+    static void cb_arm_sync(Fl_Widget*, void* p) {
+        static_cast<Shell*>(p)->set_arm(Arm::kSync);
+    }
+
     static void cb_sync_m10(Fl_Widget*, void* p) {
         static_cast<Shell*>(p)->nudge_sync(-10.0);
     }
@@ -2025,35 +2281,37 @@ struct Shell {
         static_cast<Shell*>(p)->nudge_sync(10.0);
     }
 
-    // A click on the image sets PHASE to the column clicked [§8.3 item 1].
-    // It SETS, it does not apply: §8.5 item 4 already names "the first
-    // click on the image" as a thing that BEGINS an edit, and an edit ends
-    // at Apply. A click that re-rendered immediately would also make the
-    // operator's aim un-correctable — the natural motion is click, look,
-    // click again, then Apply.
-    // ONE gesture, resolved by the distance between two clicks — not a
-    // mode, and not a hidden modifier [docs/04 Finding 2's idiom: a value
-    // in the same list, never a separate mode]. A click sets PHASE and
-    // remembers where it was; a SECOND click far enough down the picture
-    // measures the slant between them and fills SYNC. PHASE keeps the
-    // UPPER of the two clicks: the anchor is where the line starts near the
-    // TOP of the picture, and the whole point of the second click is that
-    // the feature has moved by then.
+    // A click on the image belongs to whichever gesture is ARMED [see Arm],
+    // and to nothing at all if none is. It SETS, it does not apply: §8.5
+    // item 4 already names "the first click on the image" as a thing that
+    // BEGINS an edit, and an edit ends at Apply. A click that re-rendered
+    // immediately would also make the operator's aim un-correctable — the
+    // natural motion is click, look, click again, then Apply.
     //
-    // "Far enough" is `min_baseline_rows`, and it is doing two jobs with
-    // one number. It is the honest precision limit (below it the operator
-    // is measuring their own aim), AND it is what disambiguates the
-    // gesture: a second click too close to the first is not a bad slant
-    // measurement, it is the operator re-picking PHASE, so it simply
-    // becomes a fresh first click. No cancel button, no mode to leave.
+    // TWO declared gestures, replacing session 28's one undeclared one:
+    //   PHASE — one click, naming the column the dead sector is at. Done.
+    //   SYNC  — two clicks on the same feature at two ROWS; the slant
+    //           between them is the residual clock error. Done.
+    //
+    // **The SYNC gesture no longer touches PHASE, and that is the change
+    // arming pays for.** Session 28 had to set PHASE from the first click
+    // because it could not know yet that a second one was coming — which
+    // then forced the "PHASE takes the UPPER click" correction, since on a
+    // slanted chart the lower column is wrong by exactly the slant being
+    // measured. A declared gesture does one thing, so both the coupling and
+    // its correction are simply gone. The operator who wants both arms
+    // PHASE, clicks, then arms SYNC and clicks twice: three presses instead
+    // of two, and no rule to learn about which click won.
     //
     // Returns what it DID, because that is what makes the guard below
     // observable: `apply_state`'s edit-end rule [§8.5 item 4] clears the
     // boxes whenever a correction is not possible, so a click that wrongly
     // acted on a dead surface would be wiped a moment later and the shell
     // would look correct afterwards. Net-correct for an incidental reason
-    // is not the same as correct.
-    enum class ClickAction { kNone, kPhase, kSync };
+    // is not the same as correct. kAnchor is the SYNC gesture's first
+    // click: it changes no value the operator can see, so without a name of
+    // its own it would be indistinguishable from a click that did nothing.
+    enum class ClickAction { kNone, kPhase, kAnchor, kSync };
     struct ClickResult {
         ClickAction action = ClickAction::kNone;
         int column = -1;
@@ -2069,7 +2327,14 @@ struct Shell {
         // may ACT — and only the second one is a rule about the operator's
         // data. Putting it only in the widget would also leave it on the
         // far side of the FLTK seam, where no screamer can reach it.
-        if (!view->click_enabled()) return r;
+        //
+        // Session 29: `arm` is read rather than `click_enabled()`, and the
+        // difference matters even though `apply_state` keeps them in step.
+        // The widget flag is the AFFORDANCE (crosshair, and whether to
+        // consume); this is the RULE. A click that acted because the cursor
+        // happened to be a crosshair would be the same class of defect as
+        // the one session 28 found by putting the guard only in the widget.
+        if (arm == Arm::kNone) return r;
         const nova::RulerView v = view_state();
         const int col = clicked_column(v, x_in_pane);
         if (col < 0) return r;   // named nothing; say nothing
@@ -2077,64 +2342,85 @@ struct Shell {
                             ? static_cast<int>(y_in_view / v.scale)
                             : -1;
 
-        // Second click, with a baseline behind it: SYNC.
-        const int need = min_baseline_rows(v.scale, v.image_cols);
-        if (pending_row >= 0 && row >= 0 && need > 0 &&
-            std::abs(row - pending_row) >= need) {
-            // The measurement is a residual on the picture AS DRAWN, so it
-            // is added to the clock that drew it — the same rule the
-            // steppers' blank box obeys, and the same error if it is
-            // skipped.
-            const double residual =
-                slant_ppm(col - pending_col, row - pending_row, v.image_cols);
-            // The SAME operation a stepper nudge performs — a delta on the
-            // clock the picture was drawn on — so it is the same function,
-            // and `--sync-step`'s table screams for both. The empty
-            // `typed` is deliberate and is the one difference worth
-            // stating: a nudge starts from whatever the operator has
-            // typed, but a SLANT IS READ OFF THE PICTURE, and the picture
-            // was drawn on the shown clock no matter what is sitting in
-            // the box unapplied. The evidence outranks the draft.
-            const SyncStep st =
-                sync_step("", shown_ppm, shown_ppm_valid, residual);
-            sync_input->value(sync_text(st.value).c_str());
-            // PHASE takes the UPPER of the two clicks, which in the natural
-            // top-down order is the first one and needs no correcting. In
-            // the other order it does: the anchor is where the line starts
-            // near the TOP of the picture [core/fax.cpp, `dead_start0`],
-            // and on a slanted chart the bottom column is wrong by exactly
-            // the slant just measured — which can exceed the ±search_frac
-            // the seed is refined within. Making the rule "the upper
-            // click" instead of "the first click" costs two lines and
-            // removes an ordering the operator would otherwise have to
-            // know about.
-            if (row < pending_row) {
-                char up[32];
-                std::snprintf(up, sizeof up, "%d", col);
-                phase_input->value(up);
-            }
-            pending_row = -1;
-            pending_col = -1;
+        if (arm == Arm::kPhase) {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, "%d", col);
+            phase_input->value(buf);
+            // The gesture is complete, so it disarms itself — hamfax's
+            // lifecycle, and the reason arming is not a mode you can be
+            // stuck in. The next stray click on the picture does nothing.
+            arm = Arm::kNone;
+            // The same declaration `nudge_sync` has to make, for the same
+            // reason: FLTK did not fire the input's callback, we did.
             if (!edit_dirty) edit_dirty = true;
             apply_state();
-            r.action = ClickAction::kSync;
+            r.action = ClickAction::kPhase;
             r.column = col;
-            r.ppm = st.value;
             return r;
         }
 
-        // Otherwise it is a first click: PHASE, and the anchor for a slant.
-        char buf[32];
-        std::snprintf(buf, sizeof buf, "%d", col);
-        phase_input->value(buf);
-        pending_col = col;
-        pending_row = row;
-        // The same declaration `nudge_sync` has to make, for the same
-        // reason: FLTK did not fire the input's callback, we did.
+        // The SYNC gesture. First click is the anchor and nothing else.
+        if (pending_row < 0 || row < 0) {
+            pending_col = col;
+            pending_row = row;
+            apply_state();   // the reason line now asks for the second point
+            r.action = ClickAction::kAnchor;
+            r.column = col;
+            return r;
+        }
+
+        // Second click. The one measurement that cannot be made is two
+        // points on the SAME row: there is no baseline at all, and the
+        // slant is 0/0. hamfax divides by zero here. Nova keeps the anchor
+        // and stays armed, because the operator's gesture is not finished —
+        // they aimed badly, and asking again is the whole of the fix.
+        const int drow = row - pending_row;
+        if (drow == 0) {
+            apply_state();
+            return r;   // kNone: nothing named, nothing changed, still armed
+        }
+
+        // The measurement is a residual on the picture AS DRAWN, so it
+        // is added to the clock that drew it — the same rule the
+        // steppers' blank box obeys, and the same error if it is
+        // skipped.
+        const double residual =
+            slant_ppm(col - pending_col, drow, v.image_cols);
+        // The SAME operation a stepper nudge performs — a delta on the
+        // clock the picture was drawn on — so it is the same function,
+        // and `--sync-step`'s table screams for both. The empty
+        // `typed` is deliberate and is the one difference worth
+        // stating: a nudge starts from whatever the operator has
+        // typed, but a SLANT IS READ OFF THE PICTURE, and the picture
+        // was drawn on the shown clock no matter what is sitting in
+        // the box unapplied. The evidence outranks the draft.
+        const SyncStep st = sync_step("", shown_ppm, shown_ppm_valid, residual);
+        sync_input->value(sync_text(st.value).c_str());
+        // Every measurement is worth something specific, and a short one is
+        // worth little [see slant_error_ppm]. Session 29 stopped REFUSING
+        // short baselines and started labelling them: the operator gets the
+        // number they asked for and the error bar that goes with it, which
+        // is the only form in which "this is 55 ppm of your own aim" can
+        // reach a person who has already decided they want it.
+        const double err = slant_error_ppm(v.scale, drow, v.image_cols);
+        char note[96];
+        if (std::abs(drow) < min_baseline_rows(v.scale, v.image_cols))
+            std::snprintf(note, sizeof note,
+                          "SYNC measured over %d rows: +/-%.0f ppm, a short "
+                          "baseline", std::abs(drow), err);
+        else
+            std::snprintf(note, sizeof note,
+                          "SYNC measured over %d rows: +/-%.0f ppm",
+                          std::abs(drow), err);
+        slant_note = note;
+        pending_row = -1;
+        pending_col = -1;
+        arm = Arm::kNone;   // the gesture is complete
         if (!edit_dirty) edit_dirty = true;
         apply_state();
-        r.action = ClickAction::kPhase;
+        r.action = ClickAction::kSync;
         r.column = col;
+        r.ppm = st.value;
         return r;
     }
 
@@ -2299,6 +2585,23 @@ int print_metrics(const Shell& s) {
     std::printf("  pending_row          \"%d\"\n", s.pending_row);
     std::printf("  min_baseline_rows    \"%d\"\n",
                 min_baseline_rows(v.scale, v.image_cols));
+    // Which gesture the picture is listening for [see Arm]. This is the
+    // value the click guard, the cursor and both buttons all read, so it is
+    // the one thing that has to be inspectable for any of them to be
+    // checkable — and the three are compared against it rather than against
+    // each other, so a disagreement names which one drifted.
+    std::printf("  arm                  \"%s\"\n", arm_token(s.arm));
+    std::printf("  phase_arm_active     \"%d\"\n",
+                s.phase_arm->active() ? 1 : 0);
+    std::printf("  sync_arm_active      \"%d\"\n",
+                s.sync_arm->active() ? 1 : 0);
+    std::printf("  phase_arm_pushed     \"%d\"\n", s.phase_arm->value());
+    std::printf("  sync_arm_pushed      \"%d\"\n", s.sync_arm->value());
+    // What the last measurement was worth [see slant_error_ppm]. Separate
+    // from `correct_reason` even though the reason line shows it, because
+    // the two answer different questions and the note has to be checkable
+    // in the states where something more perishable is being shown instead.
+    std::printf("  slant_note           \"%s\"\n", s.slant_note.c_str());
     std::printf("  apply_active         \"%d\"\n", s.apply->active() ? 1 : 0);
     std::printf("  auto_active          \"%d\"\n", s.autob->active() ? 1 : 0);
     std::printf("  correct_reason       \"%s\"\n", s.correct_reason.c_str());
@@ -2428,7 +2731,19 @@ int main(int argc, char** argv) {
     bool metrics_only = false;
     int nudges = 0;
     int click_rows = 0;
-    std::vector<std::pair<int, int>> clicks;
+    // --arm and --click share ONE ordered list, and that is the whole point
+    // of it: a gesture is a SEQUENCE — arm, click, click — and two separate
+    // lists could only express "all the arming, then all the clicking",
+    // which is not any gesture an operator makes. Session 28 learned the
+    // general form of this the hard way (a check spanning two processes
+    // cannot observe a transition); this is the same lesson applied before
+    // the fact rather than after it.
+    struct Action {
+        enum Kind { kArm, kClick } kind;
+        Arm arm = Arm::kNone;   // kArm
+        int x = 0, y = 0;       // kClick
+    };
+    std::vector<Action> actions;
     LiveState then_state = LiveState::kIdle;
     bool then_state_given = false;
     int win_w = kWinW;
@@ -2479,14 +2794,28 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--nudge") && i + 1 < argc &&
                  std::sscanf(argv[++i], "%d", &nudges) == 1)
             ;
+        else if (!std::strcmp(argv[i], "--arm") && i + 1 < argc) {
+            Action a;
+            a.kind = Action::kArm;
+            const char* w = argv[++i];
+            if (!std::strcmp(w, "phase")) a.arm = Arm::kPhase;
+            else if (!std::strcmp(w, "sync")) a.arm = Arm::kSync;
+            else if (!std::strcmp(w, "none")) a.arm = Arm::kNone;
+            else bad = true;
+            // "none" presses whichever button is currently down, which is
+            // what an operator disarming actually does; `set_arm` toggles,
+            // so it is expressed by re-pressing rather than by a third verb.
+            if (!bad) actions.push_back(a);
+        }
         else if (!std::strcmp(argv[i], "--click") && i + 1 < argc) {
-            int cx = 0, cy = 0;
+            Action a;
+            a.kind = Action::kClick;
             // X,Y in image-pane coordinates. Repeatable, because
             // the gesture under test is a SEQUENCE of clicks.
-            if (std::sscanf(argv[++i], "%d,%d", &cx, &cy) == 2)
-                clicks.emplace_back(cx, cy);
-            else if (std::sscanf(argv[i], "%d", &cx) == 1)
-                clicks.emplace_back(cx, 0);
+            if (std::sscanf(argv[++i], "%d,%d", &a.x, &a.y) == 2)
+                actions.push_back(a);
+            else if (std::sscanf(argv[i], "%d", &a.x) == 1)
+                actions.push_back(a);
             else
                 bad = true;
         }
@@ -2526,7 +2855,8 @@ int main(int argc, char** argv) {
                      "                [--follow BATCHESxROWS] "
                      "[--correction] [--sync-step]\n"
                      "                [--nudge N] [--click X,Y ...] [--click-rows N]\n"
-                     "                [--then-state NAME]\n"
+                     "                [--arm phase|sync|none ...] "
+                     "[--then-state NAME]\n"
                      "  window minimum %dx%d; states: idle ready start-tone "
                      "phasing\n  drawing stop-tone decoding saved\n",
                      kMinW, kMinH);
@@ -2572,17 +2902,24 @@ int main(int argc, char** argv) {
                       128);
         shell.show_image(img);
     }
-    // Each click goes through the shell's real handler, in order, so the
-    // sequence under test is the sequence an operator makes.
+    // Each action goes through the shell's real handler, in order, so the
+    // sequence under test is the sequence an operator makes. Arming goes
+    // through `set_arm` — the buttons' own callback body — rather than
+    // assigning `arm`, or the toggle-and-clear lifecycle would be untested
+    // exactly where it is easiest to get wrong.
     const char* click_action = "none";
     int click_named = -1;
     double click_ppm = 0.0;
-    for (const std::pair<int, int>& c : clicks) {
-        const Shell::ClickResult r =
-            shell.click_image(c.first, c.second);
+    for (const Action& a : actions) {
+        if (a.kind == Action::kArm) {
+            shell.set_arm(a.arm);
+            continue;
+        }
+        const Shell::ClickResult r = shell.click_image(a.x, a.y);
         switch (r.action) {
             case Shell::ClickAction::kNone: click_action = "none"; break;
             case Shell::ClickAction::kPhase: click_action = "phase"; break;
+            case Shell::ClickAction::kAnchor: click_action = "anchor"; break;
             case Shell::ClickAction::kSync: click_action = "sync"; break;
         }
         click_named = r.column;
@@ -2599,7 +2936,7 @@ int main(int argc, char** argv) {
     }
     if (metrics_only) {
         const int rc = print_metrics(shell);
-        if (!clicks.empty()) {
+        if (!actions.empty()) {
             std::printf("  click_action         \"%s\"\n", click_action);
             std::printf("  click_named          \"%d\"\n", click_named);
             std::printf("  click_ppm            \"%s\"\n",

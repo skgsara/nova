@@ -7,6 +7,161 @@ anything as our develop history").
 
 ---
 
+## 2026-08-15 — Session 29: the gestures are declared, and hamfax had the
+## answer session 28 reasoned its way past
+
+Agent: Claude. Code changed: `gui/nova-gui.cpp` (`Arm` and `arm_token`;
+`slant_error_ppm`; `Shell::arm`, `slant_note`, `set_arm` and the two
+arming buttons; `click_image` split into two declared gestures;
+`apply_state`'s arming, crosshair and reason-line rules; the correction
+block relaid out; `--arm` sharing one ordered action list with `--click`;
+`arm`/`slant_note`/arm-button metrics), `tests/gui_shell.cmake` (the
+unarmed click, both gesture lifecycles, the three witnesses, the flanked
+layout, short baselines, same-row, re-arming, the zoom dependence of the
+uncertainty). Files changed: `docs/05-m4-shell-design.md` (§8.5 built-note
+and §13), `docs/00-prior-art-survey.md` (a per-change check and a ledger
+row), `NOTICE`, `ROADMAP.md` (item 11, item 10 amended), `README.md`,
+`START-HERE.md`, `SESSION-LOG.md`. Test count unchanged at 37.
+
+**Sara's first look at session 28's panel asked two questions, and both
+answers were bad.** Could an accidental click on the picture move her
+data? It could — a stray click set PHASE silently. And were the four
+steppers PHASE's? They are SYNC's, and she could not tell from the layout
+— which is the one thing that layout most had to carry, since PHASE
+having no steppers is deliberate and load-bearing. **The misreading is
+itself the finding**, made by the person who specified the control.
+
+**She proposed an arming button and asked me to check hamfax before
+arguing. That was the right instinct and I was wrong.** HamFax (C.
+Schmitt DH1CS, GPLv2+ — the middle link of Nova's own DSP lineage, until
+today recorded as "feature-shape and lineage evidence only") has had both
+of these corrections since 2001 and **arms both**: an Image-menu action
+prompts *"select beginning of line"* or *"select first point of vertical
+line"*, disables the other controls, takes one click or two, and ends. My
+objection had been that a one-shot arming button breaks a two-click
+gesture because you would re-arm between clicks. **You arm the GESTURE,
+not the click.** One press covers both. It is also not a mode you can be
+stuck in (per-gesture, self-clearing), and it is VISIBLE — which is the
+criterion session 28 itself used when it rejected shift-click, so a button
+passes session 28's own test better than what session 28 built.
+
+**Taken, and not taken.** Taken: arm-then-click, one button per gesture,
+self-clearing — recorded in the ledger and `NOTICE` as HamFax's first
+interaction-shape reuse. Not taken: the modal prompt and disabling every
+other control (Nova has the reason line and the cursor, so the armed state
+shows in three places that cannot disagree because all three read one
+value), and `correctBegin`'s circular pixel shift (Nova's PHASE is a seed
+for a re-decode from the retained stream, which is a better promise). Not
+taken on the rigour side either: **hamfax checks no minimum separation and
+divides by zero when both clicks land on one row.** It is prior art for
+the gesture, not for the arithmetic.
+
+**What arming bought, beyond the accident it was asked for.**
+`min_baseline_rows` was doing two jobs — precision limit AND gesture
+disambiguator — and arming answers the second outright, so it is demoted
+from a GATE to a REFERENCE: a short baseline now measures and is labelled
+with what it is worth (`slant_error_ppm`, the same arithmetic solved for
+the error instead of the rows, so the two cannot disagree). Ten rows apart
+is ±55 ppm and the reason line says so, which is Sara's judgement with the
+honesty attached rather than a refusal. And **the SYNC gesture stopped
+touching PHASE**, which deleted "PHASE takes the upper click" along with
+the coupling that forced it. The crosshair also stopped being scenery: it
+follows the arming now, so it says the next click WILL act.
+
+**Finding 1, found by hand before any screamer ran: a rule that was
+correct became wrong without being touched.** The pending anchor was
+cleared inside the edit-end block, guarded on `edit_dirty` — safe in
+session 28, because a slant's first click also set PHASE, so an anchor
+could not exist without a dirty edit. Declaring the gestures broke that
+coupling silently: the SYNC gesture's first click deliberately changes no
+visible value, so it does not dirty the edit, and anchors began surviving
+into states with no picture behind them. Still unreachable, because arming
+clears the anchor and arming is the only route to a second click — which
+is precisely session 28's own warning wearing a new hat: net-correct for
+an incidental reason, one refactor from not being correct at all. The
+clearing of the anchor, the arming and the note is now separate from the
+clearing of the VALUES and guarded only on the surface being gone.
+
+**Finding 2, from the mutations, and it is a new shape of survivor.**
+Thirteen mutations gave ten kills, one void and two survivors, and the two
+survivors were the same thing: **rules that were only ever exercised where
+they could not fail.** Dropping the zoom term from `slant_error_ppm`
+survived because every measurement check ran at 100% zoom, where the scale
+is 1.0 and the term is invisible. Removing the anchor-clearing from
+`set_arm` survived because nothing anywhere re-armed mid-gesture — though
+the code's own comment claimed the rule. Neither is an equivalent mutant
+and neither was code to delete; both were holes in the tests. Both are now
+checked and both re-run dead. **The carry-forward: a check that only ever
+runs at the identity value of a parameter is not checking that parameter,
+and a claim made in a comment is not a claim under test.**
+
+**Finding 3, about the instrument again.** The mutation harness restored
+the SOURCE and left the tree holding a MUTATED BINARY, so the next ctest
+run reported a failure against innocent code. Caught because the failure
+was in a check the session had just seen pass. The restore now removes the
+object file and the binary and rebuilds.
+
+**Validation.** Baseline through the harness first, and it SURVIVED — the
+harness is not inverted. Fifteen distinct mutations in total, every one
+killed after the two survivors' gaps were closed: the unarmed-click guard,
+both gestures failing to disarm, the SYNC gesture setting PHASE again
+(session 28's coupling, re-injected by hand after the perl pattern went
+void — the witness check catching exactly what it exists for), same-row
+measured anyway, the short-baseline note inverted, the uncertainty
+dropping the zoom scale, the anchor outliving the surface, the crosshair
+back to scenery, the arming buttons not following the boxes, re-arming
+keeping the stale anchor, an armed gesture saying nothing, the buttons not
+showing the armed state, the note never cleared, and
+`min_baseline_rows` restored as a gate. Full suite 37/37.
+
+**Contradictions found:** session 28's own text, in four places, all now
+marked or rewritten rather than left standing — `docs/05`'s two-click
+block (superseded in part), ROADMAP item 10 (amended at both ends, since a
+reader meets the superseded interaction before the amendment), and the
+README and START-HERE descriptions of the gesture. The geometry session 28
+settled is unchanged and is what session 29 kept; what went is "one
+gesture, no mode", "one number doing two jobs" and "PHASE takes the upper
+click".
+Two more, from the closing sweep. **`CMakeLists.txt` still said "Suite
+count is 24, +1 with the GUI"** against a real 35 (+2) — two numbers out
+of date, in a comment beside `ruler_mapping`, and missed by session 28's
+sweep *of exactly this class of error*, which corrected three others in
+the same file and its neighbours. Worth naming rather than quietly fixing:
+a sweep that finds three of four is not a sweep that finished, and the one
+it missed was the one furthest from the thing session 28 was working on.
+And **`gui_shell.cmake`'s header had stopped describing it again**, one
+session after session 28 rewrote it for the same reason — the file gained
+a whole second interaction group and the header listed only the first.
+Rewritten, with both testing cautions now stated at the top where someone
+adding a check will meet them.
+
+**Next step: run `./build/nova-gui` by hand — still, and now with more to
+look at than session 28 left.** Nothing in sessions 28 or 29 has been
+touched by a person. Sessions 25, 26 and 27 each found a defect on the air
+that a green suite could not see, and there are now two sessions of
+interaction surface stacked on that record. Specifically worth watching,
+and all of them are judgement calls no screamer can make: whether `@circle`
+on the two arming buttons reads as "pick a point on the picture" or as a
+cryptic dot (the tooltips carry the words, and a text label would fit —
+this was my call and it is the weakest part of the session); whether
+arming feels like protection or like a tax on every correction; whether
+±1/±10 are the right step sizes on a real chart, which session 28 asked
+and nobody has answered; and whether the flanked steppers actually read as
+SYNC's now, which is the whole point of moving them.
+Then **ROADMAP M4 item 6** (a transmission arriving mid-edit [§8.2]: the
+background buffer and the compact receiving indicator), independent of all
+of the above and the one thing a by-hand run cannot observe, there being
+no second transmission — it also turns item 4's stand-in edit-end into the
+operator's own action. Or **item 7** (m4a input via runtime ffmpeg),
+independent of everything. Registered, not scheduled: per-line correction
+segments (`Correction` as a list of `{from_line, phase, ppm}`, needing a
+synthetic white-only fixture with a step at a known line); the
+pulse-station SYNC override (no recording yet exists where the fit is
+wrong and the eye is right); whether Zoom should keep the vertical ROW
+rather than the pixel offset; template white-window robustness.
+
+---
+
 ## 2026-08-15 — Session 28 (closing): the documentation sweep, and three
 ## stale counts nobody had reason to look at
 

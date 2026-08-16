@@ -357,6 +357,24 @@ more likely right than one that agrees only with its own reasoning.
   exactly that. Corollary for this shell's inspection seams: `--state`
   builds the shell already in a state, so it can never exercise a rule
   about entering one.
+- **A check that only ever runs at a parameter's IDENTITY VALUE is not
+  checking that parameter** (session 29, the two mutation survivors). Both
+  survivors were of this shape and neither was an equivalent mutant.
+  Dropping the zoom term from `slant_error_ppm` survived because every
+  measurement check ran at 100% zoom, where the scale is 1.0 and the term
+  multiplies by one; removing the anchor-clearing from `set_arm` survived
+  because nothing anywhere performed the action the rule is about
+  (re-arming mid-gesture), even though the code's comment claimed the
+  rule. Two habits fall out: vary a parameter across at least one value
+  where it BITES, and treat a rule stated only in a comment as untested by
+  default. Corollary: a survivor has a third category beyond "equivalent
+  mutant" and "delete the code" — **a real rule exercised only where it
+  cannot fail**, and that one is a hole in the test.
+- **Restoring the source is not restoring the tree** (session 29). The
+  mutation harness put the file back and left the MUTATED BINARY in place;
+  the next ctest run failed against innocent code. Any harness that
+  rebuilds must also rebuild on the way out — `rm` the object file and the
+  binary in the restore path, not only in the setup path.
 - **A widget set programmatically does not tell anyone** (session 28).
   FLTK fires an input's callback for typing, not for `value()`, so any
   control that writes another control must re-declare whatever the typed

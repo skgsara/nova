@@ -36,22 +36,26 @@ back over the same file (one transmission, one file — there is no Save
 button). Auto puts the automatic decode back, byte for byte. When a
 correction is not possible the two buttons say why instead of just being
 grey.
-Since session 28 SYNC also has four steppers under it — −10 −1 +1 +10 — so
-a slant can be nulled by eye instead of by typing a number. From a blank
-box they start at the clock the picture was drawn on, not at zero: on a
-white-only station that is −70 to −118 ppm, and starting at zero would
-make the first click a jump of the whole error. PHASE has no steppers on
-purpose — it is a seed refined within ±54 columns, so a smaller nudge
-would move nothing. Its instrument is the click, also session 28: click
-the dead sector on the picture and PHASE takes that column (same
-arithmetic as the ruler, so tick and click agree). The pointer turns into
-a crosshair exactly where a click can act, and a click past the picture's
-right edge names nothing. Click the SAME feature again further down and
-Nova measures the slant between the two and fills SYNC — that is what
-turns an eyeballed ppm into one measured over a real baseline. The reason
-line tells you how far apart the two clicks have to be for the current
-zoom (111 rows at 100%, 442 at Fit-ish 25%); closer than that and the
-click is simply read as re-picking PHASE.
+SYNC has four steppers flanking it — −10 −1 [box] +1 +10 — so a slant can
+be nulled by eye instead of by typing a number. From a blank box they
+start at the clock the picture was drawn on, not at zero: on a white-only
+station that is −70 to −118 ppm, and starting at zero would make the first
+click a jump of the whole error. PHASE has no steppers on purpose — it is
+a seed refined within ±54 columns, so a smaller nudge would move nothing.
+Its instrument is the click.
+Since session 29 both picture gestures are ARMED, which is hamfax's shape:
+press the small button beside PHASE, then click the dead sector, and PHASE
+takes that column (same arithmetic as the ruler, so tick and click agree).
+Press the one beside SYNC, then click one feature twice, and Nova measures
+the slant between the clicks. A click with nothing armed does nothing at
+all — that is the point, so a stray click cannot move your numbers. Armed,
+the pointer is a crosshair and the reason line says what to click; the
+gesture disarms itself when it is done, so there is no mode to leave.
+A short baseline still measures and tells you what it is worth: ten rows
+apart is ±55 ppm, which the reason line says, because that is your call to
+make and not the program's. Two clicks on the SAME row measure nothing —
+there is no baseline at all — and the gesture stays armed so you can just
+click again.
 Pick IOC 576 and the ruler lights up in image columns; change Zoom and the
 column at the left edge stays put. Help → About.
 It also answers without opening anything — and opens no sound card when

@@ -40,10 +40,18 @@ combined work is GPLv3+.
                adjustment architecture planned for M4 is also ACFax's
                and will be recorded when it lands.
   * HamFax   — Christof Schmitt (DH1CS), 2001–2011, GPLv2+.
-               Feature-shape reference only (IOC scaling; the TX path
-               exists there alone in the lineage). Its
-               FaxDemodulator.cpp carries ACFax's FIR tables and is the
-               middle link of the lineage evidence. No code taken.
+               Feature-shape reference (IOC scaling; the TX path exists
+               there alone in the lineage). Its FaxDemodulator.cpp
+               carries ACFax's FIR tables and is the middle link of the
+               lineage evidence. Since session 29 also an INTERACTION-
+               shape reuse: the arm-then-click structure of the two
+               post-decode image corrections — one armed gesture for
+               the beginning of the line, one for the slant, taking one
+               click and two respectively and ending when the gesture
+               completes — is HamFax's, re-implemented in Nova's own
+               terms (an arming button and the reason line, not a menu
+               action and a modal prompt) with different arithmetic
+               behind it. No code taken.
   * weatherfax_pi (OpenCPN weather fax plugin) — Sean D'Epagnier,
                GPLv3. Via yahfax, an improved adaptation of HamFax.
                Median-with-spread-rejection treatment, re-implemented

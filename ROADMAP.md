@@ -884,6 +884,8 @@ one feature with several parts, plus one verification no test can do.
    and it is the other way round. PHASE is a horizontal offset (one
    feature, one row, one click); SYNC is a SLANT, so it needs the same
    feature at two rows: `ppm = (dcol/drow)/width * 1e6`.
+   **Read the amendment at the end of this item first: the interaction
+   below was superseded in session 29 (item 11). The geometry stands.**
    **Why it is the strongest of the five ideas she raised**: §7.1
    apologises that "a ppm eyeballed off thirty seconds of preview is worse
    than one fitted over the whole transmission", and it is right, because
@@ -919,6 +921,60 @@ one feature with several parts, plus one verification no test can do.
    The rule fires on a TRANSITION, so the seam grew `--then-state` to
    express one. Four defects reintroduced, and only after that fix did all
    four fail.
+   **Amended session 29: the gesture is now DECLARED, so "one gesture, no
+   mode", "one number doing two jobs" and "PHASE takes the upper click"
+   are withdrawn — see item 11.** The geometry above is unchanged.
+11. ~~**Arming buttons: the gestures are declared**~~ **Done (session
+   29)** — Sara's, from the first by-hand look at what items 5, 9 and 10
+   had built. She asked two questions and both answers were bad: an
+   accidental click on the picture DID move PHASE silently, and the four
+   steppers read as PHASE's when they are SYNC's — losing the one thing
+   that layout most had to carry, since PHASE having no steppers is
+   deliberate.
+   **The reversal is prior-art evidence, not argument.** She asked what
+   hamfax does. HamFax (C. Schmitt DH1CS, GPLv2+ — the middle link of
+   Nova's own DSP lineage, until now recorded as feature-shape evidence
+   only) has both of these corrections and ARMS both: an Image-menu
+   action prompts, disables the other controls, takes one click for the
+   beginning of the line or two for the slant, and ends. Session 28 had
+   rejected this shape on reasoning that is wrong in one detail — you arm
+   the GESTURE, not the click, so one press covers both clicks of a slant
+   and the "you would have to re-arm between clicks" objection evaporates.
+   It is also not a mode you can be stuck in (per-gesture, self-clearing),
+   and it is VISIBLE, which is the criterion session 28 itself used when
+   it rejected shift-click. Recorded in `docs/00`'s ledger and `NOTICE` as
+   an interaction-shape reuse; the modal dialog, the disable-everything,
+   and `correctBegin`'s circular pixel shift are all left.
+   **Three things fell out that could not be had otherwise.** An unarmed
+   click cannot reach the operator's data at all, which is the whole of
+   the accident objection. `min_baseline_rows` goes back to being ONE
+   thing — arming answers the disambiguation question, so the number is
+   demoted from a gate to a reference, and a short baseline now measures
+   and is labelled with what it is worth (`slant_error_ppm`, the same
+   arithmetic solved for the error instead of the rows). And the SYNC
+   gesture stops touching PHASE, which deletes the "upper click" rule
+   along with the coupling that forced it. The one measurement still
+   refused is two clicks on the same ROW — no baseline at all, 0/0, where
+   hamfax divides by zero; Nova keeps the anchor and stays armed, because
+   a bad aim has not ended the gesture.
+   **The finding: a rule that was correct became wrong without being
+   touched.** The pending anchor was cleared inside the edit-end block,
+   guarded on `edit_dirty` — safe in session 28, because a slant's first
+   click also set PHASE, so an anchor could not exist without a dirty
+   edit. Declaring the gestures broke that coupling silently (the SYNC
+   gesture's first click deliberately changes no visible value, so it does
+   not dirty the edit) and anchors began surviving into states with no
+   picture behind them. Still unreachable, because arming clears the
+   anchor and arming is the only route to a second click — which is
+   exactly session 28's own warning: net-correct for an incidental reason,
+   one refactor from not being correct. Found by hand on the built code
+   before any screamer ran.
+   **The layout is fixed structurally, not with a label**: the steppers
+   FLANK the SYNC box (`-10 -1 [box] +1 +10`), because a control touching
+   a box on both sides cannot be read as another box's. SYNC's caption
+   moves to the row above and carries its arming button; PHASE keeps
+   caption, box and arm on one row, and the asymmetry between the two
+   blocks is the point.
 Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
 next. Items 5, 6, 7 and 8 are independent and can be taken in any order.

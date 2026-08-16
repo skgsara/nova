@@ -180,25 +180,34 @@ and on a white-only station the measured clock is −70 to −118 ppm, so
 starting at zero would make the operator's first click a jump of the
 entire error, away from correct. PHASE has no steppers on purpose — it
 is a seed the decoder refines within ±54 columns, so a smaller nudge
-would be refined straight back and the picture would not move — its real
-instrument is the click, which landed in the same session: click the dead
-sector on the picture and PHASE takes that column, using the same
-arithmetic the ruler draws from, so clicking a tick and reading a tick
-cannot disagree. A click past the image's right edge names nothing, and
-the cursor is a crosshair exactly where a click can act — an image cannot
-go grey to say it is inert, so the pointer says it instead.
+would be refined straight back and the picture would not move. Its real
+instrument is the click. Since session 29 the steppers **flank** the SYNC
+box rather than sitting under both boxes, because the first person to look
+at the built panel read them as PHASE's — and a control touching a box on
+both sides cannot be misread that way, where another label could not have
+fixed what a label had already failed to prevent.
 
-A SECOND click, far enough down the picture, measures the slant between
-the two and fills SYNC — because a slant is the same feature at two rows,
-and two clicks a thousand rows apart are a baseline rather than an
-eyeball. "Far enough" is derived rather than chosen: one screen pixel of
-click error is one column at 100% zoom, so the baseline is whatever puts
-the resulting error an order of magnitude below the 30–180 ppm the
-control exists to remove. That same number keeps the gesture unambiguous
-— a second click too close is not a bad measurement, it is the operator
-re-picking PHASE — so there is no mode to leave and no cancel button, and
-the reason line under the buttons names the baseline the current zoom
-needs.
+**Both picture gestures are declared.** A small button beside PHASE arms
+"click the dead sector"; one beside SYNC arms "click the same feature
+twice". A click on the picture with nothing armed does nothing at all —
+which is the point, since the alternative is an accidental click silently
+moving the operator's data. Arming a gesture puts a crosshair on the
+picture and a sentence in the reason line, and the gesture disarms itself
+when it completes, so there is no mode to be stuck in. This is hamfax's
+shape (it has had both corrections, both armed, since 2001) adapted to
+Nova's surface: an arming button and the reason line, not a menu action
+and a modal prompt.
+
+Two clicks on one feature measure the slant between them and fill SYNC,
+because a slant is the same feature at two rows, and two clicks a thousand
+rows apart are a baseline rather than an eyeball. **A short baseline still
+measures, and says what it is worth**: one screen pixel of click error is
+one column at 100% zoom, so ten rows apart is ±55 ppm — as large as the
+30–180 ppm the control exists to remove — and the reason line says so
+rather than refusing the measurement. The operator's judgement, with the
+error bar attached. The one thing refused is two clicks on the same row,
+which has no baseline at all; the gesture stays armed so they can simply
+click again.
 
 **M4 decodes live (2026-08-14): audio in one end, a saved chart out the
 other.** The design was settled first, against a survey of sixteen

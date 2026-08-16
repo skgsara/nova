@@ -347,7 +347,10 @@ add_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
 # screen x is the column the ruler names there, at every zoom, scroll
 # offset and both IOC widths. Unguarded: it tests a pure nova-live
 # function, so it needs no window and no audio device and runs in every
-# build, including NOVA_BUILD_GUI=OFF. Suite count is 24, +1 with the GUI.
+# build, including NOVA_BUILD_GUI=OFF. It is one of the 35 (+2 with the
+# GUI). (This line read "24, +1 with the GUI" until session 29 — two
+# counts out of date, and missed by session 28's sweep of exactly this
+# class of error, which corrected three others.)
 add_executable(nova-test-ruler tests/test_ruler_mapping.cpp)
 target_link_libraries(nova-test-ruler PRIVATE nova-live)
 add_test(NAME ruler_mapping COMMAND nova-test-ruler)

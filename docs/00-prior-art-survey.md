@@ -34,7 +34,7 @@ verbatim (checked against `mod_demod.c`).
 | Tool | Take | Leave |
 |---|---|---|
 | ACFax | fs/4 quadrature downconvert; 9-tap FIR tables (3 widths); amplitude-normalized delay discriminator; arcsin linearization idea; **retain raw demod stream → non-destructive post-adjustment** | 8-bit/8 kHz fixed point; `SHORT int` type punning; OSS audio |
-| HamFax | feature shape: IOC scaling, TX exists here only | Qt4, autotools, 8 kHz AU |
+| HamFax | feature shape: IOC scaling, TX exists here only; **interaction shape: arm-then-click for the two post-decode corrections** (session 29) | Qt4, autotools, 8 kHz AU; the modal prompt dialog and disable-everything-else; `correctBegin`'s circular pixel shift |
 | weatherfax_pi / KiwiSDR | fractional sample-rate tracking + fractional accumulator resampling; phasing wedge-fit over ~7% of line, median over ~40 lines, 10–90% spread rejection; false-start filtering | KiwiSDR runtime plumbing |
 | JWX | Goertzel start/stop detection (250 ms window) as reference; failure-mode catalogue: one-shot sync average, no per-line resync, hardcoded IOC 576/120, AFC abandoned | Java Sound workarounds |
 | Isobar | per-line sync lock approach; session/fixture doctrine | KG-FAX interop (out of scope) |
@@ -80,6 +80,36 @@ manual calibration is not a shortcoming of an old program, it is what a
 mature decoder does when the signal carries no sync it can trust. Nova's
 claim to do it automatically is only as good as the screamer behind it
 (`fixture_weak_white`, roundtrip group [7]).
+
+**How the operator TELLS the program where the line starts, and how
+slanted it is (session 29, M4).** Checked HamFax `src/FaxWindow.cpp` and
+`src/FaxImage.cpp` via the GitHub mirrors, prompted by Sara asking what
+hamfax does rather than accepting the reasoning session 28 had built on.
+Hamfax has both of Nova's two picture corrections and **arms both**: an
+Image-menu action puts up a prompt (*"select beginning of line"*, or
+*"select first point of vertical line"* then *"select second point"*),
+disables the other controls, takes one click or two, performs the
+correction and ends. Its slant arithmetic is Nova's — `(x2-x1)/(y1-y2)`
+normalized by width — expressed as a width ratio rather than in ppm.
+
+**Taken:** the arm-then-click structure, and specifically that the arming
+covers the whole GESTURE rather than one click, which is what makes a
+two-click measurement possible without a mode the operator can be stuck
+in. Session 28 had rejected this shape on reasoning that turns out to be
+wrong in exactly that detail.
+
+**Not taken:** the modal prompt dialog and disabling every other control
+(Nova has the reason line and the cursor for this, and three witnesses
+reading one value cannot disagree); and `FaxImage::correctBegin`, which
+circularly shifts already-decoded pixels — Nova's PHASE is a seed for a
+re-decode from the retained raw stream, which is a better answer and a
+different promise.
+
+**Found, and NOT taken, on the rigour side:** hamfax checks no minimum
+separation between the two clicks and divides by zero when they land on
+the same row. It is prior art for the gesture, not for the arithmetic —
+and the contrast is what turned Nova's own baseline number from a gate
+into a stated uncertainty [docs/05 §8.5, session 29].
 
 **Control-tone detection and phasing (session 6, M3).** All three mature
 decoders were read before writing anything, and they disagree:
@@ -322,6 +352,7 @@ own row the day it enters, with the source file named.
 | Leaky run counter: decrement on a miss rather than reset | KiwiSDR `typecount` | GPLv3 | `core/phasing.cpp`, `core/tones.cpp` | 2026-08-12 |
 | Abandon a phasing run after N consecutive failed lines (N re-measured) | fldigi `decode_phasing` | GPLv3+ | `core/phasing.cpp` | 2026-08-12 |
 | Per-line correlation against the previous line, kept per line rather than collapsed to a histogram mode | fldigi `correlation_shift` | GPLv3+ | `core/fax.cpp` adrift-row fallback | 2026-08-12 |
+| Arm-then-click for the two post-decode image corrections: a declared gesture, one click for the line's beginning and two for the slant, self-clearing when it completes | HamFax `FaxWindow::setBegin` / `slantWaitFirst` | GPLv2+ | `gui/nova-gui.cpp` `Arm`, `click_image` | 2026-08-15 |
 
 **Linked libraries are not reuse and do not belong in the table above**,
 but they are recorded here so the ledger is not read as the whole

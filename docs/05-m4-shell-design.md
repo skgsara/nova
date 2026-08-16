@@ -1454,6 +1454,11 @@ here would have to recompute the pane interior and would end up restating
 the code.]**
 
 **[BUILT session 28 — two-click SYNC (Sara's idea, geometry corrected).**
+**SUPERSEDED IN PART by session 29 below: the gestures are now DECLARED
+with an arming button, so "one gesture, no mode", "one number doing two
+jobs" and "PHASE takes the upper click" are all withdrawn. The geometry —
+what a slant is, why it needs a baseline, and that the measurement is a
+residual — is unchanged and is what session 29 kept.**
 She proposed one click for SYNC and two for PHASE; it is the other way
 round. PHASE is a horizontal offset — one feature, one row, one click.
 SYNC is a SLANT, which is the same feature at two ROWS:
@@ -1509,6 +1514,103 @@ not express one; `--then-state` exists for that. Four defects were
 reintroduced (the width dropped from the slant, the baseline test
 removed, PHASE keeping the first click, the anchor outliving the edit)
 and only after the seam was fixed did all four fail.]**
+
+**[BUILT session 29 — the gestures are DECLARED: an arming button each,
+and clicks gated on it (Sara).** This reverses session 28's "one gesture,
+no mode" above, and the reversal is evidenced rather than argued.
+
+*What prompted it.* Sara, reading the built panel for the first time,
+asked two things: whether an accidental click on the pane could move her
+data, and whether the four steppers belonged to PHASE. Both answers were
+bad. A stray click did set PHASE, silently; and the steppers are SYNC's,
+which she could not tell from the layout — the one thing that layout most
+had to carry, since PHASE having no steppers is deliberate. She proposed
+a small button beside each box: press it, then click the picture.
+
+*The prior art settles it, and it is prior art this project already
+tracks.* **hamfax** (C. Schmitt DH1CS, GPLv2+; the H in Nova's
+ACFax→HamFax→yahfax→weatherfax_pi lineage, until now recorded as
+"feature-shape and lineage evidence only") has had exactly these two
+gestures since 2001, and arms both:
+
+| hamfax | Nova's equivalent | Interaction |
+|---|---|---|
+| Image → "Adjust IOC (change width)" | SYNC | prompt *"select first point of vertical line"*, then *"select second point"*, two clicks, ends |
+| Image → "set beginning of line" | PHASE | prompt *"select beginning of line"*, one click, ends |
+
+Both disable the rest of the controls while the gesture is live.
+
+*Three things that settles which the session-28 reasoning did not have.*
+**The lifecycle objection was simply wrong** — "a one-shot arming button
+would break the two-click gesture, because you would have to re-arm
+between clicks": no, you arm the GESTURE, not the click; one press covers
+both and the arming ends when the measurement does. **It is not a mode you
+can be stuck in**, which is what the AUTO-is-a-value idiom was protecting
+against; it is per-gesture and self-clearing. And **it is VISIBLE**, which
+is the criterion session 28 itself stated when it rejected shift-click —
+so a button passes session 28's own test better than the undeclared
+gesture session 28 built.
+
+*What is taken, and what is left.* Taken: the arming, one button per
+gesture, self-clearing. Left: the modal prompt dialog and disabling every
+other control — Nova already has the reason line and the cursor, so the
+armed state shows in three places that cannot disagree because all three
+read one value (`Shell::arm`): the button is pushed, the reason line says
+what to click, the crosshair appears. Also left: hamfax's `correctBegin`,
+a circular shift of decoded pixels. Nova's PHASE is a SEED re-rendered
+from the retained raw stream [§7.1], which is strictly better and means
+the prompt must not promise the picture lands exactly where clicked.
+
+*What arming BUYS, beyond the accident.* Two things fall out that could
+not be had inside an undeclared gesture:
+
+- **`min_baseline_rows` goes back to being one thing.** It was the
+  precision limit AND the disambiguator; arming answers the second
+  question outright, so it is demoted from a GATE to a REFERENCE. A short
+  baseline now measures and is labelled with what it is worth
+  (`slant_error_ppm`, which is the same arithmetic solved for the error
+  instead of the rows, so the two cannot disagree). Sara's judgement, with
+  the honesty attached rather than a refusal. The one measurement still
+  refused is two clicks on the SAME ROW — no baseline at all, and 0/0;
+  hamfax divides by zero there. Nova keeps the anchor and stays armed,
+  because a bad aim has not ended the gesture.
+- **The SYNC gesture stops touching PHASE**, and with it "PHASE takes the
+  upper click" disappears. That rule existed only because the fused
+  gesture had to set PHASE from a first click it could not yet know was a
+  first click. A declared gesture does one thing; the coupling and its
+  correction are both gone. Cost: three presses instead of two to set
+  both. Bought: no rule about which click won.
+
+*And the crosshair means something now.* It used to be on for the whole
+of a correctable chart, which made it scenery. It follows the arming, so
+it says the next click WILL act. `FL_MOVE` joins `FL_ENTER` in the
+handler, because arming happens while the pointer is on the button and the
+operator can come back onto the picture without an enter FLTK reports.
+
+*The finding, and it is the session's sharpest.* **A rule that was
+correct became wrong without being touched.** The pending anchor was
+cleared inside the edit-end block, guarded by `edit_dirty` — safe in
+session 28, because a slant's first click also set PHASE, so an anchor
+could not exist without a dirty edit. Declaring the gestures broke that
+coupling silently: the SYNC gesture's first click deliberately changes no
+value the operator can see, so it does not dirty the edit, and anchors
+began surviving into states with no picture behind them. It was still
+unreachable — arming clears the anchor, and arming is the only route to a
+second click — which is exactly the shape session 28 warned about: net-
+correct for an incidental reason, one refactor from not being correct.
+Found by hand on the built code, before the screamer ran. The clearing of
+the anchor, the arming and the measurement's note is now separate from the
+clearing of the VALUES, and guarded only on the surface being gone.
+
+*Layout.* The steppers now FLANK the SYNC box — two buttons either side,
+`-10 -1 [box] +1 +10` — because a control touching a box on both sides
+cannot be read as belonging to another box, and a label could not have
+fixed a misreading a label had already failed to prevent. That costs the
+SYNC caption its place on the box's row, so the caption takes the row
+above and carries SYNC's arming button; PHASE keeps caption, box and arm
+on one row. The resulting asymmetry between the two blocks is the point:
+what PHASE visibly lacks is what it is meant to lack. Same three rows as
+before, so nothing below moved.]**
 
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
@@ -2360,3 +2462,22 @@ It is worth expecting a third instance somewhere in this document.
   could not observe the transition it was about. A seam makes a rule
   reachable; it does not make a check correct. Ask what else could make it
   pass.
+  **Session 29 extended the covered half and sharpened the caution.**
+  Covered now as well: the arming buttons (`--arm phase|sync`, through
+  `set_arm`, the buttons' own callback body), and gestures as SEQUENCES —
+  `--arm` and `--click` share one ordered list, because a gesture is
+  arm-then-click-then-click and two separate lists could only express "all
+  the arming, then all the clicking", which is not any gesture an operator
+  makes.
+  **The sharpened caution is about SURVIVORS, not seams.** Thirteen
+  mutations against the new rules gave ten kills, one void and two
+  survivors, and the two survivors were the same kind of thing: not
+  equivalent mutants, not code to delete, but **rules that were only ever
+  exercised where they could not fail**. Dropping the zoom term from
+  `slant_error_ppm` survived because every measurement check ran at 100%
+  zoom, where the scale is 1.0 and the term is invisible; removing the
+  anchor-clearing from `set_arm` survived because nothing re-armed
+  mid-gesture, though the code's own comment claimed the rule. Both are now
+  checked. The lesson to carry: **a check that only ever runs at the
+  identity value of a parameter is not checking that parameter**, and a
+  claim made in a comment is not a claim under test.
