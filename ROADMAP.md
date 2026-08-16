@@ -979,6 +979,52 @@ Items 2–4 are one story told in three commits and should not be split
 across sessions if it can be helped: each is nearly useless without the
 next. Items 5, 6, 7 and 8 are independent and can be taken in any order.
 
+### Registered, not scheduled — the correction surface
+
+**Moved here session 29 after Sara asked whether per-line corrections
+were built and the answer took a code search to find.** These four were
+each registered in a SESSION-LOG entry and nowhere else, so the file that
+is supposed to answer "what is left" did not mention them and the log
+that did was scrolling away underneath them. They are not milestones and
+none is scheduled; they are here so that asking the question again costs
+a page-read instead of a grep.
+
+- **Per-line correction segments (Sara's, session 28).** Today one
+  correction covers the WHOLE chart: `Correction` in `live/engine.hpp` is
+  a flat `{phase_set, phase_frac, sync_set, sync_ppm}`, and Apply
+  re-renders the entire picture with it. Sara's proposal is a start
+  LINE — a correction applying only from that row down — so several
+  different fixes can be laid over one chart, which is what a recording
+  whose clock actually changes mid-transmission needs.
+  Shape if it is built: `Correction` becomes a list of
+  `{from_line, phase, ppm}`, and the re-decode walks it. **The gesture
+  for it already exists and already throws the data away**: session 29's
+  two-click SYNC knows both rows it measured between, so a measurement is
+  already "between row A and row B the slant is X" and only the rows are
+  discarded.
+  **Why it is not scheduled: it cannot be verified.** A clock step
+  mid-chart on a white-only station is undetectable by construction —
+  that is the same fact that makes the phasing anchor a fixed reference
+  rather than a tracked one (see the registered gaps below) — and no
+  library recording shows one. It needs a SYNTHETIC white-only fixture
+  with a step at a known line, built for the purpose, before there is any
+  way to tell a correct implementation from a plausible one.
+- **The pulse-station SYNC override.** On a station with per-line sync
+  the batch fit outranks the operator's ppm, by design [§7.1]. No
+  recording yet exists where the fit is wrong and the eye is right, so
+  there is nothing to justify letting the operator win — and building the
+  override without that evidence would be building on taste.
+- **Whether Zoom should keep the vertical ROW rather than the pixel
+  offset.** Changing zoom currently holds the column at the left edge and
+  the pixel offset vertically; holding the row instead may be what an
+  operator means. Untested either way, and a real question rather than a
+  defect.
+- **Template white-window robustness.** The pulse template's white window
+  is polluted when dark content follows the gap closely, which is what
+  produced session 26's false per-line locks. Seam admission fixed the
+  symptom; the template itself is the larger, later fix, and waits for
+  the library to show the need again.
+
 ## M4.5 — tuning aids  [pending; created session 17]
 - Spectrum / waterfall display [DECIDED 2026-08-13, Sara, session 17:
   cut from M4, ships here]. It is the one part of the M4 window that

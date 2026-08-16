@@ -153,12 +153,26 @@ background buffer and the compact receiving indicator), independent of all
 of the above and the one thing a by-hand run cannot observe, there being
 no second transmission — it also turns item 4's stand-in edit-end into the
 operator's own action. Or **item 7** (m4a input via runtime ffmpeg),
-independent of everything. Registered, not scheduled: per-line correction
-segments (`Correction` as a list of `{from_line, phase, ppm}`, needing a
-synthetic white-only fixture with a step at a known line); the
-pulse-station SYNC override (no recording yet exists where the fit is
-wrong and the eye is right); whether Zoom should keep the vertical ROW
-rather than the pixel offset; template white-window robustness.
+independent of everything.
+
+**Closing addendum — a registration that was not a registration.** Sara
+asked whether per-line corrections had been built. They have not; the
+answer took a code search, and finding out why exposed the real problem.
+Four things had been "registered, not scheduled" — per-line correction
+segments, the pulse-station SYNC override, Zoom holding the row rather
+than the pixel offset, and template white-window robustness — and every
+one of them was registered **in a SESSION-LOG entry and nowhere else.**
+ROADMAP, which is the file that answers "what is left", did not mention
+any of them, and the log that did is newest-first, so each was sinking
+further from the top with every session. A note in an append-only log that
+nothing indexes is a note that has been written down and lost at the same
+time. All four are now in ROADMAP under M4 as "Registered, not scheduled",
+with the reason each is unscheduled stated — for Sara's per-line idea,
+that the feature cannot be VERIFIED without a synthetic white-only fixture
+carrying a step at a known line, because such a step is undetectable by
+construction and no library recording has one. Worth noticing in passing:
+session 29's two-click gesture already computes exactly the datum that
+feature needs (a slant between two named rows) and discards the rows.
 
 ---
 
