@@ -14,6 +14,11 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
+**On Sara's machine that is 38 suites. From a fresh clone it is 8, and the
+other 30 report Skipped** — they need off-air recordings, which this
+repository does not carry and never will (see `fixtures/MANIFEST.md`, which
+holds every recording's identity and SHA-256). Nothing is broken when that
+happens; ctest prints "The following tests did not run" and names all 30.
 (36 test suites (+2 with the GUI): three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the

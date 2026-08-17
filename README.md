@@ -343,6 +343,21 @@ cmake --build build
 ctest --test-dir build
 ```
 
+**What you will see: 8 suites run, 30 report Skipped.** Nova's real-signal
+tests need off-air recordings of weather-fax broadcasts, and this
+repository does not redistribute them — the copyright of a transmitted
+chart varies by issuing meteorological service, and one of the stations in
+the set is a commercial news agency. `fixtures/MANIFEST.md` carries what
+can be published: every recording's station, provenance, format and
+SHA-256, alongside the pass/fail bounds, which live in `CMakeLists.txt`
+next to each test. So the claim being made — *this recording, this hash,
+decodes within these bounds* — is fully stated and checkable by anyone
+holding the same file.
+
+The 8 that run anywhere are not a token: they include the full
+{IOC 288, 576} × {60, 90, 120 lpm} synthetic matrix and the
+untrusted-input guards, which generate their own malformed files.
+
 **The decoder, the command-line tools and the whole test suite have no
 external dependencies.** FLTK and RtAudio are needed by the GUI binary
 alone (`nova-gui`), behind `option(NOVA_BUILD_GUI)`, which is ON by

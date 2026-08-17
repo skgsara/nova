@@ -81,6 +81,57 @@ add_executable(nova-preview cli/nova-preview.cpp)
 target_link_libraries(nova-preview PRIVATE nova-live)
 
 enable_testing()
+
+# The recordings are not in this repository and never will be: they are
+# off-air captures of broadcasts whose copyright varies by issuing service,
+# and in one case (JSC, Kyodo News) is a commercial newspaper's. What ships
+# instead is fixtures/MANIFEST.md — every fixture's identity, provenance and
+# SHA-256 — plus the bounds, which are in this file beside each test.
+#
+# 30 of the 38 suites need one of those recordings. From a checkout without
+# them they are still REGISTERED and reported Skipped, with the reason,
+# rather than quietly not existing — a suite that shrinks from 38 to 8 while
+# reporting a green run tells you nothing is wrong when two thirds of the
+# evidence is missing.
+#
+# Known limit of the mechanism, stated because the alternative is believing
+# it does more than it does: ctest counts a skipped test as passed in its
+# headline, so `ctest` still ends with "100% tests passed out of 38". What
+# carries the truth is the "The following tests did not run:" block printed
+# after it — 30 lines, each naming a suite — and the configure-time message
+# below. Making the skips FAIL instead would be louder and wrong: a checkout
+# without recordings is a supported state, not a broken one.
+#
+# The other 8 — the synthetic matrices, the ruler, the PNG round-trip, the
+# audio ring, the untrusted-input guards and the GUI layout — generate what
+# they need and run anywhere.
+set(NOVA_FIXTURE_SENTINEL
+    ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav)
+if(EXISTS ${NOVA_FIXTURE_SENTINEL})
+  set(NOVA_HAVE_FIXTURES ON)
+else()
+  set(NOVA_HAVE_FIXTURES OFF)
+  message(STATUS
+    "fixtures: ABSENT - 30 suites needing an off-air recording will be "
+    "SKIPPED (see fixtures/MANIFEST.md); 8 synthetic suites still run")
+endif()
+
+# Registers a suite that needs a recording. Present: a normal test. Absent:
+# a stub whose output ctest reads as a skip, so `ctest` reports 30 Skipped
+# and names the reason instead of reporting a smaller green run.
+function(nova_fixture_test)
+  cmake_parse_arguments(NFT "" "NAME" "COMMAND" ${ARGN})
+  if(NOVA_HAVE_FIXTURES)
+    add_test(NAME ${NFT_NAME} COMMAND ${NFT_COMMAND})
+  else()
+    add_test(NAME ${NFT_NAME} COMMAND ${CMAKE_COMMAND} -E echo
+      "SKIPPED: needs an off-air recording, which this repository does not \
+carry - see fixtures/MANIFEST.md for its identity and SHA-256")
+    set_tests_properties(${NFT_NAME} PROPERTIES
+                         SKIP_REGULAR_EXPRESSION "SKIPPED:")
+  endif()
+endfunction()
+
 add_executable(nova-test tests/test_roundtrip.cpp)
 target_link_libraries(nova-test PRIVATE nova-core)
 add_test(NAME roundtrip COMMAND nova-test)
@@ -103,7 +154,7 @@ target_link_libraries(nova-test-fixture PRIVATE nova-core)
 # The clean reference: a picture with nothing wrong with it must not acquire
 # jitter from a corrector meant for the ones that do (1.0 px measured, and
 # 0.84 px of place error, unchanged by session 11).
-add_test(NAME fixture COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav 120 115 125 -130 -40 0.95
   --expect-straight-strip 1.5 --expect-rigid-rows 3.0)
 # Session 7: line counts below are POST-SEGMENTATION — the start tone and
@@ -111,9 +162,9 @@ add_test(NAME fixture COMMAND nova-test-fixture
 # opens inside one decodes fewer lines than it holds. Both of these do:
 # 45 phasing lines in the first (its parent's phasing runs 72.5-102.5 s and
 # the cut is 80-140 s), 69 lines of start tone + phasing in the LPE one.
-add_test(NAME fixture_phasing_boundary COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_phasing_boundary COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-60s.wav 120 70 80 -130 -40 0.85)
-add_test(NAME fixture_lpe COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_lpe COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75)
 # The warp fixture is where session 11 shows most: this recording loses
 # ~1270 samples in one go, and until session 11 the assembly threw that
@@ -124,13 +175,13 @@ add_test(NAME fixture_lpe COMMAND nova-test-fixture
 # count as a correction level, so the clamp then walked the first REAL
 # measurement in at 0.03 lines a time and the first two drawn lines came out
 # 80.7 and 26.3 px out (place rms 5.72 -> 0.64, clamped 10 -> 0).
-add_test(NAME fixture_warp COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_warp COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
   --expect-straight-strip 2.0)
 # 60 lpm AND stepping: JSC1 inserts samples like the rest of its family, so
 # this fixture pins that the corrector works at the other line rate too
 # (place rms 3.81 -> 1.38 px, edge p90 4.0 -> 3.0).
-add_test(NAME fixture_60lpm COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_60lpm COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav 60 95 125 150 450 0.9
   --expect-straight-strip 3.5)
 # XSG FYCI 120-240 s: a phasing interval (12-42 s into the cut) followed by
@@ -140,7 +191,7 @@ add_test(NAME fixture_60lpm COMMAND nova-test-fixture
 # produces — the first drawn lines do not lock, so the place error reads
 # 0.13 px either way — and shows only in the picture, as eight lines sitting
 # 88.6 px from the rest of the chart.
-add_test(NAME fixture_picture_head COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_picture_head COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav 120 100 200 -130 -60 0.7
   --expect-straight-strip 1.5)
 # JMH KiwiSDR Himawari 340-460 s: the DROPOUT case, cut session 11b. The
@@ -161,7 +212,7 @@ add_test(NAME fixture_picture_head COMMAND nova-test-fixture
 # lives ONLY here: it asks what each row matches, and a resolution grating
 # matches its neighbour at several shifts by construction (the JMH test
 # chart reads 23 on a picture with nothing wrong with it).
-add_test(NAME fixture_dropout COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_dropout COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-dropout-120s.wav 120 230 245 -130 -40 0.9
   --expect-rows-in-place 1)
 # The false-lock fixture, cut session 26 from HLL 2147Z (Korea Met, 500 hPa
@@ -180,10 +231,10 @@ add_test(NAME fixture_dropout COMMAND nova-test-fixture
 # is unmeasurable by construction, because the same coastline that crowds
 # the gap also breaks the 12-light-pixel run the strip statistic looks
 # for.
-add_test(NAME fixture_false_locks COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_false_locks COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/hll-2147z-false-locks-40s.wav 120 75 82 -100 -40 0.7
   --expect-straight-porch 10.0)
-add_test(NAME fixture_white_sector COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_white_sector COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav 120 230 248 -90 0 0.0
   --expect-white-only)
 # Weak + white-only: the clock is the ONLY thing holding the picture
@@ -191,16 +242,16 @@ add_test(NAME fixture_white_sector COMMAND nova-test-fixture
 # window is chosen so the old coarse-only estimate fails it: session 5
 # measured -51.6 ppm coarse against -118.4 from the fold, and the fold
 # reads -117 +/- 1.5 ppm on every window of this recording.
-add_test(NAME fixture_weak_white COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_weak_white COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/gya-weak-white-120s.wav 120 200 220 -135 -95 0.0
   --expect-white-only)
-add_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
+nova_fixture_test(NAME fixture_fill_reject COMMAND nova-test-fixture --expect-reject
   ${CMAKE_SOURCE_DIR}/fixtures/stall-fill-15s.wav)
 # The phasing line-start anchor [WMO §5.2.3.4], asserted against the
 # decoded picture rather than against the anchor number — session 5's rule.
 # VMW is white-only: this phase does not exist anywhere else in the signal,
 # and with the image-derived anchor the chart came out rotated by 520 px.
-add_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav 120 240 250 -90 -50 0.0
   --expect-phasing-anchor)
 # Session 8: the two independent anchors must agree, on a PULSE station,
@@ -214,7 +265,7 @@ add_test(NAME fixture_phasing_anchor COMMAND nova-test-fixture
 # a line out, and both tests fail. The obvious third candidate,
 # test-chart-jmh-kiwisdr-60s.wav, is NOT used here — its run is 45 lines,
 # and an odd run is the one case that bug cannot reach.
-add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
+nova_fixture_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav 120 46 56 -130 -40 0.75
   --expect-anchor-delta -125 -25)
 # Session 10: the drawn-line band moved 138-148 -> 128-140 because the
@@ -228,7 +279,7 @@ add_test(NAME fixture_anchor_delta_jmh COMMAND nova-test-fixture   # 5/95
 # into the phasing region, where the template anchors half a dead sector
 # away [WMO §5.2.3.1]. It did, so the first drawn lines were placed at the
 # control signal's phase and then jumped 88.6 px into the picture.
-add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
+nova_fixture_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-phasing-image-100s.wav 120 128 140 -130 -60 0.85
   --expect-anchor-delta -160 -55 --expect-straight-strip 3.5)
 # Session 9: is the recording's timebase the straight line everything
@@ -259,10 +310,10 @@ add_test(NAME fixture_anchor_delta_xsg COMMAND nova-test-fixture   # 50/50
 # locked, so nothing here is excused by a weak signal — the pre-session-11
 # assembly still left 2.89 px of place error on it, which is the flat
 # +/-8-line median lagging every step. 1.42 px now.
-add_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_timebase_steps COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc2-steps-120s.wav 120 230 245 150 450 0.95
   --expect-timebase steps --expect-straight-strip 1.5 --expect-rigid-rows 3.0)
-add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-jmh-warp-120s.wav 120 230 248 -130 -40 0.85
   --expect-timebase linear)
 # Session 10: GYA 2300Z's first 120 s, which carry a REAL 40-line phasing
@@ -291,7 +342,7 @@ add_test(NAME fixture_timebase_linear COMMAND nova-test-fixture
 # truth in `tones [13]`.
 # 7.00-22.00 s is corroborated by the tone detector, which shares no code
 # with this: the start tone ends at 7.00 s.
-add_test(NAME fixture_phasing_two_openings COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_phasing_two_openings COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
   120 70 85 -40 40 0.85 --expect-phasing-window 7.0 22.0)
 # Session 10, the real one-skip case: JMH KiwiSDR Himawari's first 120 s.
@@ -302,10 +353,10 @@ add_test(NAME fixture_phasing_two_openings COMMAND nova-test-fixture
 # on the SIZE of the residual rather than on counted persistent moves
 # over-rules them. Cut at 120 s so the image witness clears its 128-line
 # floor and can be the one that answers.
-add_test(NAME fixture_phasing_one_skip COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_phasing_one_skip COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/himawari-kiwisdr-phasing-jump-120s.wav
   120 155 175 -130 -40 0.85 --expect-timebase linear)
-add_test(NAME fixture_faded_phasing COMMAND nova-test-fixture
+nova_fixture_test(NAME fixture_faded_phasing COMMAND nova-test-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav 120 185 200 -135 -95 0.0
   --expect-white-only --expect-phasing-lines 30 --expect-timebase noisy)
 
@@ -339,16 +390,16 @@ add_test(NAME hooks COMMAND nova-test-hooks)
 # The --expect-none case is the false-start trap on real newspaper text.
 add_executable(nova-test-tones-fixture tests/test_tones_fixture.cpp)
 target_link_libraries(nova-test-tones-fixture PRIVATE nova-core)
-add_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
+nova_fixture_test(NAME tones_fixture_vmw COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-start-phasing-100s.wav
   --expect-start 56.88 1.0 --expect-phasing 120 50 40)
-add_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
+nova_fixture_test(NAME tones_fixture_no_false_start COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/kyodo-news-jsc1-60lpm-120s.wav --expect-none)
 # The library's only real STOP tone, cut session 21 from NMC 2204Z: the
 # signal that ENDS a transmission, which every fixture before this one
 # lacked, and which fades to nothing for 0.88 s in its middle — the
 # gap-bridging rule meeting a real fade instead of a generated one.
-add_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
+nova_fixture_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
   ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
   --expect-stop 111.38 1.0)
 
@@ -372,7 +423,7 @@ add_test(NAME ruler_mapping COMMAND nova-test-ruler)
 # overlap rather than assuming it. Unguarded: no window, no audio device.
 add_executable(nova-test-live-equiv tests/test_live_equiv.cpp)
 target_link_libraries(nova-test-live-equiv PRIVATE nova-live)
-add_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
+nova_fixture_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav)
 
 # §9 screamer 2 [docs/05]: the streaming tone detector reaches the same
@@ -395,7 +446,7 @@ add_test(NAME live_demod_equiv COMMAND nova-test-live-equiv
 # Unguarded: no window, no audio device.
 add_executable(nova-test-live-preview tests/test_live_preview.cpp)
 target_link_libraries(nova-test-live-preview PRIVATE nova-live)
-add_test(NAME live_preview COMMAND nova-test-live-preview
+nova_fixture_test(NAME live_preview COMMAND nova-test-live-preview
   ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav
@@ -417,7 +468,7 @@ add_test(NAME live_preview COMMAND nova-test-live-preview
 
 add_executable(nova-test-live-tones tests/test_live_tones.cpp)
 target_link_libraries(nova-test-live-tones PRIVATE nova-live)
-add_test(NAME live_tones COMMAND nova-test-live-tones
+nova_fixture_test(NAME live_tones COMMAND nova-test-live-tones
   ${CMAKE_SOURCE_DIR}/fixtures/faxsignal-two-openings-70s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/nmc-image-stop-tone-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/gya-faded-phasing-120s.wav
@@ -446,7 +497,7 @@ target_link_libraries(nova-test-live-session PRIVATE nova-live)
 # two-openings case, and the library's only real stop tone, which carries
 # the forced-start, operator-stop, no-opening and page-cap cases too.
 # Unguarded: no window, no audio device.
-add_test(NAME live_session COMMAND nova-test-live-session
+nova_fixture_test(NAME live_session COMMAND nova-test-live-session
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/xsg-fyci-phasing-head-120s.wav
@@ -479,7 +530,7 @@ set_tests_properties(png_roundtrip PROPERTIES SKIP_RETURN_CODE 77)
 # device, and the only file it writes is under the build tree.
 add_executable(nova-test-live-engine tests/test_live_engine.cpp)
 target_link_libraries(nova-test-live-engine PRIVATE nova-live)
-add_test(NAME live_engine COMMAND nova-test-live-engine
+nova_fixture_test(NAME live_engine COMMAND nova-test-live-engine
   ${CMAKE_CURRENT_BINARY_DIR}
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-60s.wav)
@@ -497,11 +548,11 @@ add_test(NAME live_ring COMMAND nova-test-ring)
 # Unguarded: no window, no audio device; the decoy fixture is generated.
 add_executable(nova-test-overrides tests/test_overrides.cpp)
 target_link_libraries(nova-test-overrides PRIVATE nova-core)
-add_test(NAME override_phase_seed COMMAND nova-test-overrides phase
+nova_fixture_test(NAME override_phase_seed COMMAND nova-test-overrides phase
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav)
-add_test(NAME override_sync_fallback COMMAND nova-test-overrides sync
+nova_fixture_test(NAME override_sync_fallback COMMAND nova-test-overrides sync
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav)
@@ -583,7 +634,7 @@ if(NOVA_BUILD_GUI)
     # engine. It still opens no audio device and no window, and the only
     # thing it writes is under the build tree — `--feed` REFUSES without an
     # explicit folder, which is itself one of the checks.
-    add_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
+    nova_fixture_test(NAME gui_shell COMMAND ${CMAKE_COMMAND}
       -DNOVA_GUI=$<TARGET_FILE:nova-gui>
       -DNOVA_FIXTURE=${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
       -DNOVA_TMP=${CMAKE_CURRENT_BINARY_DIR}/gui-shell-capture

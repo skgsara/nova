@@ -16,13 +16,21 @@ Thumbs.db
 *.swp
 *~
 
-# Raw recordings and licensed standards NEVER enter this repo.
-# Ground-truth recordings live in ../ (outside the repo); only trimmed
-# WAV excerpts under fixtures/ are committed.
+# Recordings and licensed standards NEVER enter this repo.
+#
+# Until session 32 this carved out an exception: "only trimmed WAV excerpts
+# under fixtures/ are committed". Audit Pass B found the cost of that
+# exception — 19 off-air excerpts were tracked with no redistribution basis
+# stated for any of them, and one station (JSC) is Kyodo News, a commercial
+# newspaper. The exception is gone and the audio was removed from history.
+# What ships is fixtures/MANIFEST.md: identity, provenance and SHA-256 of
+# each recording, with the bounds in CMakeLists.txt beside each test.
 recordings/
+*.wav
 *.m4a
 *.mp3
 *.flac
+*.aiff
 *.pdf
 *.tar.bz2
 
