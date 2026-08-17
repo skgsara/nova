@@ -1,0 +1,278 @@
+# 06 — Audit protocol, Gate 0
+
+Prepared 2026-08-16 against tree revision `893bdd9` (session 31, clean).
+**Status: partially filled. Three rows still need Sara.** No pass has
+run, and nothing in this file is an audit finding — Gate 0 preparation
+is not a pass.
+
+The protocol requires the human to verify every value against the
+physical documents and real hardware before any pass runs. The rows
+below marked **NEEDS SARA** cannot be closed from the source tree at
+all; the rows marked *decided* were decided by Sara on 2026-08-16 and
+still want her eye on the values themselves.
+
+---
+
+## 0. Auditor identity — decided
+
+The protocol states the auditing agent MUST NOT be the agent that
+authored the code. Claude authored all of it across 31 sessions, which
+disqualifies it from Passes A, C, D and E.
+
+**Decision (Sara, 2026-08-16): passes run in fresh sessions under a
+different model.** Claude stays out of A, C, D and E entirely, and picks
+the work back up at remediation, which the protocol already defines as a
+separate, later, human-directed activity. Gate 0 authoring — this file —
+is not a pass and is not covered by the constraint.
+
+Each pass session gets: the source tree, the reference documents, the
+fixture set, the protocol, and the structured outputs of its
+prerequisite passes. It does **not** get `SESSION-LOG.md`, `AGENTS.md`,
+commit messages, or any authoring transcript.
+
+**Pass B is the sole exception to that document restriction** and may
+read all of them, for provenance evidence only. It is **not** an
+exception to the authorship rule: the protocol's bar on the agent that
+authored the code has no exception anywhere, so Pass B also needs a
+non-authoring agent. Knowledge Pass B gains from transcripts must not
+be imported into any other pass.
+
+Note for whoever runs the passes: the tree contains a great deal of the
+authoring agent's own prose — `docs/01` holds the WMO clause citations,
+`docs/02` holds the ISO applicability map. Those are the *subject* of
+Pass A, not evidence for it. A.1's "specified" column must come from the
+WMO document itself, never from `docs/01`.
+
+---
+
+## 1. Values the tree settles
+
+| Parameter | Value | Evidence |
+|---|---|---|
+| LICENSE_DECISION | **GPL-3.0-or-later** | `LICENSE` is the GPLv3 text; `NOTICE` and `README.md:336` both state GPLv3+. Already a fact in the tree. |
+| PRIOR_ART_LANE | **B-COPYLEFT** | Derived from the above per the protocol, not chosen. Prior-art reading is permitted; the obligation is attribution hygiene. |
+| ISO_9876_EDITION | **2015 (Edition 3)** | `ISO_9876_2015(en).pdf` held outside the repo; `docs/01` and `docs/02` cite 2015 throughout. |
+| AUDIO_INPUT_RATE | **8000 Hz, mono, 16-bit** | Read from the fixture WAV headers (offset 22 = 1 channel, offset 24 = 8000). All 19 fixtures share this shape. This is the *fixture* rate; the live capture rate through RtAudio is a separate number and is not pinned anywhere. |
+| FIXTURE_SET | **`nova/fixtures/`, 19 trimmed WAV excerpts** | Committed in-tree. Distinct from the 20-recording ground-truth library in the parent directory, which is gitignored. Both numbers appear in the docs — an auditor must not conflate them. |
+| RECEIVER_MANUALS | **16 manuals; revisions NOT recorded** | `../Weather Fax Receiver Manuals/`: Furuno FAX-30, FAX-207, FAX-208A, FAX-210, FAX-214, FAX-408; JRC JAX-91, JAX-9B; Nagra FAX-DM; OMC 62610H/FAX-410; OME 62600L1/FAX-30; Samyung SFAX-500, SFX-100; Sony CRF-V21; Steamrock SR-97; Taiyo TF-711. **Incomplete** — the protocol asks for model *and revision*. |
+
+---
+
+## 2. TARGET_FLOOR — decided in shape, needs values
+
+**Decision (Sara, 2026-08-16): old hardware is not a goal.** The floor is
+set to what Nova actually supports, and the unsupported platform tiers
+come out of the README.
+
+The finding that drove it: **there is no old-hardware target anywhere in
+this project.** The build sets no `-march` or `-mtune`;
+`CMAKE_CXX_STANDARD 17` is the only constraint. Everything has only ever
+been built and run on macOS arm64 (`build/nova-decode: Mach-O 64-bit
+executable arm64`). No 32-bit build has ever been attempted. Filling a
+Pentium III floor would not have described Nova — it would have imposed
+a new requirement, and Pass D would have measured against a floor
+nothing was written for.
+
+**Proposed values, for Sara to confirm:**
+
+| Parameter | Proposed | Note |
+|---|---|---|
+| TARGET_FLOOR_ARCH | 64-bit little-endian: x86-64 (baseline, no AVX) and AArch64 | No sub-baseline extensions are relied on today because none are requested. Pass D still verifies the compiler does not *emit* above-baseline instructions. |
+| TARGET_FLOOR_CPU | **NEEDS SARA** — a named part on each of the two | Only needed as a name, since no benchmark is being run. |
+| TARGET_FLOOR_RAM | **NEEDS SARA** | Still worth a real number: it is the bound A.3's malformed-input testing measures against, and that matters regardless of CPU age. Peak is driven by full-chart buffering at IOC 576 — measurable today. |
+| REALTIME_BUDGET | **NEEDS SARA** | Under this decision it is no longer the thing that justifies breaking KISS, but a live decoder still has a real-time requirement. Suggested form: a percentage of one core at 120 LPM, IOC 576, measured on the machine Nova actually runs on. |
+| BENCH_METHOD | **Not required** | Moot under this decision. Pass D reports no PERF figures and says so in its "what this pass did not cover" statement. |
+
+**Pending remediation, independent of the values above:** `README.md`
+claims Tier 1 *"release-tested: Windows 64-bit, macOS (universal), Linux
+x86_64"* and Tier 2 *"CI-built, community-tested: 32-bit Windows/Linux,
+ARM, FreeBSD"*. There is no CI and no git remote (`git remote -v` is
+empty), and no platform other than macOS arm64 has ever been built. Those
+claims are unsupported under every option and are struck.
+
+---
+
+## 3. FIXTURE_COMPARE — decided, and rewritten around the suite
+
+**Decision (Sara, 2026-08-16): state the policy in terms of the property
+assertions the suite actually makes.** No golden-image set is built.
+
+The protocol as written assumes each fixture has an expected output
+image, hashed. **No such artifact exists** — there are no stored golden
+images and no hashes anywhere in `tests/` or `CMakeLists.txt`. Nova's
+suite is screamers: numeric bounds on measured properties of the decoded
+picture, several of which share no code with the decoder.
+
+### The policy
+
+For each fixture, the comparison is the bound set registered with its
+`add_test` in `CMakeLists.txt`, in the form
+
+```
+nova-test-fixture <path> <lpm> <min_lines> <max_lines>
+                  <clock_lo_ppm> <clock_hi_ppm> <min_locked_frac>
+                  [--expect-* ...]
+```
+
+A fixture PASSES when the decode reports a line rate equal to `<lpm>`, a
+drawn-line count within `[min_lines, max_lines]`, a clock within
+`[clock_lo_ppm, clock_hi_ppm]`, a locked-line fraction at or above
+`<min_locked_frac>`, and every `--expect-*` predicate satisfied. Those
+predicates are the picture-domain checks and carry their own numeric
+bounds — `--expect-straight-strip N` (90th percentile row-to-row move of
+the dead-sector edge, in finished pixels), `--expect-straight-porch N`,
+`--expect-rigid-rows N`, `--expect-rows-in-place N`,
+`--expect-anchor-delta LO HI`, `--expect-phasing-window LO HI`,
+`--expect-phasing-lines N`, `--expect-timebase linear|steps|noisy`,
+`--expect-white-only`, `--expect-phasing-anchor`, `--expect-reject`.
+
+**This policy is architecture-independent by construction**, which
+resolves the problem the protocol's FIXTURE_COMPARE row was written to
+solve. The bounds are tolerances on measured physical quantities, not
+byte patterns, so x87/SSE divergence cannot produce a spurious failure
+and no separate canonical-versus-floor comparison rule is needed. The
+protocol's warning that a strict-hash requirement on an x87 build is a CI
+defect does not apply, because no strict hash exists.
+
+**What this policy gives up, recorded because it is a knowing trade:** a
+change that alters output pixels while keeping every measured property
+inside its bounds will not be caught. The bounds were each set below the
+measured value and above what the previous code achieved, so a
+regression to a known-worse behaviour fails — but an unintended change
+that is merely *different* can pass. A golden-image tripwire was the
+option that would have caught it and was declined.
+
+### Coverage against A.3's required list
+
+A.3 requires the fixture set to cover, at minimum: both IOC values,
+every supported line rate, a clean signal, a fading/noisy signal, a
+signal with a missed or corrupted phasing block, and a truncated
+transmission. From the registrations, with the gaps the project has
+already registered itself:
+
+| Required | Covered by | Status |
+|---|---|---|
+| IOC 576 | most fixtures | yes |
+| IOC 288 | — | **gap** — `docs/02` registers "real 675 Hz fixture remains a registered gap"; synthetic only |
+| 60 lpm | `fixture_60lpm` (JSC1) | yes |
+| 90 lpm | — | **gap** — `docs/02` registers "real 90 lpm fixture remains a registered gap"; synthetic only |
+| 120 lpm | many | yes |
+| clean signal | `fixture` (JMH KiwiSDR test chart) | yes |
+| fading / noisy | `fixture_weak_white` (GYA), `fixture_faded_phasing` | yes |
+| corrupted phasing | `fixture_faded_phasing`, `himawari-kiwisdr-phasing-jump`, `fixture_phasing_two_openings` | yes |
+| truncated transmission | — | **unclear** — `fixture_fill_reject` covers a stall, not a truncation. Pass A should determine whether any fixture opens or closes mid-transmission in the sense A.3 means. |
+
+These are Pass A's to verify and re-register; they are listed here only
+so Gate 0 is not filled in ignorance of them.
+
+### A naming collision that will derail a pass if it is not flagged
+
+A.3's "mutation testing" means **corrupting the fixture audio** — bit
+flips, truncation, head/tail splicing, silence injection — and requiring
+the decoder not to crash, hang, or grow unboundedly.
+
+Nova's own long-standing discipline, referred to throughout
+`SESSION-LOG.md` and `ROADMAP.md` as "mutation testing", means the
+opposite direction: **mutating the source** to prove a test fails when
+the code is broken.
+
+These are two different activities with the same name. An auditor
+reading the project's language will find extensive evidence of "mutation
+testing" and may credit it against A.3, which it does not satisfy at
+all. **A.3's input-corruption testing does not exist in this project.**
+The nearest thing is `fixture_fill_reject`, a single hand-made stall
+case. Building it is real, unstarted work.
+
+---
+
+## 4. NEEDS SARA — the remaining rows
+
+### WMO_386_EDITION — the highest-stakes row
+
+The protocol pins this as unquestionable fact and warns that if Part
+III-5 is not where the facsimile specification lives, every Tier 1
+citation degrades. Two separate checks against the paper:
+
+1. **Which edition is normative.** The project does not pin one.
+   `docs/01` and `NOTICE` both say the citations were verified against
+   the 2009 *and* 2023 editions and found identical in the checked
+   sections. Both PDFs are on disk (`386_2023-edition_en.pdf`,
+   `WMO_386_Vol_I_2009_en.pdf`), both gitignored via `*.pdf`.
+   *Suggested:* pin **2023** as normative and keep 2009 as the
+   corroborating check — stronger than the protocol asks, and it matches
+   what was actually done. But the protocol wants one pin, so name one.
+2. **Whether "Part III-5" and the project's "Vol. I, Part III, §5" are
+   the same location.** The project cites as `WMO §5.1.2`, meaning
+   section 5 of Part III; the protocol's form is `WMO386:III-5 §x.y`.
+   Probably the same thing said two ways — and "probably" is exactly
+   what this row exists to eliminate. If they diverge, every citation in
+   `docs/01`, `docs/02` and the README needs re-anchoring.
+
+### MAX_FUNCTION_LINES / MAX_NESTING_DEPTH
+
+Context so the number is not arbitrary: `core/` is 3999 lines total and
+`core/fax.cpp` alone is 1965 of them — roughly half the core in one
+file. That is where a threshold will bite. The protocol is right that
+"reasonable length" is not auditable, but a threshold picked without
+looking at the distribution just generates noise.
+
+### RECEIVER_MANUALS revisions
+
+Sixteen title pages to read.
+
+---
+
+## 5. Things already visible that the passes will hit
+
+Not findings — no pass has run, and this file's author is not the
+auditor. Recorded because they bear on how Gate 0 is filled.
+
+1. **No CI, no remote.** A.3 requires confirming the fixture set runs in
+   CI with failures blocking the build; Pass E requires the same. The
+   repo is local-only. There is nothing to audit, and both passes will
+   register it.
+2. **The README's Platforms section claims testing that has not
+   happened.** See §2. Likely load-bearing for Pass E as a public claim
+   about verification.
+3. **`docs/02` is already in the shape A.2 demands.** A.2 forbids a
+   global "conforms to ISO 9876:2015" statement; `docs/02` is a
+   clause-by-clause applicability map with hardware-only exclusions
+   listed as decisions, and both it and the README say "designed to
+   satisfy … no claim of certified compliance". Whether each row's
+   verdict is *correct* is Pass A's job.
+4. **`NOTICE` carries a lineage ledger but no version pins.** It names
+   ACfax, HamFax, weatherfax_pi, KiwiSDR FAX, JWX, Isobar and fldigi
+   with stated licences and an explicit "idea-level reuse, no code
+   taken" claim. B-COPYLEFT step 1 asks for the exact upstream
+   version/commit examined and the licence **as stated in that version's
+   file headers**. `NOTICE` asserts licences instead, and records no
+   version or commit for any of the seven. The protocol's specific
+   concern is a **GPLv2-only** upstream, which would be incompatible
+   with GPLv3+ publication of a derivation; the ledger records GPLv2+
+   for ACfax, HamFax and JWX, but from assertion rather than headers.
+5. **No fixture has a stated redistribution basis.** B.0 requires one per
+   fixture, and says fixtures without a basis must not ship. The 19
+   committed excerpts derive from JMH (Japan), VMW (Australia), XSG
+   (China), GYA (France), NMC (USA), HLL (Korea) and JSC (Kyodo News —
+   a commercial newspaper facsimile, the most likely of the set to have
+   no basis at all). Nothing in the tree states a basis for any of them.
+
+---
+
+## 6. Order of work
+
+1. ~~Floor decision~~ — decided, §2. Values still to confirm.
+2. ~~FIXTURE_COMPARE~~ — decided and written, §3.
+3. Verify the WMO pin against the paper: edition, and Part III-5.
+4. Read the 16 manual revisions off their title pages.
+5. Pick the two Pass C thresholds.
+6. **Run Pass B first, not Pass A.** All its inputs exist today and it
+   carries the critical-severity legal outcome.
+   **Correction to an earlier draft of this file:** Pass B is *not*
+   exempt from the authorship constraint. The protocol's exception is to
+   the DOCUMENT-ACCESS clause only — Pass B may read authoring
+   transcripts, session logs and full git history, for provenance
+   evidence. The clause barring the agent that authored the code has no
+   exception anywhere in the protocol, so Pass B needs a non-authoring
+   agent exactly as A, C, D and E do. It is first because its inputs are
+   ready, not because it is easier to staff.

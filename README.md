@@ -289,8 +289,15 @@ for the milestone map.
 
 ## Platforms
 
-Tier 1 (release-tested): Windows 64-bit, macOS (universal), Linux x86_64.
-Tier 2 (CI-built, community-tested): 32-bit Windows/Linux, ARM, FreeBSD.
+**Built and tested on macOS arm64 only.** That is the whole of it: there
+is no CI, and no other platform has been built, so any claim about one
+would be a guess. The decoder, the command-line tools and the test suite
+are plain C++17 with no external dependencies, which is a reason to
+expect other 64-bit platforms to work — not evidence that they do.
+Reports from anywhere else are welcome.
+
+No 32-bit build has been attempted, and nothing here is written against
+an old-hardware floor.
 
 ## Build
 

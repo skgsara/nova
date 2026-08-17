@@ -129,5 +129,7 @@ cut session 21 so the signal that ENDS a transmission is in the library:
 - `docs/03` — pre-M4 standards/provenance/GUI-readiness audit
 - `docs/04` — commercial receiver UI survey; the M4 design decisions
 - `docs/05` — the M4 shell design (all questions decided, session 17)
+- `docs/06` — the audit protocol's Gate 0, DRAFT: values gathered from
+  the tree, and the rows only Sara can close. No pass has run.
 - `ROADMAP.md` — milestones, done vs pending
 - `SESSION-LOG.md` — newest first, append-only, tracked in git
