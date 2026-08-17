@@ -14,12 +14,14 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-(35 test suites (+2 with the GUI): three synthetic matrices + 22
+(36 test suites (+2 with the GUI): three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually
 running + the audio ring + the PNG round-trip under an independent
-decoder + the two operator corrections behaving asymmetrically;
+decoder + the two operator corrections behaving asymmetrically + the
+untrusted-input guards, which generate their own malformed files and read
+no recording at all;
 `gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 See the M4 shell, if FLTK and RtAudio are installed — the full window,
 and since session 23 with the live decode behind it: `./build/nova-gui`

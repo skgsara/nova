@@ -34,9 +34,21 @@ void wr_u16(std::ostream& s, uint16_t v) {
 
 }  // namespace
 
+// Nyquist on the white frequency: WEFAX white is 2300 Hz [WMO §5.3.1.2],
+// so a stream sampled at or below 4600 Hz cannot represent the signal at
+// all and is not a recording of one. The upper bound is a sanity limit
+// rather than a standards one — no capture device reaches it. Without the
+// lower bound a declared rate of 1 Hz drives resample() to an 8000x
+// output size [audit Pass D, D-PERF-002].
+constexpr uint32_t kMinRateHz = 4600;
+constexpr uint32_t kMaxRateHz = 768000;
+
 Wav read_wav(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open " + path);
+    f.seekg(0, std::ios::end);
+    const std::streamoff file_bytes = f.tellg();
+    f.seekg(0, std::ios::beg);
     char tag[4];
     f.read(tag, 4);
     if (std::memcmp(tag, "RIFF", 4) != 0)
@@ -65,8 +77,19 @@ Wav read_wav(const std::string& path) {
             if (size > 16) f.seekg(size - 16, std::ios::cur);
             have_fmt = true;
         } else if (std::memcmp(tag, "data", 4) == 0) {
-            data.resize(size);
-            f.read(reinterpret_cast<char*>(data.data()), size);
+            // A chunk header is not evidence that its bytes exist. Clamp
+            // the declared size to what is actually left in the file: a
+            // 144-byte file declaring 4 GB otherwise allocates 4 GB and
+            // zero-fills it, which is 144 bytes of input turning into
+            // gigabytes of resident memory [audit Pass D, D-PERF-001].
+            const std::streamoff here = f.tellg();
+            const uint64_t left =
+                (here < 0 || here > file_bytes) ? 0
+                                                : uint64_t(file_bytes - here);
+            const size_t want = static_cast<size_t>(std::min<uint64_t>(size, left));
+            data.resize(want);
+            f.read(reinterpret_cast<char*>(data.data()),
+                   static_cast<std::streamsize>(want));
             have_data = true;
         } else {
             f.seekg(size + (size & 1), std::ios::cur);  // chunks are padded
@@ -75,6 +98,11 @@ Wav read_wav(const std::string& path) {
     if (!have_fmt || !have_data)
         throw std::runtime_error("malformed WAV (missing fmt/data): " + path);
     if (channels < 1) throw std::runtime_error("WAV with 0 channels: " + path);
+    if (rate < kMinRateHz || rate > kMaxRateHz)
+        throw std::runtime_error(
+            "implausible WAV sample rate (" + std::to_string(rate) +
+            " Hz; WEFAX needs more than twice the 2300 Hz white tone): " +
+            path);
 
     Wav w;
     w.sample_rate = static_cast<int>(rate);

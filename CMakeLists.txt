@@ -317,6 +317,15 @@ add_executable(nova-test-tones tests/test_tones.cpp)
 target_link_libraries(nova-test-tones PRIVATE nova-core)
 add_test(NAME tones COMMAND nova-test-tones)
 
+# Untrusted-input screamers, session 32, after audit Pass D measured a
+# 144-byte file reaching ~12.9 GB of footprint and a WELL-FORMED file with a
+# 1 Hz rate hanging in the resampler. Reads no fixture and generates its own
+# inputs, deliberately: it is the one suite that must run from any checkout,
+# including one with no recordings in it.
+add_executable(nova-test-malformed tests/test_malformed.cpp)
+target_link_libraries(nova-test-malformed PRIVATE nova-core)
+add_test(NAME malformed COMMAND nova-test-malformed)
+
 # M4 seam screamers: structured decode errors, log/progress callbacks,
 # cooperative cancellation (docs/03 "Small core changes").
 add_executable(nova-test-hooks tests/test_hooks.cpp)
@@ -567,7 +576,7 @@ if(NOVA_BUILD_GUI)
     # and the two-click slant. Driven through --state / --metrics /
     # --click / --nudge / --then-state, so it needs no window and no
     # audio device; guarded with nova-gui, the second of the two
-    # in "35 (+2 with the GUI)".
+    # in "36 (+2 with the GUI)".
     # NOVA_FIXTURE and NOVA_TMP arrived with session 31's offline capture:
     # §8.2's receiving indicator needs a transmission arriving behind an
     # edit, so this suite now feeds a real recording through the real
