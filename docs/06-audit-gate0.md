@@ -208,13 +208,41 @@ citation degrades. Two separate checks against the paper:
    what this row exists to eliminate. If they diverge, every citation in
    `docs/01`, `docs/02` and the README needs re-anchoring.
 
-### MAX_FUNCTION_LINES / MAX_NESTING_DEPTH
+### MAX_FUNCTION_LINES / MAX_NESTING_DEPTH — decided
 
-Context so the number is not arbitrary: `core/` is 3999 lines total and
-`core/fax.cpp` alone is 1965 of them — roughly half the core in one
-file. That is where a threshold will bite. The protocol is right that
-"reasonable length" is not auditable, but a threshold picked without
-looking at the distribution just generates noise.
+**MAX_FUNCTION_LINES = 80. MAX_NESTING_DEPTH = 4.** (Sara, 2026-08-16.)
+The protocol's own example values, chosen against the measured
+distribution rather than by default.
+
+Distribution across 168 functions in `core/ live/ cli/ gui/`, measured
+2026-08-16 by brace-depth scan (heuristic — it keys on a signature
+pattern at column 0, so it will miss some definitions and may merge
+others; good enough to set a threshold against, not a census):
+
+| | lines |
+|---|---|
+| median | 13 |
+| p75 | 36 |
+| p90 | 102 |
+| max | 416 |
+
+Functions over each candidate threshold: >60 → 28 (17%), **>80 → 24
+(14%)**, >100 → 17 (10%), >150 → 6 (4%).
+
+The longest, which Pass C will certainly reach: `stage_assembly`
+(`core/fax.cpp:1512`, 416), `main` (`gui/nova-gui.cpp:3174`, 397),
+`detect_phasing` (`core/phasing.cpp:180`, 297), `LiveEngine::collect_batch`
+(`live/engine.cpp:661`, 186), `main` (`cli/nova-decode.cpp:45`, 178),
+`stage_dead_sector` (`core/fax.cpp:607`, 175).
+
+### Pass auditor model — decided
+
+**Sonnet 5** runs Passes A, C, D and E, each in a fresh session with no
+rationale, no session log, no commit messages. Cross-verification
+afterwards must use a third model different from both Opus 5 and
+Sonnet 5.
+
+### RECEIVER_MANUALS revisions
 
 ### RECEIVER_MANUALS revisions
 
@@ -266,8 +294,29 @@ auditor. Recorded because they bear on how Gate 0 is filled.
 3. Verify the WMO pin against the paper: edition, and Part III-5.
 4. Read the 16 manual revisions off their title pages.
 5. Pick the two Pass C thresholds.
-6. **Run Pass B first, not Pass A.** All its inputs exist today and it
-   carries the critical-severity legal outcome.
+6. **Pass B carries the critical-severity legal outcome, but it cannot
+   run today — its corpus is missing.** B-COPYLEFT step 1 requires the
+   exact upstream version/commit of each prior-art project and the
+   licence **as stated in that version's file headers**. Of the six
+   external projects `NOTICE` names, exactly one is on disk:
+   `../JWX_source.tar.bz2`. ACfax, HamFax, weatherfax_pi, the KiwiSDR
+   FAX extension and fldigi are all absent, as is Isobar, Sara's own
+   prior work. Headers cannot be read from sources that are not there,
+   and `NOTICE`'s licence claims are precisely what Pass B exists to
+   check rather than to trust.
+   **Corpus assembly is a prerequisite, not part of the pass** — and it
+   is work the authoring agent may do, since fetching sources is not
+   auditing them.
+   *(Corrects an earlier draft of this file, which said all of Pass B's
+   inputs existed today. They do not.)*
+   **Assembled 2026-08-16**, all six projects, pinned and checksummed:
+   `../prior-art-corpus/`, with `CORPUS-MANIFEST.md` recording source
+   URL, commit or version, and size for each. It sits OUTSIDE the git
+   repository so it cannot be committed by accident. Isobar was left
+   unextracted and its location noted instead. Pass B is unblocked.
+
+7. **Pass C is the one that can start immediately** — it needs only the
+   two Gate 0 thresholds and the source tree. Nothing else blocks it.
    **Correction to an earlier draft of this file:** Pass B is *not*
    exempt from the authorship constraint. The protocol's exception is to
    the DOCUMENT-ACCESS clause only — Pass B may read authoring
