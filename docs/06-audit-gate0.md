@@ -274,6 +274,50 @@ Sixteen title pages to read.
 
 ---
 
+## 4b. History rewrite, 2026-08-16 — recorded because it invalidates SHAs
+
+Pass B's B-RISK-013 (critical, load-bearing) found 19 off-air recordings
+tracked in git with no redistribution basis stated for any of them, one of
+them from a commercial news agency. **Sara's decision: the library stays
+private.** The audio was removed from all history.
+
+| | before | after |
+|---|---|---|
+| HEAD | `330d408` | `aeff6a3` |
+| commits | 69 | 69 |
+| `.git` | 38 MB | 1.1 MB |
+| `.wav` across all refs | 19 | **0** |
+
+Command: `git filter-repo --path-glob 'fixtures/*.wav' --invert-paths`.
+The narrower glob rather than `--path fixtures/`, so `fixtures/MANIFEST.md`
+survives. All **seven** branches were rewritten, `main` included — it
+carried 17 of the recordings and would have kept them had only the working
+branch been filtered.
+
+Backup before the rewrite:
+`../nova-prerewrite-backup/nova-prerewrite-20260816-330d408.bundle`,
+`git bundle verify` reports a complete history, sha256
+`033d54148f908b080fab539a41c851fd91b37ade656b720aac2886b399f10873`.
+The recordings themselves are preserved outside the repository at
+`../fixtures-private/`, hash-checked against `fixtures/MANIFEST.md`.
+
+**Two consequences worth stating.**
+
+1. **The audit reports keep their original citations and are not edited.**
+   B-RISK-013 says `git ls-files fixtures/` returns 19; it now returns 1.
+   The report is a dated artifact and correcting it in place would destroy
+   the record of what was found. Correct by appending — the same rule
+   `SESSION-LOG.md` runs on.
+2. **Every SHA in the reports and in commit messages before `aeff6a3` no
+   longer resolves.** The first three commits keep their identity (they
+   predate the first recording); everything from M0 onward was rewritten.
+   The bundle above is the only way back to the old hashes.
+
+`filter-repo` also checks out the rewritten tree, which deleted the
+working-tree copies as well — not only the history. They were restored
+from `../fixtures-private/` and are now untracked and ignored, so local
+runs still see all 38 suites.
+
 ## 5. Things already visible that the passes will hit
 
 Not findings — no pass has run, and this file's author is not the
