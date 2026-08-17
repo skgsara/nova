@@ -67,8 +67,24 @@ combined work is GPLv3+.
                taken.
   * Isobar   — Sara Sakuragawa, 2026, GPLv3+ (this project's author's
                own prior work). Per-line resync approach adapted.
-  * fldigi   — David Freese (W1HKJ) et al., GPLv3+. Studied as prior
-               art. Rule shapes reused with re-measured constants:
+  * fldigi   — David Freese (W1HKJ) et al. Licence is MIXED per file,
+               and the files in this lineage are NOT the project's
+               headline GPLv3. Checked at commit 61b97f41 (audit Pass B,
+               2026-08-16): fldigi's root COPYING is the plain GPLv3
+               text, but `src/wefax/wefax.cxx` and `src/wefax/
+               wefax-pic.cxx` — the WEFAX module proper, and the files
+               this lineage concerns — each grant "version 2 of the
+               License, or (at your option) any later version", i.e.
+               **GPLv2-or-later**. Both state in their own headers that
+               they are adapted from HamFax and carry Christof Schmitt's
+               copyright, which is why the chain above continues through
+               HamFax to ACfax rather than stopping here. The generic
+               FIR class in `src/include/filters.h` is GPLv3-or-later.
+               GPLv2-or-later is upgradable, so Nova's GPLv3+ is
+               compatible; this entry previously said "GPLv3+" flatly,
+               which named the wrong grant for the files actually in the
+               lineage. Studied as prior art.
+               Rule shapes reused with re-measured constants:
                abandon a phasing run after N consecutive failures,
                frequency coherence across a run, and per-line
                correlation kept per line rather than collapsed to a

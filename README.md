@@ -13,6 +13,40 @@ Nova decodes the weather charts broadcast over shortwave by stations
 such as JMH (Japan), GYA (UK), NMC (USA), VMW (Australia) and others —
 using only a computer's sound input and an HF receiver.
 
+## How Nova was written
+
+**Nova's code was written by an AI agent (Claude), directed
+session-by-session by Sara Sakuragawa, who owns every design decision in
+it.** The development history is public and unedited: `SESSION-LOG.md`
+records each session newest-first, append-only, and is corrected by
+adding entries rather than by rewriting old ones.
+
+**What has been reviewed by a person:** every design decision, and the
+behaviour of the decoder against real off-air recordings — the charts
+were looked at by eye. Several defects reached the fix stage only
+because a human ran the program against a live signal and saw something
+a passing test suite could not.
+
+**What has not:** the code has not been line-by-line human-reviewed, and
+AI training-data provenance is not introspectable by any party,
+including the agent that wrote it. Nova's third-party lineage is
+idea-level and documented in `NOTICE`, and that claim has been checked
+against the actual upstream sources (see the audit below) — but no
+process available here can rule out unconscious reproduction at a level
+below what comparison detects.
+
+**The audit.** Nova is being audited against a written protocol, by
+agents that did not author it and under a different model, with a human
+sign-off gate that the audit explicitly does not replace:
+
+- the protocol — [`docs/07-audit-protocol.md`](docs/07-audit-protocol.md)
+- its parameters — [`docs/06-audit-gate0.md`](docs/06-audit-gate0.md)
+- the pass reports — [`docs/audit/`](docs/audit/)
+
+The audit is a filter, not an assurance. Findings that are still open
+are recorded in the reports as they stand, including the ones that
+count against release.
+
 ## Features (target)
 
 - IOC 576 and 288, automatic and manual selection

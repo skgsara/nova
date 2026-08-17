@@ -187,20 +187,44 @@ case. Building it is real, unstarted work.
 
 ## 4. NEEDS SARA — the remaining rows
 
-### WMO_386_EDITION — the highest-stakes row
+### WMO_386_EDITION — half decided, half still open
 
-The protocol pins this as unquestionable fact and warns that if Part
-III-5 is not where the facsimile specification lives, every Tier 1
-citation degrades. Two separate checks against the paper:
+**WMO_386_EDITION = the 2023 edition** (`386_2023-edition_en.pdf`).
+Decided by Sara, 2026-08-16: pin the latest. The 2009 edition
+(`WMO_386_Vol_I_2009_en.pdf`) stays on disk as the corroborating check
+that `docs/01` and `NOTICE` already describe, but 2023 is normative and
+is what Pass A must cite.
 
-1. **Which edition is normative.** The project does not pin one.
+**The second half of this row is NOT closed.** The protocol warns that if
+Part III-5 is not where the facsimile specification lives, every Tier 1
+citation degrades — and that check has not been made. The project cites
+in the form `WMO §5.1.2`, meaning section 5 of Vol. I Part III; the
+protocol's form is `WMO386:III-5 §x.y`. Almost certainly the same thing
+said two ways, and "almost certainly" is exactly what this row exists to
+eliminate.
+
+Attempted 2026-08-16 and failed for want of tooling: the 2023 PDF is 233
+pages of subset-encoded fonts, and this machine has no `pdftotext`,
+`mutool`, `qpdf`, or any Python PDF library, so a raw stream extraction
+returned glyph indices rather than text (zero hits for "facsimile" in
+3.8 MB of extracted bytes — an extraction failure, not a finding about
+the document). Installing poppler would close it, as would Sara simply
+opening the PDF and reading the contents page.
+
+**Pass A must not run until this is closed.** Everything else in Gate 0
+is now filled.
+
+The two checks, restated in full so neither is lost:
+
+1. ~~**Which edition is normative.**~~ **Decided: 2023.** The project
+   does not pin one on its own —
    `docs/01` and `NOTICE` both say the citations were verified against
    the 2009 *and* 2023 editions and found identical in the checked
    sections. Both PDFs are on disk (`386_2023-edition_en.pdf`,
-   `WMO_386_Vol_I_2009_en.pdf`), both gitignored via `*.pdf`.
-   *Suggested:* pin **2023** as normative and keep 2009 as the
-   corroborating check — stronger than the protocol asks, and it matches
-   what was actually done. But the protocol wants one pin, so name one.
+   `WMO_386_Vol_I_2009_en.pdf`), both gitignored via `*.pdf`. Keeping
+   2009 as a corroborating check is stronger than the protocol asks and
+   matches what was actually done, but the protocol wants one pin and
+   2023 is it.
 2. **Whether "Part III-5" and the project's "Vol. I, Part III, §5" are
    the same location.** The project cites as `WMO §5.1.2`, meaning
    section 5 of Part III; the protocol's form is `WMO386:III-5 §x.y`.
