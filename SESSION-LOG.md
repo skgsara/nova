@@ -7,6 +7,188 @@ anything as our develop history").
 
 ---
 
+## 2026-08-16 — Session 32: the audit, and the two things it found that
+## nothing else was going to
+
+Agent: Claude (Opus 5) as author and remediator; Passes B, C and D run by
+Claude Sonnet 5 as independent auditors. Code changed: `core/wav.cpp` (data
+chunk clamped to real file bytes; sample-rate bounds), `core/resample.cpp`
+(ratio bounds), `tests/test_malformed.cpp` (new), `CMakeLists.txt`
+(`nova_fixture_test`, the fixture sentinel, the new suite). Files changed:
+`README.md`, `START-HERE.md`, `NOTICE`, `.gitignore`,
+`fixtures/MANIFEST.md` (new), `docs/06-audit-gate0.md` (new),
+`docs/07-audit-protocol.md` (new), `docs/audit/PASS-{B,C,D}-REPORT.md`
+(new), `SESSION-LOG.md`. **Test count 37 → 38.** History rewritten:
+`330d408` → `aeff6a3`.
+
+**Sara brought a written audit protocol and asked for the whole project to
+be audited against it.** Five passes, each in a fresh session, each barred
+from the authoring agent's rationale. The first thing it did was disqualify
+me: the protocol says the auditing agent must not be the agent that wrote
+the code, and I wrote all 31 previous sessions of it. **Sara's call: the
+passes run under a different model (Sonnet 5); I do Gate 0 and
+remediation.** That constraint held all session and is why the findings
+below are worth anything.
+
+**Gate 0 took most of the setup and was worth every minute, because three
+of its rows were not fillable as written.** TARGET_FLOOR_* assumed an
+old-hardware target Nova has never had — no `-march` anywhere, arm64 only,
+no 32-bit build ever attempted — so filling it would have imposed a new
+requirement rather than described the project; Sara set the floor to what
+Nova actually supports. FIXTURE_COMPARE assumed a hashed expected image per
+fixture, and **no such artifact exists**: the suite is property assertions,
+not byte comparison, so the policy was rewritten around the bounds actually
+registered beside each `add_test`. Writing that out showed the policy is
+architecture-independent by construction, which dissolves the x87/SSE
+spurious-failure problem the row existed to solve. MAX_FUNCTION_LINES was
+set to 80 against the measured distribution (median 13, p90 102, max 416)
+rather than by default.
+
+**The WMO pin was the highest-stakes row and it is now closed against the
+paper.** Pinned to the 2023 edition. Part III §5 is the meteorological
+facsimile equipment specification, and the subsection numbering matches the
+project's citations exactly — 5.1.1 scanning direction, 5.1.2 IOC, 5.1.3.3
+dead sector, 5.2.2 IOC selection, 5.2.3.4 phasing on the white leading
+edge, 5.2.5 stop, 5.2.6 control-signal precision. "Part III-5" and "Vol. I,
+Part III, §5" are the same place. This needed `pdftotext`, which was not
+installed; the first extraction attempt returned glyph indices and **zero**
+hits for "facsimile", which is an extraction failure and was recorded as
+one rather than as a fact about the document.
+
+**I corrected my own advice twice, and both corrections mattered.** I told
+Sara to run Pass B first because "it is exempt from auditor isolation" —
+wrong: the exemption is to the DOCUMENT-ACCESS clause only, and the bar on
+the authoring agent has no exception anywhere. Then I said all of Pass B's
+inputs existed — also wrong: B-COPYLEFT needs each upstream's licence as
+printed in its FILE HEADERS, and five of the six projects `NOTICE` names
+were not on disk. A corpus was assembled outside the repository and pinned
+(ACfax 981011 from the Debian archive, HamFax at `cbf98140`, weatherfax_pi
+`02ebd48f`, KiwiSDR `efb38e2b`, fldigi `61b97f41`, JWX from the local
+tarball, which the manifest flags as the weak link because its provenance
+is asserted rather than established).
+
+**Pass C: 20 findings, all minor or informational, none load-bearing.**
+`stage_assembly` is 416 lines and carries the ONLY nesting-depth violation
+in the tree; every `stage_*` exceeds 80 lines, so the length problem is
+systemic. Six bare `1900.0` literals in the signal path — and the one
+occurrence carrying a WMO citation is in `gen.cpp`, the test-signal
+generator, so the decode path has none. The AI-artifact hunt the protocol
+asks for came back NEGATIVE: zero `virtual` in the tree, no
+single-instantiation templates, both wrapper types judged load-bearing with
+falsifiable stated reasons. **None of Pass C is acted on yet.** Verifying
+it by hand found `kPi` defined six times rather than the five reported —
+it missed `gui/nova-gui.cpp:157`, consistent with its own registered gap.
+
+**Pass B: the question the protocol expected to be critical came back
+clean, and a different one did not.** No GPLv2-only grant anywhere in the
+derivation chain; every upstream is "or later" and compatible with GPLv3+.
+`NOTICE`'s "idea-level reuse, no code taken" claim held up under direct
+comparison at the highest-risk sites — the FIR is computed at runtime
+rather than carrying ACfax's tables, and the phasing algorithm is a
+structurally different prefix-sum wedge-fit. Two majors fixed the same day:
+`NOTICE` said "fldigi — GPLv3+" flatly, but `wefax.cxx` and `wefax-pic.cxx`
+— the two files this lineage actually runs through, and the ones whose own
+headers say they are adapted from HamFax — grant **version 2 or later**;
+and the README had no AI-authorship disclosure at all, which B.0.4
+requires.
+
+**The critical was the recordings, and it decided the shape of the rest of
+the session.** All 19 fixtures were tracked in git with **no redistribution
+basis stated anywhere in the tree**, and `test_fixture.cpp:35` identifies
+JSC as Kyodo News — a commercial news agency, so no public-domain argument
+applies to it at all. Sara's call: **the library stays private.** See the
+surgery below.
+
+**Pass D found three criticals and they are the finding of the session.**
+Two were reproduced independently before anything was touched, at reduced
+scale so the machine was never at risk. A **144-byte** file declaring a
+500 MB data chunk reached **3.5 GB resident** and ran until a 30 s alarm
+killed it. And a **completely well-formed** 20 KB file — every field
+internally consistent — declaring a 1 Hz sample rate reached 321 MB and
+also ran to the alarm. **The second is the one that matters: 1 is a legal
+value in a legal field.** This was never malformed-input handling; it was
+an unbounded implication of a legal one. Three guards now, with the
+reasoning in the code, and the sample-rate bound is DERIVED rather than
+picked — WEFAX white is 2300 Hz [WMO §5.3.1.2], so at or below 4600 Hz
+Nyquist says the signal cannot be represented and the file is not a
+recording of one. After: both attacks refused in 0.01–0.42 s at ~1.4 MB,
+and the auditor's whole 15-file malformed corpus refuses in ~0.00 s.
+
+**`tests/test_malformed.cpp` reads no fixture on purpose**, and that
+decision paid off within the hour: it is one of the 8 suites that still run
+in a checkout with no recordings, so the security-relevant checks survived
+the removal. Mutation: baseline SURVIVED before and after, five mutations
+all KILLED by the intended check with the FAIL line read back. **Two of the
+five make the guards too TIGHT rather than absent**, because a guard that
+eats real input is a worse defect than the one it fixes, and nothing tested
+that direction until those were written. **The harness found a defect in
+the test itself**, which is the point of running it: tightening the rate
+bound made `read_wav` throw inside a case expecting success, the exception
+escaped `main()`, and the process aborted with SIGABRT **before printing
+which check failed** — so a mutation the suite genuinely catches looked
+like a hang and its attribution was lost. Third time in this project the
+instrument has been the thing at fault, and it failed in the usual
+direction: toward the answer I wanted.
+
+**The fixture surgery, and the count is 30, not 22.** Taken from `ctest`
+rather than by reading the file: **30 of 38 suites need a recording, 8 run
+anywhere** — the figure the docs reached for was the "real-fixture
+screamers", but the live-path, override and `gui_shell` suites feed on
+recordings too. `nova_fixture_test()` registers those 30 as skips-with-a-
+reason when the audio is absent, so a fresh clone does not quietly become a
+smaller green project. **Recorded the limit of that mechanism rather than
+overclaiming it:** ctest counts a skipped test as passed in its headline,
+so it still ends "100% tests passed out of 38"; what carries the truth is
+the trailing "did not run" block naming all 30. Making the skips FAIL would
+be louder and wrong — a checkout without recordings is a supported state.
+
+**Then the history rewrite.** `git filter-repo --path-glob 'fixtures/*.wav'
+--invert-paths`; 69 commits before and after, `.git` 38 MB → 1.1 MB, zero
+`.wav` across all refs. **Two things the dry run caught that reasoning had
+not.** All SEVEN branches needed rewriting — `main` carried 17 of the
+recordings and is the branch most likely to be published, so filtering only
+the working branch would have left the audio exactly where it would do most
+harm. And `filter-repo` checks out the rewritten tree, so it deleted the
+WORKING-TREE copies too, not just history; restored from
+`../fixtures-private/`, hash-checked against the manifest. Verified as a
+stranger sees it rather than by inspecting my own repo: a fresh clone is
+1.1 MB, has no `.wav` in any ref, runs 8 suites and reports 30 Skipped.
+
+**The audit reports are NOT edited to match the remediation.** B-RISK-013
+says `git ls-files fixtures/` returns 19; it now returns 1. They are dated
+artifacts and correcting them in place would destroy the record of what was
+found — correct by appending, the same rule this file runs on. The rewrite
+is recorded as its own event in `docs/06` with before/after SHAs, because
+every SHA cited in those reports and in commit messages before `aeff6a3` no
+longer resolves. `../nova-prerewrite-backup/nova-prerewrite-20260816-
+330d408.bundle` is the only way back to the old hashes.
+
+**Next step: Pass A is RUNNING under Sonnet 5 and its report is the next
+thing to read.** It is the pass that re-derives from the WMO document the
+citations I wrote into `docs/01` and `docs/02` — which is exactly why it
+could not be run by me, and why a same-model auditor was the compromise
+most worth avoiding. When it lands: read its A.1 table, and in particular
+its list of **CONFORMS verdicts that no fixture exercises**, which is the
+most valuable thing that pass produces.
+
+After Pass A: **Pass E** (release readiness, receives all prior outputs),
+then **cross-verification by a THIRD model** different from both Opus 5 and
+Sonnet 5, which re-checks every load-bearing finding's citation and a 10%
+sample of the rest. Then the human sign-off gate, which the protocol is
+explicit that the audit does not replace.
+
+**Still open, and none of it is blocked on the audit.** Pass C's 20
+maintainability findings are unaddressed by choice. Pass D's third critical
+(D-PERF-003, unbounded `retained_` during a sustained tone in the live
+session) is **static-trace only, never reproduced** — it is the one finding
+in this session that is asserted rather than demonstrated. And session 31's
+two BY-HAND runs are still outstanding: the receiving indicator with an
+edit open when a second transmission arrives, and session 30's relayout of
+the correction block. Four of four on-air sessions found a defect a green
+suite could not see; that record is unchanged by this audit.
+
+---
+
 ## 2026-08-16 — Session 31: the indicator gets an instrument, and the state
 ## it opened had two defects in it
 
