@@ -1,5 +1,9 @@
 # Build output
 build/
+# Session 35: tools/record-fixture-regression.sh builds in its own tree,
+# and it refuses to run against a dirty one — so its build dir must be
+# ignored or the second run can never happen.
+build-*/
 out/
 *.o
 *.obj
