@@ -89,6 +89,8 @@ bool parse_args(int argc, char** argv, nova::DecodeOptions& opt,
     return true;
 }
 
+void print_timebase(const nova::DecodeResult& r);
+
 // Print the decode result, one fact per line.
 void print_result(const nova::DecodeResult& r, const nova::DecodeOptions& opt,
                   double deviation) {
@@ -159,6 +161,21 @@ void print_result(const nova::DecodeResult& r, const nova::DecodeOptions& opt,
                     "measurement of anything. A phasing interval\n"
                     "           lost to fading looks exactly like this. "
                     "Give --phase FRAC to set it by hand.\n");
+    print_timebase(r);
+    if (r.segmented)
+        std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
+                    "start/phasing, %d of stop)\n",
+                    r.image_t_start, r.image_t_end, r.lines_dropped_head,
+                    r.lines_dropped_tail);
+    else
+        std::printf("  image   whole recording (no control signals to "
+                    "segment on)\n");
+}
+
+// The timebase verdict: kSteps is loud because it changes what the
+// clock figure above it means; kLinear prints only the evidence that
+// exists; kUnknown says WHICH witness is missing.
+void print_timebase(const nova::DecodeResult& r) {
     switch (r.timebase) {
         case nova::Timebase::kSteps:
             // Loud, because it changes what the line above it means.
@@ -219,14 +236,6 @@ void print_result(const nova::DecodeResult& r, const nova::DecodeOptions& opt,
                         phasing_witness_text(r));
             break;
     }
-    if (r.segmented)
-        std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
-                    "start/phasing, %d of stop)\n",
-                    r.image_t_start, r.image_t_end, r.lines_dropped_head,
-                    r.lines_dropped_tail);
-    else
-        std::printf("  image   whole recording (no control signals to "
-                    "segment on)\n");
 }
 }  // namespace
 
