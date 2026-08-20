@@ -63,6 +63,20 @@ Notes:
   says where the dead sector is, and **one operator PHASE click lands the
   page to within 1 px of the batch image** (measured on
   `vmw-white-sector-120s`, which the automatic path draws 46 px around).
+  *That 1 px is a ONE-OFF MEASUREMENT reported in prose, not a bound any
+  test asserts* [audit Pass A]: `override_phase_seed` pins the mechanism —
+  rows above the override byte-identical, rows below moved by the fraction
+  asked — and no registered bound would catch this figure regressing.
+  Stated because every other number in this matrix names the check that
+  holds it, and a prose measurement standing among pinned ones reads as
+  pinned.
+  **And the case this paragraph describes is the one audit Pass A found
+  unflagged and untested** (session 32): a white-only station with no
+  phasing interval was the stated JUSTIFICATION for the manual override
+  here, while the automatic path met it with no warning at all. It now
+  reports `DecodeResult::no_phase_reference`, `nova-decode` says so loudly,
+  and `roundtrip [16]` pins that the flag distinguishes it from the healthy
+  white-only case rather than firing on both.
   The GUI wiring landed in session 23 (numeric fields, live while the
   preview draws) and the batch re-decode in session 24 [docs/05 §7.1], so
   the row now reads "manual adj. met end to end". **The two corrections do

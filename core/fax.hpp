@@ -303,6 +303,24 @@ struct DecodeResult {
     // True when the drawn picture is phased from the phasing interval
     // rather than from the image lines.
     bool anchor_from_phasing = false;
+    // True when NOTHING in the recording says where a line starts: a
+    // white-only dead sector (so no per-line sync feature exists) AND no
+    // phasing interval was found, and the operator supplied no hint. The
+    // picture is then drawn at whatever rotation the image-derived anchor
+    // guessed, which on such a station is not a measurement of anything.
+    //
+    // This is NOT the same as the healthy white-only case, and telling them
+    // apart is the whole point of the flag [audit Pass A, A-CLAIM-013]:
+    // VMW, NMC and GYA normally send no per-line sync at all and are decoded
+    // correctly from their phasing interval. Lose that interval to fading
+    // and every other field still reads the same, while the dead sector
+    // moves across the page — measured at 1495 -> 404 of 1810 columns on
+    // vmw-phasing-image-160s with its phasing region silenced. `per_line_
+    // sync` and `phasing_found` were both already reported, so a caller
+    // COULD have derived this; nothing did, because two independently
+    // true-ish flags do not read as an alarm.
+    bool no_phase_reference = false;
+
     // True when it is phased from the operator's `phase_anchor_hint`
     // instead — refined locally, so this says which FEATURE was chosen by
     // hand, not that the position was. Exclusive with the flag above: the

@@ -36,7 +36,7 @@ is deliberate.
 | Centre frequency | 1900 Hz | WMO §5.3.1.2, §5.5.1 |
 | Black | 1500 Hz | WMO §5.3.1.2, §5.5.1 |
 | White | 2300 Hz | WMO §5.3.1.2, §5.5.1 |
-| Audio shift at receiver | ±400 Hz (HF circuits), ±150 Hz (LF circuits) about the 1900 Hz centre | ISO §4.2.2, WMO §5.5.2 |
+| Audio shift at receiver | ±400 Hz (HF circuits), ±150 Hz (LF circuits) about the 1900 Hz centre | ISO §4.2.2 (see the edition note: WMO §5.5.2 is the RF-carrier form of the same numbers, NOT an audio-domain claim) |
 | Tone stability | black/white freqs within 8 Hz over 30 s; 16 Hz over 15 min | WMO §5.3.1.2 |
 | Gray scale | 8 tones, linear by recommendation: 1500, 1614, 1729, 1843, 1957, 2071, 2186, 2300 Hz | WMO §5.4.1, §5.4.3 |
 | Recording-unit AF input | at least −10 dBm … +10 dBm equivalent | ISO §4.2.2 |
@@ -58,6 +58,15 @@ subsections, so that claim was wrong. For a decoder the practical content
 is pinned by ISO §4.2.2 anyway: the audio presented to the demodulator
 shifts by ±400 Hz (HF) or ±150 Hz (LF) about 1900 Hz. Nova's deviation
 mode implements exactly that.
+
+**Citation corrected, session 32 [audit Pass A, A-CLAIM-011a].** The
+"audio shift at receiver" row above used to cite `WMO §5.5.2` alongside
+ISO §4.2.2, which this note already contradicts: §5.5.2 gives ±400/±150 Hz
+about **f₀, the assigned RF frequency**, and says nothing about 1900 Hz.
+The numbers coincide, the domains do not. The prose here was right and the
+table row was loose — worth recording because that is the harder failure to
+notice, a correct explanation sitting two paragraphs under a citation that
+does not support the claim beside it.
 
 ## 3. Remote-control signals
 

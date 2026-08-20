@@ -50,7 +50,10 @@ count against release.
 ## Features (target)
 
 - IOC 576 and 288, automatic and manual selection
-- 60 / 90 / 120 lines per minute, automatic and manual selection
+- 60 / 90 / 120 lines per minute, automatic and manual selection.
+  WMO §5.1.5 lists a fourth rate, 240 lpm, which Nova does not
+  implement — ISO 9876:2015 §4.2.4 requires only these three of a
+  receiver. A 240 lpm broadcast will not decode at all.
 - ±400 Hz (HF) and ±150 Hz (LF) subcarrier deviation
 - Automatic start (300/675 Hz), stop (450 Hz), and phasing
 - Automatic clock-error (slant) correction: rate estimated from the

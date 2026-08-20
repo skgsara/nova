@@ -789,6 +789,52 @@ int main() {
             }
     }
 
+    // [16] exists because audit Pass A built this case by hand and found
+    // nothing in the suite covered it. A white-only station (VMW, NMC, GYA)
+    // carries no per-line sync, so its phasing interval is the ONLY place
+    // its line phase exists. Lose that interval — fading does exactly this,
+    // which is why gya-faded-phasing is in the library at all — and the
+    // decode still returns 0, still writes a picture, and every status
+    // field still reads much as it did. Measured on the real recording with
+    // its phasing region silenced, the dead sector moved from column 1495
+    // to column 404 of 1810.
+    //
+    // Generated rather than cut from a recording, deliberately: the
+    // recordings are not redistributed, and a check this specific should
+    // not be one of the 30 suites that vanish from a clean clone.
+    std::printf("[16] no phase reference at all: white-only AND no phasing "
+                "[audit Pass A]\n");
+    {
+        // The healthy white-only case first, so the flag is shown to be
+        // about the DIFFERENCE and not merely about white-only stations —
+        // otherwise it would fire on VMW every day and mean nothing.
+        nova::GenOptions g;
+        g.dead_pulse = false;   // white-only: no per-line sync exists
+        g.phasing = true;       // ...but the phasing interval is present
+        nova::DecodeOptions d;
+        nova::DecodeResult ok = run(g, kLines, d);
+        check(!ok.per_line_sync, "white-only station has no per-line sync");
+        check(ok.phasing_found, "healthy white-only: phasing found");
+        check(!ok.no_phase_reference,
+              "healthy white-only is NOT flagged (it has a phase reference)");
+
+        // Now take the phasing away, which is all that separates them.
+        nova::GenOptions g2 = g;
+        g2.phasing = false;
+        nova::DecodeResult bad = run(g2, kLines, d);
+        check(!bad.per_line_sync, "still white-only");
+        check(!bad.phasing_found, "and now no phasing interval");
+        check(bad.no_phase_reference,
+              "no phase reference anywhere IS flagged");
+
+        // An operator hint IS a phase reference, so the flag must clear.
+        nova::DecodeOptions d3 = d;
+        d3.phase_anchor_hint = 0.5;
+        nova::DecodeResult hinted = run(g2, kLines, d3);
+        check(!hinted.no_phase_reference,
+              "an operator PHASE hint clears the flag");
+    }
+
     std::printf(failures ? "\n%d FAILURE(S)\n" : "\nall tests passed\n",
                 failures);
     return failures ? 1 : 0;

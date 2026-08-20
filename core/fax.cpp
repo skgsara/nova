@@ -1959,6 +1959,17 @@ DecodeResult decode_fax(const std::vector<float>& video, int fs,
         s.run(st);
         report(opt.hooks, s.name, 1.0);
     }
+    // Decided here rather than inside a stage because it is a statement
+    // about the finished decode: every one of these three flags is final
+    // only once phasing, the dead-sector style and any operator hint have
+    // all been settled [audit Pass A, A-CLAIM-013].
+    st.res.no_phase_reference = !st.res.per_line_sync &&
+                                !st.res.phasing_found &&
+                                !st.res.anchor_from_hint;
+    if (st.res.no_phase_reference)
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: NO PHASE REFERENCE - white-only dead sector, no phasing "
+             "interval, no operator hint: line start is a guess");
     return std::move(st.res);
 }
 

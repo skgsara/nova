@@ -146,6 +146,23 @@ int main(int argc, char** argv) {
                                                      : "image anchor used"));
         else
             std::printf("  phasing none\n");
+        // Loud, for the same reason the NOT LINEAR block below is loud: it
+        // changes what the picture means. "phasing none" and
+        // "no-per-line-sync" are each unremarkable alone — the second is
+        // NORMAL on VMW, NMC and GYA — and together they mean nothing in
+        // the recording says where a line starts [audit Pass A,
+        // A-CLAIM-013].
+        if (r.no_phase_reference)
+            std::printf("  NO PHASE REFERENCE: this recording has a "
+                        "white-only dead sector (no per-line sync) AND no\n"
+                        "           phasing interval, so nothing in it "
+                        "establishes where a line begins. The picture\n"
+                        "           below is drawn at a rotation that was "
+                        "GUESSED from image content, and on a\n"
+                        "           station like this that is not a "
+                        "measurement of anything. A phasing interval\n"
+                        "           lost to fading looks exactly like this. "
+                        "Give --phase FRAC to set it by hand.\n");
         switch (r.timebase) {
             case nova::Timebase::kSteps:
                 // Loud, because it changes what the line above it means.

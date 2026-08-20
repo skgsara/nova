@@ -18,7 +18,10 @@ struct GenOptions {
     double ppm = 0.0;       // clock error to inject
     double noise = 0.0;     // Gaussian RMS, relative to full scale
     double amplitude = 0.5;
-    double deviation = 400.0;  // 400 (HF) or 150 (LF) [WMO §5.5.2]
+    // 400 (HF) or 150 (LF). The AUDIO-domain form is ISO §4.2.2 about a
+    // 1900 Hz subcarrier [WMO §5.5.1]; WMO §5.5.2 is the same pair of
+    // numbers about the RF carrier f0, which is not what this generates.
+    double deviation = 400.0;
     double start_sec = 5.0;    // start tone duration, 5-10 s [WMO §5.2.2]
     // Tolerance knobs [WMO §5.1.3.3]: dead sector 4.5% ± 0.5%, black pulse
     // no more than half of it. Defaults are the nominal/measured layout.
