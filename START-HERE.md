@@ -14,12 +14,12 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-**On Sara's machine that is 39 suites. From a fresh clone it is 9, and the
+**On Sara's machine that is 40 suites. From a fresh clone it is 10, and the
 other 30 report Skipped** — they need off-air recordings, which this
 repository does not carry and never will (see `fixtures/MANIFEST.md`, which
 holds every recording's identity and SHA-256). Nothing is broken when that
 happens; ctest prints "The following tests did not run" and names all 30.
-(39 with the GUI, 37 without: three synthetic matrices + 22
+(40 with the GUI, 38 without: three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually
@@ -27,7 +27,9 @@ running + the audio ring + the PNG round-trip under an independent
 decoder + the two operator corrections behaving asymmetrically + the
 untrusted-input guards, which generate their own malformed files and read
 no recording at all + `version_flag`, session 35's, which holds every
-binary's `--version` to the one version CMake declares;
+binary's `--version` to the one version CMake declares + `tuning_spectrum`,
+session 36's, which holds M4.5's waterfall to naming a frequency correctly
+in Hz rather than merely looking like a spectrum;
 `gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 
 **Since session 35 the tree carries a version and a CI workflow.** Every
@@ -49,6 +51,19 @@ receiver (or a virtual cable) and press Start; Force Start needs IOC and
 Rate both explicit and is how you begin mid-transmission. Rows appear in the pane as they are
 drawn, the level meter moves, and a completed transmission is decoded and
 saved to the folder in Settings → Image folder, named by UTC timestamp.
+Since session 36 there is a **tuning strip** above the level meter — M4.5,
+the last milestone before release. A waterfall with the live spectrum along
+its top edge, covering 800–3000 Hz, with magenta lines marking the two WMO
+tones: 1500 Hz black and 2300 Hz white. Tune the receiver until the
+signal's two humps sit on those two lines. It reads the raw sound-card
+audio, not the demodulated video — a spectrum taken any later would show
+the tuning error already corrected — and it is live from the moment the
+window opens, **before** you press Start, because tuning is what you do
+before a transmission arrives. With no audio measured yet it says so
+rather than drawing an empty band, for the same reason the meter says
+`-- dBFS`: a dead input must not look like a quiet one. View → Tuning
+strip turns it off and gives its 72 px back to the picture; the choice is
+remembered.
 PHASE and SYNC go live while the preview is drawing — and since session 27
 they work on the SAVED chart too: type a column or a ppm, press Apply, and
 the picture is re-rendered from the raw stream kept behind it and written

@@ -7,6 +7,117 @@ anything as our develop history").
 
 ---
 
+## 2026-08-20 — Session 36: M4.5, and a tuning aid whose whole job is to be
+## looked at has not been looked at
+
+Agent: Claude (Opus 5). Code changed: new `live/spectrum.{hpp,cpp}` (the
+analyser and the band mapping), `live/engine.{hpp,cpp}` (the analyser on
+thread 2, `copy_spectrum` for thread 4, `EngineOptions::spectrum`),
+`gui/nova-gui.cpp` (the `TuningStrip` widget, the layout region, the View
+menu toggle, the `--strip on|off` flag, four `--metrics` state lines),
+`CMakeLists.txt` (VERSION 0.4.5, `live/spectrum.cpp`, the `tuning_spectrum`
+target, three stale suite counts). New: `tests/test_spectrum.cpp`. Files
+changed: `tests/gui_layout.cmake` (the strip block),
+`tests/test_live_engine.cpp` (`test_tuning_strip`),
+`.github/workflows/{ci,release}.yml` and `tools/record-fixture-regression.sh`
+(inventory counts), `README.md`, `START-HERE.md`, `ROADMAP.md`,
+`CHANGELOG.md`. Suite: 39 → **40** (38 without the GUI); 40/40 green,
+nothing skipped, zero warnings, 275.7 s.
+
+**Sara's call at the top of the session: finish M4.5 — the last milestone
+before release — then wrap up for tests and release.** M4.5 is complete.
+The three design questions were hers, answered before any code was
+written: a waterfall WITH an instantaneous spectrum trace along its top
+edge; **800–3000 Hz** with the two WMO tones marked; a **View menu toggle,
+default on, remembered**.
+
+**Two things were settled by reading the code rather than by asking.**
+`start_live()` opens the sound card and runs the engine when the WINDOW
+opens, not when Start is pressed — so the strip can be live while the
+operator tunes, which is the only arrangement in which a tuning aid is
+worth anything. And the strip is fed the raw capture block in thread 2's
+loop, right where the peak meter reads it and BEFORE the resampler: a
+spectrum taken after the demodulator would show the tuning error already
+removed, which is precisely the error being looked for. `test_tuning_strip`
+pins both — it never calls `start_capture()`, and it runs the capture at
+48 kHz while the internal rate is 8 kHz so that a 2300 Hz tone landing at
+2300 Hz is only possible on the raw path.
+
+**The numbers are in `live/`, not in the widget** — `nova::SpectrumAnalyzer`
+plus a pair of free functions for the band mapping. The free functions are
+what let the GUI place its marker lines with no sound card open, and they
+exist at all because of session 20: the marker line and the columns under
+it must not be two implementations of "where is 1500 Hz". `--metrics`
+reports the two marker columns as 81 and 174 on a machine with no audio,
+and the engine's own screamer independently measures a real 2300 Hz tone
+into column 174. Those two agree from opposite directions, which is the
+kind of agreement session 30's trap says to look for.
+
+**The mutation passes found two real defects in the instruments, not in the
+code.**
+1. The Hz tolerance in `tuning_spectrum` was written at 1.5 FFT bins.
+   Two mutations — the bin lookup one bin out, and nearest-bin instead of
+   interpolation — produced worst errors of 17.6 Hz and 11.3 Hz and would
+   have **SURVIVED** it. Tightened to 0.75 bins against a measured worst of
+   5.9 Hz, both die. The suite passed 33/33 either way; the difference was
+   only ever visible by trying to break it.
+2. The first `gui_layout` strip block bundled three conditions behind one
+   `message()`. Two of seven layout mutations were killed by a clause other
+   than the one they were aimed at, leaving "the picture gains exactly
+   72 px" and "the strip sits directly on the meter" as unproven as if
+   nothing had been tested — session 31's attribution lesson, reproduced
+   exactly. Split into three checks with three messages; re-run, 7/7 killed
+   and 7/7 attributed.
+Totals: **17 mutations, 17 killed, 0 survived, 0 void**, unmutated
+baselines survived both passes.
+
+**One method was written and deleted.** `SpectrumAnalyzer::reset()` looked
+obviously right — a device change should not scroll the previous device's
+history away as if it were this one's past. It has no caller: `cb_device`
+destroys the engine and builds a new one, so the analyser's life is already
+the audio stream's life. Session 24's rule applied without waiting for the
+mutation pass to say it: principled and unfalsifiable is the shape of code
+to delete, and being principled is not evidence.
+
+**Version 0.4.0 → 0.4.5**, and this is the one thing worth Sara's explicit
+agreement rather than her silence. The scheme was set in session 35 as
+milestone-based in the project's own M0-M4 language; M4.5 is a milestone
+in that language and it is now the one that is complete, so 0.4.5 follows
+mechanically. It is not a new decision, but it does change what a tag would
+be called — `v0.4.5`, not `v0.4.0`. One line in `CMakeLists.txt` reverses
+it if Sara reads the scheme differently.
+
+**The inventory numbers were re-measured, not carried forward.** Session 35
+verified 39 registered / 9 ran / 30 skipped on a real fixture-less build.
+Adding a suite makes that stale, and editing the number without rebuilding
+would have been a claim of verification that had not happened — the failure
+this project has now found six times. So a fixture-less copy was configured,
+built and run twice: **40 / 10 / 30**, and **38 / 9 / 29** with
+`NOVA_BUILD_GUI=OFF`. `check-suite-inventory.sh` was then given the old
+numbers and seen to FAIL.
+
+**What this session did NOT do, stated plainly: nobody has looked at the
+tuning strip.** Every claim above is geometry, Hz, and headless inspection.
+It has never been on a screen in front of a person, and it is the one
+surface in the whole window whose entire purpose is to be looked at — a
+colour ramp that is unreadable, a trace too small to see, a marker line
+that vanishes against a strong signal, and a 40-row waterfall that turns
+out to be too short to show a fade are all defects no check here can have.
+Four of four on-air sessions have found a defect a green suite could not
+see, and this is the surface most exposed to that.
+
+**Next step: the by-hand GUI runs, now THREE things in one sitting.**
+Session 31's two — two transmissions through a real receiver with an edit
+open when the second arrives (does the indicator beat losing your picture;
+is the RECEIVING panel noticed; does handing the pane over at a click read
+as control or as a lost page), plus session 30's relayout of the correction
+block — and now M4.5's tuning strip, looked at while actually tuning a
+receiver across a signal. After that, unchanged from session 35: a remote,
+so the CI can stop being theoretical; then `tools/record-fixture-regression.sh`,
+commit the fresh record, and tag, in that order, because the release
+workflow checks it. The record in the tree is stale as of this session's
+first commit, exactly as session 35 said it would become.
+
 ## 2026-08-20 — Session 35: a version, and CI that has never run — which is
 ## the only honest thing to call it
 

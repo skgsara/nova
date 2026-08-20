@@ -9,7 +9,7 @@
 # recordings are deliberately not published — the copyright of a
 # transmitted chart varies by issuing meteorological service and one
 # station is a commercial newspaper [Pass B] — so a public runner cannot
-# run 30 of the 39 suites, and no amount of workflow YAML changes that.
+# run 30 of the 40 suites, and no amount of workflow YAML changes that.
 #
 # The honest alternative, which Pass E's RESOLVES IF names as acceptable:
 # whoever holds the recordings runs the full suite out of band and records

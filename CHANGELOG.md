@@ -2,13 +2,74 @@
 
 Nova has not been released: there is no tag, because making one is the
 release decision itself. Since session 35 it does carry a version —
-`project(nova VERSION 0.4.0)`, milestone-based in the project's own M0-M4
-language, reported by every binary's `--version`.
+milestone-based in the project's own M0-M4 language, reported by every
+binary's `--version`.
 
 This file records what changed and when, newest first. The full narrative
 lives in `SESSION-LOG.md`; this is the short form.
 
-## Unreleased — 0.4.0
+## Unreleased — 0.4.5
+
+### 2026-08-20 — M4.5: the tuning strip
+
+- **The spectrum/waterfall display, cut from M4 on 2026-08-13 and parked
+  in M4.5, is built.** M4.5 is complete; it was the last milestone before
+  M5 (packaging & release). A waterfall with the instantaneous spectrum
+  along its top edge, over **800–3000 Hz**, marking the two WMO tones at
+  1500 Hz black and 2300 Hz white [WMO §5.2.1] — 72 px directly above the
+  level meter, extending the full-width meter strip rather than taking
+  sidebar space. Band, contents and placement decided by Sara, session 36.
+- **`View → Tuning strip`** toggles it, default on, remembered in prefs
+  beside the device and the image folder. Hiding it returns all 72 px to
+  the picture and moves nothing else; the window does not resize.
+- **It reads the RAW capture audio, before the resampler**, and it is live
+  from the moment the window opens rather than from Start. Both are the
+  point rather than details: a spectrum taken after the demodulator shows
+  the tuning error already removed, and tuning is what an operator does
+  *before* a transmission arrives.
+- **New module `live/spectrum.{hpp,cpp}`** — Hann-windowed 4096-point FFT,
+  one column per 50 ms, dB scale referenced so a full-scale sine reads
+  0 dB. Dependency-free, in `nova-live` rather than in the GUI, because a
+  column that names the wrong frequency is a thing that can be wrong about
+  a signal. The band mapping is a pair of free functions, so the widget's
+  marker lines and the analyser's columns are one implementation and not
+  two — the mistake `live/ruler.hpp` exists to prevent.
+- **New suite `tuning_spectrum`** (40 total, 38 without the GUI;
+  fixture-free, so it runs from a bare clone). 33 checks, stated in Hz
+  rather than pixels: a generated tone peaks where the mapping says at
+  nine frequencies across the band and names its frequency to within
+  0.75 of an FFT bin; 44100 and 48000 put the same tone in the same
+  column; both WMO tones read as two peaks with a valley between; the dB
+  scale is checked as a difference between two levels off the clamp; an
+  out-of-band tone leaves the band clean; the waterfall scrolls, wraps and
+  reports nothing-measured as nothing-measured rather than as silence.
+- **Wiring and layout screamers too**: `live_engine`'s `test_tuning_strip`
+  pins that the strip is fed raw audio (a 2300 Hz tone captured at 48 kHz
+  where the internal rate is 8 kHz) and that it fills with no capture
+  started; `gui_layout` pins the region, the toggle's 72 px, and the
+  marker columns (81 and 174) at every window size.
+- **17 mutations, all killed** — 10 against the DSP, 7 against the layout
+  — each attributed to the check it was aimed at, with unmutated baselines
+  surviving both passes. Two findings from the pass itself: the Hz
+  tolerance was tightened from 1.5 bins to 0.75 after two mutations
+  survived the looser one, and one bundled layout assertion was split into
+  three so a kill names the rule it actually broke.
+- **`SpectrumAnalyzer::reset()` was written and then deleted**: a device
+  change destroys the engine, so it had no caller. A principled method
+  defended only by a test that calls it is not evidence.
+- **Version 0.4.0 → 0.4.5**, mechanically: the scheme is milestone-based
+  and M4.5 is the milestone that is now complete. Still below 1.0 —
+  nothing in Platforms or Security posture has changed.
+- CI inventory gates updated **and re-measured** on real fixture-less
+  builds rather than carried forward: 40 registered / 10 ran / 30 skipped,
+  and 38 / 9 / 29 with `NOVA_BUILD_GUI=OFF`. The check was again seen to
+  FAIL when given the old numbers.
+- **Not looked at by a person.** The strip has only been driven headlessly.
+  It joins session 31's two by-hand GUI runs as a release blocker, and it
+  is the surface where that gap matters most, since its entire job is to
+  be looked at.
+
+## Earlier in 0.4.0
 
 ### 2026-08-20 — a version, a `--version`, and CI that has never run
 

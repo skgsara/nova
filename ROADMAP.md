@@ -1125,19 +1125,49 @@ a page-read instead of a grep.
   symptom; the template itself is the larger, later fix, and waits for
   the library to show the need again.
 
-## M4.5 — tuning aids  [pending; created session 17]
-- Spectrum / waterfall display [DECIDED 2026-08-13, Sara, session 17:
-  cut from M4, ships here]. It is the one part of the M4 window that
-  serves tuning rather than decoding, and nothing in the M4 design —
-  no thread, seam, screamer or core field — depends on it.
+## M4.5 — tuning aids  [COMPLETE 2026-08-20, session 36]
+- ~~Spectrum / waterfall display~~ **Done** [DECIDED 2026-08-13, Sara,
+  session 17: cut from M4, ships here; built session 36]. It is the one
+  part of the M4 window that serves tuning rather than decoding, and
+  nothing in the M4 design — no thread, seam, screamer or core field —
+  depended on it, which is why it deferred and then landed cleanly.
+- **What shipped**, all three decided by Sara at the top of session 36:
+  a waterfall with the instantaneous spectrum along its top edge; over
+  **800-3000 Hz** with the two WMO tones marked at 1500 Hz (black) and
+  2300 Hz (white) [WMO §5.2.1]; **72 px** above the level meter, with a
+  **View menu toggle, default on, remembered** in prefs like the device
+  and the image folder.
+- **It is fed the RAW capture audio, before the resampler.** That is the
+  whole design: a spectrum taken after the demodulator shows the tuning
+  error already removed, which is precisely the error the operator is
+  trying to see. It is also live from the moment the window opens, before
+  Start — `start_live()` opens the sound card and runs the engine at
+  once, and tuning is what you do before a transmission, so a strip that
+  waited for Start would be dark exactly when it is wanted.
+- **The numbers live in `live/spectrum.hpp`, not in the widget**, for the
+  reason `live/ruler.hpp` exists: the marker line and the columns under
+  it must not be two implementations of "where is 1500 Hz". The mapping
+  is a pair of free functions over the band, so the GUI can place its
+  markers with no sound card open and `--metrics` can report them on a
+  machine with no audio at all.
 - Note that **no receiver in the 16-manual corpus has a waterfall**
   [docs/04]. It is an SDR-era affordance with no precedent in the survey,
-  which is part of why it defers cleanly.
-- What stays in M4 instead: a slim input level meter. Not a partial
-  reversal of the cut — without a level readout, a muted, clipping or
-  wrong-device input has no diagnosis and every failure looks like "no
-  signal". It also has the precedent the waterfall lacks: the FAX-30
-  shows signal strength and S/N while receiving [docs/04 Finding 4].
+  which is part of why it deferred cleanly — and why what it does had to
+  be argued from the signal rather than from the corpus.
+- What stayed in M4 instead, and still stands beneath it: a slim input
+  level meter. Not a partial reversal of the cut — without a level
+  readout, a muted, clipping or wrong-device input has no diagnosis and
+  every failure looks like "no signal". It also has the precedent the
+  waterfall lacks: the FAX-30 shows signal strength and S/N while
+  receiving [docs/04 Finding 4].
+- **Screamers:** `tuning_spectrum` (new, fixture-free — 33 checks, all in
+  Hz rather than pixels), `live_engine`'s `test_tuning_strip` (the wiring:
+  raw audio, and alive before Start), and `gui_layout`'s strip block (the
+  region, the toggle returning its pixels to the picture, the marker
+  columns). 10 mutations against the DSP and 7 against the layout, all
+  killed and attributed; unmutated baselines survived both passes.
+- **Never looked at by a person.** Like every GUI surface since session
+  30, this has been driven only headlessly. It joins the by-hand list.
 
 ## M5 — packaging & release  [pending]
 - CI: tier 1 release-tested (Win64, macOS universal, Linux x86_64);
@@ -1162,7 +1192,7 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    a commercial news agency~~ **Done** [Pass B, critical]. Removed from
    the working tree and from all git history (`330d408` → `aeff6a3`, all
    seven branches). `fixtures/MANIFEST.md` ships identity, provenance and
-   SHA-256 instead. Cost, accepted: **30 of 39 suites now report Skipped
+   SHA-256 instead. Cost, accepted: **30 of 40 suites now report Skipped
    from a clean checkout.**
 2. ~~A 144-byte WAV reaching ~12.9 GB of footprint~~ **Done** [Pass D,
    critical]. Data chunk clamped to the bytes that exist.
@@ -1214,9 +1244,11 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    version, and on a full-suite record whose commit is the tagged commit.
    **No run of any of it exists, because the repository has no remote.**
    What was verified instead, by hand: the inventory assertion is the
-   inventory a fixture-less build really produces (39 registered, 9 ran,
-   30 skipped; 37 and 8 and 29 with `NOVA_BUILD_GUI=OFF`), and the check
-   was seen to FAIL when given wrong numbers. The recordings stay private,
+   inventory a fixture-less build really produces (**40 registered, 10 ran,
+   30 skipped; 38 and 9 and 29 with `NOVA_BUILD_GUI=OFF`** as of session
+   36 — re-measured on real fixture-less builds when M4.5 added a suite,
+   not carried forward from session 35's 39/9/30), and the check was seen
+   to FAIL when given wrong numbers. The recordings stay private,
    so the 30 fixture-gated suites are run out of band by whoever holds
    them (`tools/record-fixture-regression.sh`) rather than by a runner —
    Pass E's RESOLVES IF names that as acceptable, and it is the strongest
@@ -1224,6 +1256,11 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    is prove Nova builds on Linux; that stays unknown until a run happens.
 13. **Session 31's two by-hand GUI runs are still outstanding** — four of
     four on-air sessions have found a defect a green suite could not see.
+    Session 36 added a third surface to look at in the same sitting:
+    M4.5's tuning strip, which has never been on a screen in front of a
+    person either. It is the one surface whose whole job is to be LOOKED
+    at, so a headless check of its geometry is further from sufficient
+    here than anywhere else in the window.
 14. **No tag, because no release decision.** Everything a tag needs is in
     place; making one is Sara's act, not an agent's.
 

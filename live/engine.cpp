@@ -164,7 +164,11 @@ LiveEngine::LiveEngine(int capture_rate, const EngineOptions& opt)
                               : default_ring_capacity(capture_rate)),
       resamp_(capture_rate, opt.internal_rate),
       demod_(opt.internal_rate, opt.demod_center, opt.demod_deviation),
-      session_(opt.internal_rate, opt.session) {
+      session_(opt.internal_rate, opt.session),
+      // At the CAPTURE rate, not the internal rate: this is the only stage
+      // in the engine that looks at the audio the sound card actually
+      // delivered.
+      spectrum_(capture_rate, opt.spectrum) {
     if (!opt_.utc_now) opt_.utc_now = system_utc_stamp;
     session_.set_decode_callback(
         [this](std::shared_ptr<const std::vector<float>> snap, long long start,
@@ -176,6 +180,33 @@ LiveEngine::LiveEngine(int capture_rate, const EngineOptions& opt)
 LiveEngine::~LiveEngine() { shutdown(); }
 
 // --- thread 4 -------------------------------------------------------------
+
+int LiveEngine::copy_spectrum(std::vector<float>* out, int* columns) const {
+    std::lock_guard<std::mutex> g(spec_mu_);
+    const int cols = spectrum_.columns();
+    const int rows = spectrum_.rows_filled();
+    if (columns) *columns = cols;
+    if (!out) return rows;
+    out->resize(static_cast<std::size_t>(rows) *
+                static_cast<std::size_t>(cols));
+    for (int r = 0; r < rows; r++) {
+        const float* src = spectrum_.row(r);
+        if (!src) return r;  // cannot happen; not worth trusting that it cannot
+        std::copy(src, src + cols,
+                  out->begin() + static_cast<std::ptrdiff_t>(r) * cols);
+    }
+    return rows;
+}
+
+double LiveEngine::spectrum_column_hz(int col) const {
+    std::lock_guard<std::mutex> g(spec_mu_);
+    return spectrum_.column_hz(col);
+}
+
+int LiveEngine::spectrum_hz_column(double hz) const {
+    std::lock_guard<std::mutex> g(spec_mu_);
+    return spectrum_.hz_column(hz);
+}
 
 void LiveEngine::start_capture() {
     std::lock_guard<std::mutex> g(cmd_mu_);
@@ -946,6 +977,16 @@ void LiveEngine::thread2() {
         for (std::size_t i = 0; i < got; i++)
             peak = std::max(peak, static_cast<double>(std::fabs(block[i])));
         since_stats += static_cast<long long>(got);
+
+        // The tuning strip [ROADMAP M4.5], fed the same raw block the peak
+        // meter just read and BEFORE the resampler below. That ordering is
+        // the whole point: a spectrum taken after the demodulator would
+        // show the tuning error already removed, which is precisely the
+        // error the operator is trying to see.
+        {
+            std::lock_guard<std::mutex> g(spec_mu_);
+            spectrum_.push(block.data(), got);
+        }
 
         const std::vector<float> mono = resamp_.push(block.data(), got);
         if (!mono.empty()) {

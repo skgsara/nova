@@ -1190,6 +1190,77 @@ void test_filenames() {
 }
 
 // --- the overrun, which must be counted rather than hidden -----------------
+// --- the M4.5 tuning strip reaches thread 4 [ROADMAP M4.5] ------------------
+// The DSP has its own suite (`tuning_spectrum`, fixture-free). What is
+// checked HERE is the wiring, and specifically the two things about it that
+// are easy to get wrong and impossible to see in a screenshot:
+//
+//   1. the strip is fed the RAW CAPTURE audio, before the resampler. A
+//      spectrum taken after the demodulator would show the tuning error
+//      already removed — a tuning aid that cannot see mistuning. The check
+//      discriminates by running the capture at 48 kHz while the internal
+//      rate is 8 kHz and feeding a 2300 Hz tone: on the raw path it lands
+//      at 2300 Hz, and there is no wiring to the video path that could put
+//      it there;
+//
+//   2. it is alive BEFORE start_capture(). Tuning a receiver is what you
+//      do before a transmission, so a strip that only draws once you have
+//      pressed Start is a strip that is dark exactly when it is wanted.
+//      This test never calls start_capture() at all.
+void test_tuning_strip() {
+    std::printf("the tuning strip's wiring [ROADMAP M4.5]\n");
+    const int capture_rate = 48000;  // deliberately NOT kInternalRate
+    nova::EngineOptions opt;
+    opt.poll_ms = 1;
+    nova::LiveEngine eng(capture_rate, opt);
+
+    std::vector<float> cols;
+    int width = 0;
+    check(eng.copy_spectrum(&cols, &width) == 0,
+          "before any audio the strip has no rows — nothing measured, which "
+          "is not the same as a quiet band");
+
+    eng.run();
+    // No start_capture(): the operator is tuning, not receiving.
+    const double f = 2300.0;  // WMO white [WMO §5.2.1]
+    std::vector<float> tone(static_cast<std::size_t>(capture_rate));
+    for (std::size_t i = 0; i < tone.size(); i++)
+        tone[i] = static_cast<float>(
+            0.5 * std::sin(2.0 * 3.14159265358979323846 * f * i /
+                           capture_rate));
+    for (std::size_t at = 0; at < tone.size();) {
+        const std::size_t n = std::min<std::size_t>(1024, tone.size() - at);
+        const std::size_t took = eng.push_audio(tone.data() + at, n);
+        at += took;
+        if (took < n) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    eng.shutdown();  // joins thread 2: everything pushed has been consumed
+
+    const int rows = eng.copy_spectrum(&cols, &width);
+    check(rows > 0 && width > 0,
+          "audio arriving with no capture started still fills the strip");
+    if (rows <= 0 || width <= 0) return;
+
+    check(cols.size() == static_cast<std::size_t>(rows) *
+                             static_cast<std::size_t>(width),
+          "the copy is exactly rows x columns, so the widget's row stride "
+          "is the one the engine used");
+
+    int peak = 0;
+    for (int c = 1; c < width; c++)
+        if (cols[static_cast<std::size_t>(c)] > cols[static_cast<std::size_t>(peak)])
+            peak = c;
+    const int want = eng.spectrum_hz_column(f);
+    checkf(std::abs(peak - want) <= 1,
+           "a 2300 Hz tone captured at 48 kHz peaks at column %d, where the "
+           "engine's own mapping puts 2300 Hz (%d) — so the strip is reading "
+           "the raw capture and not the 8 kHz video",
+           peak, want);
+    checkf(std::abs(eng.spectrum_column_hz(peak) - f) < 15.0,
+           "...and it names it %.1f Hz, not %.1f",
+           eng.spectrum_column_hz(peak), f);
+}
+
 void test_overrun_counted(const char* wav_path) {
     std::printf("a ring too small for the feed [docs/05 §2.1]\n");
     nova::Wav w = nova::read_wav(wav_path);
@@ -1257,6 +1328,7 @@ int main(int argc, char** argv) {
     test_background_buffer(argv[2], tmp);
     test_provenance();
     test_filenames();
+    test_tuning_strip();
     test_overrun_counted(argv[argc - 1]);
 
     std::printf("%s\n", failures ? "FAILED" : "OK");

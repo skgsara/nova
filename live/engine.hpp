@@ -53,6 +53,7 @@
 #include "png.hpp"
 #include "ring.hpp"
 #include "session.hpp"
+#include "spectrum.hpp"
 #include "stream.hpp"
 
 #include <atomic>
@@ -139,6 +140,11 @@ struct EngineOptions {
 
     // How long thread 2 sleeps when the ring is dry.
     int poll_ms = 5;
+
+    // The M4.5 tuning strip [ROADMAP M4.5]. Injected rather than fixed so
+    // a test can ask for a shallow history and a handful of columns
+    // instead of driving four seconds of waterfall to check one claim.
+    SpectrumOptions spectrum;
 };
 
 // --- the filename rules of §8.5 item 5, as pure functions ------------------
@@ -272,6 +278,24 @@ public:
     // no picture. Rows are appended and never revised, so this is a
     // snapshot of a prefix, never a torn image.
     bool copy_image(Image* out);
+
+    // The tuning strip's waterfall, copied under its own lock so thread 4
+    // paints from its own copy with nothing held — the same shape as
+    // `copy_image` and for the same reason [docs/05 §2].
+    //
+    // `out` receives `rows * columns()` floats, NEWEST ROW FIRST, each 0..1
+    // on the analyser's dB scale; `columns` receives the row stride.
+    // Returns the number of rows copied. **Zero means nothing has been
+    // measured yet, which is not silence** — a strip drawn as if it were
+    // would tell an operator with a dead input that the band is quiet.
+    int copy_spectrum(std::vector<float>* out, int* columns) const;
+
+    // The strip's frequency mapping, so the widget's marker lines and the
+    // columns it draws cannot disagree about where 1500 Hz is. Exposed
+    // from the engine rather than reimplemented in the GUI — the ruler
+    // taught that lesson in session 20 [live/ruler.hpp].
+    double spectrum_column_hz(int col) const;
+    int spectrum_hz_column(double hz) const;
 
     // --- thread 4: the post-decode correction [docs/05 §8.5 items 2-4] ------
     // Re-render the image on the pane from the raw stream retained behind
@@ -512,6 +536,16 @@ private:
     // choose the filename; the atomic below is the same fact for thread 4.
     bool batch_is_redecode_ = false;
     std::atomic<bool> redecoding_{false};
+
+    // The tuning strip [ROADMAP M4.5]. Thread 2 pushes RAW capture audio
+    // into it — before the resampler, because the operator is tuning a
+    // receiver and the strip must show what the receiver delivers, not the
+    // video Nova derives from it — and thread 4 copies rows out. The lock
+    // is held across one 4096-point transform at worst, about 50 us at
+    // 20 Hz, which is why guarding the analyser directly is cheaper than
+    // keeping a second published copy of the waterfall in step with it.
+    mutable std::mutex spec_mu_;
+    SpectrumAnalyzer spectrum_;
 };
 
 }  // namespace nova

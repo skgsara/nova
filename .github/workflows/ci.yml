@@ -70,9 +70,9 @@ jobs:
       - name: Suites (9 run, 30 skipped without recordings)
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a tools/check-suite-inventory.sh build 39 30
+            xvfb-run -a tools/check-suite-inventory.sh build 40 30
           else
-            tools/check-suite-inventory.sh build 39 30
+            tools/check-suite-inventory.sh build 40 30
           fi
 
       # -Wall -Wextra are on for every target; the project has been warning
@@ -109,4 +109,4 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
       - name: Suites (8 run, 29 skipped)
-        run: tools/check-suite-inventory.sh build 37 29
+        run: tools/check-suite-inventory.sh build 38 29

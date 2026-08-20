@@ -143,6 +143,21 @@ constexpr int kMenuH = 25;        // §8.3: the File / Settings / Help bar
 constexpr int kControlRowH = 25;  // §8: "25 px control rows"
 constexpr int kRulerH = 18;
 constexpr int kMeterH = 18;  // §8
+// M4.5's tuning strip [ROADMAP M4.5; Sara, session 36]. It extends the
+// full-width meter strip rather than taking sidebar space — a waterfall
+// wants width for a frequency axis, and 200 px is the wrong shape for one
+// [docs/05 §8.3 item 5]. The three sub-heights add up to kStripH and are
+// named separately because the waterfall's height is also the number of
+// history rows the analyser is asked to keep: every retained row is a drawn
+// row, so nothing is decimated on its way to the screen.
+constexpr int kStripH = 72;
+constexpr int kStripTraceH = 20;    // the instantaneous spectrum, on top
+constexpr int kStripAxisH = 12;     // the frequency labels, underneath
+constexpr int kStripWaterfallH = kStripH - kStripTraceH - kStripAxisH;  // 40
+// The two WMO tones the strip exists to let an operator line up on
+// [WMO §5.2.1, docs/01]: black is 1500 Hz, white is 2300 Hz.
+constexpr double kBlackHz = 1500.0;
+constexpr double kWhiteHz = 2300.0;
 constexpr int kStatusH = 22;
 constexpr int kPanelW = 200;
 constexpr int kPad = 4;
@@ -1016,6 +1031,178 @@ private:
     bool live_ = false;
 };
 
+// ---------------------------------------------------------------------------
+// M4.5's tuning strip [ROADMAP M4.5; cut from M4 on 2026-08-13, session 17;
+// built session 36]. A waterfall with the instantaneous spectrum along its
+// top edge and the two WMO tones marked, over 800-3000 Hz.
+//
+// It is the one region of the window that serves TUNING rather than
+// decoding, and the one with no precedent in the sixteen-manual receiver
+// corpus [docs/04] — an SDR-era affordance, which is exactly why it
+// deferred out of M4 cleanly. What earns it a place now is that every other
+// readout in the window answers "is Nova decoding this", and none of them
+// answers "is the radio on the right frequency".
+//
+// The widget DECIDES NOTHING. Columns, their frequencies and the marker
+// positions all arrive from `nova::SpectrumAnalyzer` through the engine, so
+// the ticks under the picture and the columns above them cannot disagree
+// about where 1500 Hz is — the mistake live/ruler.hpp exists to prevent,
+// made once already in session 20.
+class TuningStrip : public Fl_Widget {
+public:
+    TuningStrip(int x, int y, int w, int h) : Fl_Widget(x, y, w, h) {}
+
+    // The band's geometry: how many columns it has, and which of them hold
+    // the two WMO tones (-1 if the band does not contain one). Set ONCE, at
+    // construction, from `nova::spectrum_hz_column` — it is pure arithmetic
+    // over the band, so the marker lines do not wait for a sound card and
+    // are reportable by --metrics on a machine with no audio at all.
+    void set_markers(int columns, int black, int white) {
+        columns_ = columns;
+        black_ = black;
+        white_ = white;
+        redraw();
+    }
+
+    // Newest row first, `columns` wide, values 0..1.
+    void set_data(std::vector<float> rows, int columns, int nrows) {
+        rows_ = std::move(rows);
+        if (columns > 0) columns_ = columns;
+        nrows_ = nrows;
+        redraw();
+    }
+    int strip_rows() const { return nrows_; }
+    int black_col() const { return black_; }
+    int white_col() const { return white_; }
+
+    void draw() override {
+        fl_draw_box(FL_DOWN_BOX, x(), y(), w(), h(), FL_BLACK);
+        const int ix = x() + kFrame, iw = w() - 2 * kFrame;
+        if (iw <= 0) return;
+        const int trace_y = y() + kFrame;
+        const int wf_y = trace_y + kStripTraceH;
+        const int axis_y = wf_y + kStripWaterfallH;
+
+        // Nothing measured is not a quiet band, and must not be drawn as
+        // one — the same distinction the level meter makes with "-- dBFS".
+        // An operator with a dead input who reads an empty waterfall as
+        // "nothing on this frequency" will go and tune the radio.
+        if (nrows_ <= 0 || columns_ <= 0) {
+            fl_font(FL_HELVETICA, kFontSize);
+            fl_color(FL_INACTIVE_COLOR);
+            fl_draw("tuning strip — no input measured", x(), y(), w(), h(),
+                    FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+            return;
+        }
+
+        draw_waterfall(ix, wf_y, iw);
+        draw_trace(ix, trace_y, iw);
+        draw_markers(ix, trace_y, iw, axis_y);
+        draw_axis(ix, axis_y, iw);
+    }
+
+private:
+    // The colour ramp: black -> blue -> cyan -> yellow -> white. Chosen so
+    // that the marker colour (magenta) is nowhere in it — a marker line the
+    // signal can imitate is a marker line that can be misread.
+    static void ramp(float v, unsigned char* rgb) {
+        const float t = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+        float r, g, b;
+        if (t < 0.25f) {
+            const float u = t * 4.0f;
+            r = 0.0f; g = 0.0f; b = 0.06f + 0.49f * u;
+        } else if (t < 0.5f) {
+            const float u = (t - 0.25f) * 4.0f;
+            r = 0.0f; g = 0.78f * u; b = 0.55f + 0.45f * u;
+        } else if (t < 0.75f) {
+            const float u = (t - 0.5f) * 4.0f;
+            r = u; g = 0.78f + 0.22f * u; b = 1.0f - u;
+        } else {
+            const float u = (t - 0.75f) * 4.0f;
+            r = 1.0f; g = 1.0f; b = u;
+        }
+        rgb[0] = static_cast<unsigned char>(r * 255.0f + 0.5f);
+        rgb[1] = static_cast<unsigned char>(g * 255.0f + 0.5f);
+        rgb[2] = static_cast<unsigned char>(b * 255.0f + 0.5f);
+    }
+
+    // One row of data per row of pixels — the analyser is asked for exactly
+    // kStripWaterfallH rows of history, so this neither decimates nor
+    // stretches, and a fade that lasted one column occupies one line.
+    void draw_waterfall(int ix, int wy, int iw) {
+        buf_.resize(static_cast<std::size_t>(iw) * kStripWaterfallH * 3);
+        for (int py = 0; py < kStripWaterfallH; py++) {
+            // Newest at the TOP, history falling away below it.
+            const int r = py;
+            const float* src =
+                r < nrows_ ? &rows_[static_cast<std::size_t>(r) * columns_]
+                           : nullptr;
+            for (int px = 0; px < iw; px++) {
+                unsigned char* o =
+                    &buf_[(static_cast<std::size_t>(py) * iw + px) * 3];
+                if (!src) {
+                    o[0] = o[1] = o[2] = 0;
+                    continue;
+                }
+                const int c = px * columns_ / iw;
+                ramp(src[c], o);
+            }
+        }
+        fl_draw_image(buf_.data(), ix, wy, iw, kStripWaterfallH, 3);
+    }
+
+    void draw_trace(int ix, int ty, int iw) {
+        if (nrows_ <= 0) return;
+        const float* now = &rows_[0];
+        fl_color(FL_GREEN);
+        fl_begin_line();
+        for (int px = 0; px < iw; px++) {
+            const int c = px * columns_ / iw;
+            const float v = now[c] < 0.0f ? 0.0f : (now[c] > 1.0f ? 1.0f
+                                                                  : now[c]);
+            fl_vertex(ix + px,
+                      ty + kStripTraceH - 1 -
+                          static_cast<int>(v * (kStripTraceH - 1)));
+        }
+        fl_end_line();
+    }
+
+    // The two tones, marked through the trace AND the waterfall so that
+    // "the signal sits on the line" is one judgement and not two.
+    void draw_markers(int ix, int ty, int iw, int axis_y) {
+        fl_color(fl_rgb_color(255, 64, 255));
+        for (int c : {black_, white_}) {
+            if (c < 0 || columns_ <= 0) continue;
+            const int px = ix + c * iw / columns_;
+            fl_line(px, ty, px, axis_y - 1);
+        }
+    }
+
+    void draw_axis(int ix, int ay, int iw) {
+        fl_font(FL_HELVETICA, 9);
+        fl_color(FL_GRAY);
+        // The band ends, so a signal off the edge has a direction.
+        fl_draw("800", ix + 2, ay, 30, kStripAxisH,
+                FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
+        fl_draw("3000", ix, ay, iw - 2, kStripAxisH,
+                FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
+        fl_color(fl_rgb_color(255, 64, 255));
+        if (black_ >= 0 && columns_ > 0)
+            fl_draw("1500", ix + black_ * iw / columns_ - 14, ay, 28,
+                    kStripAxisH, FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+        if (white_ >= 0 && columns_ > 0)
+            fl_draw("2300", ix + white_ * iw / columns_ - 14, ay, 28,
+                    kStripAxisH, FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+    }
+
+    std::vector<float> rows_;
+    std::vector<unsigned char> buf_;
+    int columns_ = 0;
+    int nrows_ = 0;
+    int black_ = -1;
+    int white_ = -1;
+};
+
 constexpr int kFields = 6;  // Mode, IOC, Rate, State, Quality, Started
 
 struct Shell {
@@ -1094,6 +1281,18 @@ struct Shell {
     // item 6: measured-or-blank, and no memory between transmissions].
     nova::Correction applied;
     LevelMeter* meter = nullptr;
+    // M4.5's tuning strip and whether it is showing. Default ON [Sara,
+    // session 36]: a tuning aid nobody sees is a tuning aid nobody uses.
+    TuningStrip* strip = nullptr;
+    bool strip_on = true;
+    // One description of the strip's band, shared by the widget's markers
+    // and the engine's analyser. `history` is the waterfall's pixel height
+    // so that every retained row is a drawn row.
+    nova::SpectrumOptions strip_opt = [] {
+        nova::SpectrumOptions o;
+        o.history = kStripWaterfallH;
+        return o;
+    }();
     Fl_Box* status_bg = nullptr;
     Fl_Box* status_state = nullptr;
     Fl_Box* status_lines = nullptr;
@@ -1203,10 +1402,20 @@ struct Shell {
         return b;
     }
 
-    void build(int win_w, int win_h, const char* argv0) {
+    void build(int win_w, int win_h, const char* argv0,
+               bool strip_given = false, bool strip_arg = true) {
         FL_NORMAL_SIZE = kFontSize;
         prefs.open(executable_dir(argv0));
         image_folder = prefs.get("image_folder");
+        // Read BEFORE the window is built: the first layout has to be the
+        // remembered one, or the window visibly reflows on startup.
+        // Default on, so a missing key and a "1" mean the same thing and
+        // only an explicit "0" hides it.
+        strip_on = prefs.get("tuning_strip") != "0";
+        // --strip outranks the remembered value and does NOT write it back:
+        // an inspection run must be able to ask for a layout without
+        // changing what the operator will see next time they open Nova.
+        if (strip_given) strip_on = strip_arg;
         win = new ShellWindow(win_w, win_h, "Nova");
         win->shell = this;
         note("window", win);
@@ -1214,6 +1423,10 @@ struct Shell {
         win->end();
         // No resizable() child: the layout is computed, not scaled. FLTK
         // still lets the user resize because size_range says so.
+        // kMinH is unchanged by M4.5, checked rather than assumed: at
+        // 880x420 with the strip showing the picture area is still 258 px.
+        // Raising the minimum would have forbidden window sizes that
+        // worked before, to protect a layout that does not need it.
         win->size_range(kMinW, kMinH);
         layout(win_w, win_h);
         populate_devices();
@@ -1364,7 +1577,13 @@ struct Shell {
         menu->textsize(kFontSize);
         menu->add("File/Quit", FL_COMMAND + 'q', cb_quit, this);
         menu->add("Settings/Image folder...", 0, cb_folder, this);
+        // View sits between Settings and Help, which is where a desktop
+        // application puts it. FL_MENU_TOGGLE draws the tick; the state is
+        // set from prefs below, so the menu agrees with the window from
+        // the first frame rather than after the first click.
+        menu->add("View/Tuning strip", 0, cb_strip, this, FL_MENU_TOGGLE);
         menu->add("Help/About Nova", 0, cb_about, this);
+        sync_strip_menu();
         note("menu_bar", menu);
     }
 
@@ -1598,6 +1817,17 @@ struct Shell {
 
     // --- level meter and status line -------------------------------------
     void create_meter_and_status() {
+        strip = new TuningStrip(0, 0, 0, 0);
+        note("tuning_strip", strip);
+        // The markers are geometry, not measurement: they come from the
+        // same SpectrumOptions the engine will be handed, through the same
+        // function the analyser itself uses. So the line under the picture
+        // and the columns above it cannot disagree about where 1500 Hz is
+        // — and they are right before any audio has arrived, which is when
+        // an operator is most likely to be looking at them.
+        strip->set_markers(strip_opt.columns,
+                           nova::spectrum_hz_column(strip_opt, kBlackHz),
+                           nova::spectrum_hz_column(strip_opt, kWhiteHz));
         meter = new LevelMeter(0, 0, 0, 0);
         note("level_meter", meter);
 
@@ -1647,7 +1877,12 @@ struct Shell {
         start->resize(W - kPad - 164, row_y + 2, 64, kControlRowH - 4);
 
         const int main_y = kMenuH + kControlRowH;
-        const int main_h = H - main_y - kMeterH - kStatusH;
+        // The strip takes its height from the picture area when it is
+        // showing and gives every pixel back when it is not — the whole
+        // point of it being a toggle [§8.3 item 5's "adding a region later
+        // is an edit, not a redesign"].
+        const int strip_h = strip_on ? kStripH : 0;
+        const int main_h = H - main_y - strip_h - kMeterH - kStatusH;
         const int pane_w = W - kPanelW - 2 * kPad;
 
         pane->resize(kPad, main_y + kRulerH, pane_w, main_h - kRulerH - kPad);
@@ -1662,8 +1897,13 @@ struct Shell {
 
         layout_sidebar(W, main_y, main_h);
 
-        meter->resize(0, main_y + main_h, W, kMeterH);
-        const int sy = main_y + main_h + kMeterH;
+        // Directly above the meter, full width, both of them below the
+        // picture: the strip EXTENDS the meter strip rather than competing
+        // with the sidebar [docs/05 §8.3 item 5].
+        strip->resize(0, main_y + main_h, W, strip_h);
+        if (strip_on) strip->show(); else strip->hide();
+        meter->resize(0, main_y + main_h + strip_h, W, kMeterH);
+        const int sy = main_y + main_h + strip_h + kMeterH;
         status_bg->resize(0, sy, W, kStatusH);
         status_state->resize(kPad, sy, 240, kStatusH);
         status_lines->resize(kPad + 250, sy, 120, kStatusH);
@@ -2119,6 +2359,11 @@ struct Shell {
 
         nova::EngineOptions opt;
         opt.image_folder = image_folder;
+        // The same band description the markers were drawn from — one
+        // object, so the analyser and the widget cannot be configured
+        // differently. live/spectrum.hpp never learns what a widget is;
+        // this is the one place that knows the strip's pixel height.
+        opt.spectrum = strip_opt;
         engine.reset(new nova::LiveEngine(static_cast<int>(audio_rate), opt));
         engine->run();
 
@@ -2371,6 +2616,23 @@ struct Shell {
             apply_state();
             update_status();
         }
+        refresh_strip();
+    }
+
+    // M4.5's tuning strip, refreshed on the same 50 ms tick as everything
+    // else [docs/05 §2.3] — the analyser produces one column per 50 ms, so
+    // the strip advances exactly one row per repaint.
+    //
+    // Skipped entirely while hidden. That is not only an economy: the
+    // waterfall the operator gets back on re-showing should be the CURRENT
+    // few seconds, and there is nothing to be gained by keeping a buffer
+    // warm that nobody is looking at.
+    void refresh_strip() {
+        if (!strip_on || !engine) return;
+        int cols = 0;
+        std::vector<float> rows;
+        const int n = engine->copy_spectrum(&rows, &cols);
+        strip->set_data(std::move(rows), cols, n);
     }
 
     void set_quality(const nova::DecodeResult& r) {
@@ -2513,6 +2775,29 @@ struct Shell {
     // BlackHole selected). It is insensitive from Start until the
     // transmission ends, so this can only fire while monitoring or after a
     // save: there is never a live chart for the reopen to kill.
+    // Keep the tick in the menu and the region in the window saying the
+    // same thing. Called at construction and after every toggle, so the two
+    // cannot drift — a checkbox that disagrees with the window is worse
+    // than no checkbox.
+    void sync_strip_menu() {
+        Fl_Menu_Item* it =
+            const_cast<Fl_Menu_Item*>(menu->find_item("View/Tuning strip"));
+        if (!it) return;
+        if (strip_on) it->set(); else it->clear();
+    }
+
+    static void cb_strip(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        s->strip_on = !s->strip_on;
+        s->prefs.set("tuning_strip", s->strip_on ? "1" : "0");
+        s->sync_strip_menu();
+        // The window does not change size: the strip takes its height from
+        // the picture area and gives it back. Toggling it must not move the
+        // operator's window on their desktop.
+        s->layout(s->win->w(), s->win->h());
+        s->win->redraw();
+    }
+
     static void cb_device(Fl_Widget*, void* p) {
         Shell* s = static_cast<Shell*>(p);
         const int v = s->device->value();
@@ -3047,6 +3332,20 @@ void print_metrics_state(const Shell& s) {
                 s.recv && s.recv->complete() ? 1 : 0);
     std::printf("  pane_held            \"%d\"\n",
                 s.engine && s.engine->pane_held() ? 1 : 0);
+    // M4.5's tuning strip. Read off the WIDGET, not recomputed here: an
+    // inspection that restates the rule pins the restatement, which is this
+    // file's standing lesson.
+    std::printf("  strip_visible        \"%d\"\n",
+                s.strip && s.strip->visible() ? 1 : 0);
+    std::printf("  strip_rows           \"%d\"\n",
+                s.strip ? s.strip->strip_rows() : 0);
+    // The two marker columns, so that "the tick is where 1500 Hz is" is a
+    // checkable claim rather than a comment. -1 means the band does not
+    // contain the tone, which would be a band nobody should ship.
+    std::printf("  strip_black_col      \"%d\"\n",
+                s.strip ? s.strip->black_col() : -1);
+    std::printf("  strip_white_col      \"%d\"\n",
+                s.strip ? s.strip->white_col() : -1);
 }
 
 void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
@@ -3292,6 +3591,12 @@ struct ParsedArgs {
     int zoom_index = 0;
     int ioc_index = 0;
     int rate_index = 0;
+    // M4.5's tuning strip. `strip_given` is separate from `strip_on`
+    // because the flag has to be able to say "off" and OUTRANK the
+    // remembered preference — otherwise a test's answer would depend on
+    // whatever the person running it last chose in the View menu.
+    bool strip_on = true;
+    bool strip_given = false;
 };
 
 // The flags that decide what the run IS — an inspection, a window at a
@@ -3323,6 +3628,18 @@ bool parse_inspection_flag(int argc, char** argv, int* i, ParsedArgs* a,
                         &a->resize_h) == 2 &&
             a->resize_w >= kMinW && a->resize_h >= kMinH)
             return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--strip")) {
+        if (*i + 1 < argc) {
+            const char* v = argv[++(*i)];
+            if (!std::strcmp(v, "on") || !std::strcmp(v, "off")) {
+                a->strip_on = !std::strcmp(v, "on");
+                a->strip_given = true;
+                return true;
+            }
+        }
         *bad = true;
         return true;
     }
@@ -3515,6 +3832,7 @@ void print_usage() {
                  "usage: nova-gui [--devices] [--metrics] [--size WxH] "
                  "[--resize WxH]\n"
                  "                [--state NAME] [--zoom fit|25|50|100|200]"
+                 " [--strip on|off]"
                  "\n                [--ioc auto|576|288] "
                  "[--rate auto|60|90|120]\n"
                  "                [--follow BATCHESxROWS] "
@@ -3553,7 +3871,8 @@ bool parse_args(int argc, char** argv, ParsedArgs* a) {
 // and a picture on the pane if a click is coming.
 void configure_shell(Shell& shell, const ParsedArgs& args,
                      const char* argv0) {
-    shell.build(args.win_w, args.win_h, argv0);
+    shell.build(args.win_w, args.win_h, argv0, args.strip_given,
+                args.strip_on);
     // Before anything can feed: `build` has just read the remembered folder
     // out of prefs, and this is what replaces it.
     if (!args.image_folder_arg.empty())

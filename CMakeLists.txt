@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # live FLTK/RtAudio shell, is the milestone that is complete. It is the
 # ONLY place the version is written [E-GAP-001]; core/version.hpp.in is
 # expanded from it and `version_flag` fails if any binary disagrees.
-project(nova VERSION 0.4.0 LANGUAGES CXX)
+project(nova VERSION 0.4.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,8 +59,17 @@ target_include_directories(nova-core PUBLIC core ${CMAKE_BINARY_DIR}/generated)
 # and the phasing watcher that hands the preview its anchor [§6 item 1].
 # live/png.cpp is the save format: hand-rolled greyscale PNG, stored
 # deflate blocks, no dependency [ROADMAP M4, decided session 16].
+# live/spectrum.cpp is M4.5's tuning strip [ROADMAP M4.5]: a rolling
+# spectrum over the RAW capture audio, before the resampler, because the
+# operator is tuning a receiver and the strip has to show what the receiver
+# is actually delivering rather than the video Nova derives from it. It is
+# here rather than in the GUI for the reason everything else in this library
+# is: a column that names the wrong frequency is a thing that can be wrong
+# about a signal, and it is testable with a generated tone instead of a
+# sound card.
 add_library(nova-live STATIC
   live/ruler.cpp
+  live/spectrum.cpp
   live/stream.cpp
   live/tone_stream.cpp
   live/preview.cpp
@@ -97,7 +106,7 @@ enable_testing()
 # instead is fixtures/MANIFEST.md — every fixture's identity, provenance and
 # SHA-256 — plus the bounds, which are in this file beside each test.
 #
-# 30 of the 39 suites need one of those recordings. From a checkout without
+# 30 of the 40 suites need one of those recordings. From a checkout without
 # them they are still REGISTERED and reported Skipped, with the reason,
 # rather than quietly not existing — a suite that shrinks from 38 to 8 while
 # reporting a green run tells you nothing is wrong when two thirds of the
@@ -105,7 +114,7 @@ enable_testing()
 #
 # Known limit of the mechanism, stated because the alternative is believing
 # it does more than it does: ctest counts a skipped test as passed in its
-# headline, so `ctest` still ends with "100% tests passed out of 39". What
+# headline, so `ctest` still ends with "100% tests passed out of 40". What
 # carries the truth is the "The following tests did not run:" block printed
 # after it — 30 lines, each naming a suite — and the configure-time message
 # below. Making the skips FAIL instead would be louder and wrong: a checkout
@@ -127,7 +136,7 @@ else()
   set(NOVA_HAVE_FIXTURES OFF)
   message(STATUS
     "fixtures: ABSENT - 30 suites needing an off-air recording will be "
-    "SKIPPED (see fixtures/MANIFEST.md); 9 synthetic suites still run")
+    "SKIPPED (see fixtures/MANIFEST.md); 10 synthetic suites still run")
 endif()
 
 # Registers a suite that needs a recording. Present: a normal test. Absent:
@@ -570,6 +579,17 @@ nova_fixture_test(NAME override_sync_fallback COMMAND nova-test-overrides sync
   ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-white-sector-120s.wav
   ${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav)
+
+# M4.5's tuning strip [ROADMAP M4.5]. Unguarded and fixture-free: it
+# generates its own tones, so it runs from a bare clone like the other
+# synthetic matrices. The claims it defends are in Hz — a waterfall is the
+# most convincing wrong answer in the project, because colourful noise in
+# roughly the right shape reads as a working instrument, and an operator
+# nulling a mistune against a marker line that names the wrong frequency has
+# been actively misled rather than merely unhelped.
+add_executable(nova-test-spectrum tests/test_spectrum.cpp)
+target_link_libraries(nova-test-spectrum PRIVATE nova-live)
+add_test(NAME tuning_spectrum COMMAND nova-test-spectrum)
 
 # ---------------------------------------------------------------------------
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an

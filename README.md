@@ -375,7 +375,7 @@ are welcome.
 and Linux x86-64 and would be that evidence, **but it has never executed:
 this repository has no remote, so no run of it exists.** Its steps were
 checked by hand against a fixture-less local build — the inventory it
-asserts, 39 suites registered and 30 skipped without recordings, is the
+asserts, 40 suites registered and 30 skipped without recordings, is the
 inventory such a build actually produces, and the check was seen to fail
 when given the wrong numbers. That is a verified script, not a verified
 platform. The Linux row is there to find out whether Nova builds on
@@ -465,6 +465,18 @@ by UTC timestamp, with the decode QA in the file's text chunks. Force
 Start begins mid-transmission with an operator-supplied IOC and rate; the
 PHASE and SYNC controls correct the picture forward while it draws.
 
+Above the level meter is the **tuning strip** (M4.5): a waterfall with the
+live spectrum along its top edge, covering 800–3000 Hz, marking the two
+WMO tones at 1500 Hz (black) and 2300 Hz (white) [WMO §5.2.1]. Tune until
+the signal sits on the marks. It reads the raw sound-card audio rather
+than the demodulated video — a spectrum taken after demodulation would
+show the tuning error already removed — and it runs from the moment the
+window opens rather than from Start, because tuning precedes reception.
+`View → Tuning strip` hides it and returns its 72 px to the picture; the
+setting is remembered. No receiver in the sixteen-manual survey behind
+Nova's UI has a waterfall (`docs/04`): it is an SDR-era affordance, and
+what it does here is argued from the signal rather than from that corpus.
+
 Everything between the sound card and the saved file lives in the
 dependency-free `nova-live` library and is covered by the test suite; the
 GUI binary is widgets, one audio callback and a timer.
@@ -476,6 +488,7 @@ device when it does:
 ./build/nova-gui --devices
 ./build/nova-gui --metrics
 ./build/nova-gui --version
+./build/nova-gui --metrics --strip off   # the layout with the strip hidden
 ```
 
 ## License

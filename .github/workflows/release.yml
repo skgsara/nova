@@ -38,7 +38,7 @@ jobs:
       - run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build --target nova-gui
       - run: cmake --build build --parallel
-      - run: tools/check-suite-inventory.sh build 39 30
+      - run: tools/check-suite-inventory.sh build 40 30
 
   fixture-regression-record:
     name: The out-of-band full-suite record
