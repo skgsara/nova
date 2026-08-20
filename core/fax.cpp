@@ -1,4 +1,8 @@
-// fax.cpp
+// fax.cpp — the batch decode pipeline, onset to assembled image.
+// Signpost for the filename browser [audit Pass C, C-MAINT-018]: the
+// per-line sync lock lives in THIS file — `fax_best_sync`, the `lock`
+// threshold, stage_track. core/phasing.cpp is the ~30 s phasing-interval
+// detector, NOT the per-line sync.
 #include "fax.hpp"
 #include "constants.hpp"
 #include "phasing.hpp"
@@ -256,6 +260,65 @@ double fold_shift(const std::vector<double>& a, const std::vector<double>& b,
     return best_lag + d;
 }
 
+// Fold each block of per_block lines into one mean-removed profile of
+// plen samples (JWX's accumulation idea — see the header above).
+std::vector<std::vector<double>> fold_profiles(const std::vector<float>& v,
+                                               size_t start, double period,
+                                               int nb, int per_block,
+                                               int plen) {
+    std::vector<std::vector<double>> prof(
+        nb, std::vector<double>(plen, 0.0));
+    for (int b = 0; b < nb; b++) {
+        for (int l = 0; l < per_block; l++) {
+            const double base =
+                start + (static_cast<double>(b) * per_block + l) * period;
+            for (int i = 0; i < plen; i++)
+                prof[b][i] += fax_lerp_at(v, base + i);
+        }
+        double m = 0.0;
+        for (int i = 0; i < plen; i++) m += prof[b][i];
+        m /= plen;
+        for (int i = 0; i < plen; i++) prof[b][i] -= m;
+    }
+    return prof;
+}
+
+// Phase walk, accumulated inside runs of surviving pairs. A fade or
+// a restart must not invalidate the blocks after it, and must not
+// have its unmeasured drift folded into the total: a rejected pair
+// starts a new segment, and only within-segment pairs contribute
+// slopes. The long baselines inside each segment are what make this
+// precise; the segmentation is what keeps it honest.
+// Returns the median within-segment pairwise slope (samples per block),
+// or false where no segment holds a pair.
+bool segmented_drift(const DecodeHooks& hooks, const std::vector<double>& sh,
+                     const std::vector<bool>& good, double* drift) {
+    const int nb = static_cast<int>(sh.size());
+    std::vector<double> phase(nb, 0.0);
+    std::vector<int> seg(nb, 0);
+    for (int b = 1; b < nb; b++) {
+        if (!good[b]) {
+            seg[b] = seg[b - 1] + 1;
+            phase[b] = 0.0;
+        } else {
+            seg[b] = seg[b - 1];
+            phase[b] = phase[b - 1] + sh[b];
+        }
+    }
+    if (hooks.log)
+        for (int b = 1; b < nb; b++)
+            dlog(hooks, LogTopic::kFold, "dbg: fold blk %2d shift %+9.2f %s",
+                 b, sh[b], good[b] ? "" : "REJECT");
+    std::vector<double> slopes;
+    for (int i = 0; i < nb; i++)
+        for (int j = i + 1; j < nb; j++)
+            if (seg[i] == seg[j])
+                slopes.push_back((phase[j] - phase[i]) / (j - i));
+    if (slopes.empty()) return false;
+    *drift = median(slopes);  // samples per block
+    return true;
+}
+
 double refine_period(const std::vector<float>& v, size_t start, double period,
                      int n_lines, const DecodeHooks& hooks) {
     const int nb = std::min(kFoldMaxBlocks, n_lines / kFoldMinLines);
@@ -267,20 +330,8 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
         // Lag window: ±plen/8 covers ~1500 ppm of drift per block at any
         // usable block length, and keeps the O(plen * lag) correlation cheap.
         const int maxlag = std::max(4, plen / 8);
-        std::vector<std::vector<double>> prof(
-            nb, std::vector<double>(plen, 0.0));
-        for (int b = 0; b < nb; b++) {
-            for (int l = 0; l < per_block; l++) {
-                const double base =
-                    start + (static_cast<double>(b) * per_block + l) * period;
-                for (int i = 0; i < plen; i++)
-                    prof[b][i] += fax_lerp_at(v, base + i);
-            }
-            double m = 0.0;
-            for (int i = 0; i < plen; i++) m += prof[b][i];
-            m /= plen;
-            for (int i = 0; i < plen; i++) prof[b][i] -= m;
-        }
+        const std::vector<std::vector<double>> prof =
+            fold_profiles(v, start, period, nb, per_block, plen);
 
         // Consecutive-block shifts first, then a robust centre. A long
         // recording is not one picture: each new chart restarts the paper at
@@ -308,34 +359,8 @@ double refine_period(const std::vector<float>& v, size_t start, double period,
         for (int b = 1; b < nb; b++)
             if (good[b] && std::fabs(sh[b] - centre) > tol) good[b] = false;
 
-        // Phase walk, accumulated inside runs of surviving pairs. A fade or
-        // a restart must not invalidate the blocks after it, and must not
-        // have its unmeasured drift folded into the total: a rejected pair
-        // starts a new segment, and only within-segment pairs contribute
-        // slopes. The long baselines inside each segment are what make this
-        // precise; the segmentation is what keeps it honest.
-        std::vector<double> phase(nb, 0.0);
-        std::vector<int> seg(nb, 0);
-        for (int b = 1; b < nb; b++) {
-            if (!good[b]) {
-                seg[b] = seg[b - 1] + 1;
-                phase[b] = 0.0;
-            } else {
-                seg[b] = seg[b - 1];
-                phase[b] = phase[b - 1] + sh[b];
-            }
-        }
-        if (hooks.log)
-            for (int b = 1; b < nb; b++)
-                dlog(hooks, LogTopic::kFold, "dbg: fold blk %2d shift %+9.2f %s",
-                     b, sh[b], good[b] ? "" : "REJECT");
-        std::vector<double> slopes;
-        for (int i = 0; i < nb; i++)
-            for (int j = i + 1; j < nb; j++)
-                if (seg[i] == seg[j])
-                    slopes.push_back((phase[j] - phase[i]) / (j - i));
-        if (slopes.empty()) return period;
-        const double drift = median(slopes);  // samples per block
+        double drift = 0.0;
+        if (!segmented_drift(hooks, sh, good, &drift)) return period;
         const double next = period + drift / per_block;
         dlog(hooks, LogTopic::kInfo,
              "dbg: fold pass %d: %d blocks x %d lines, drift "
@@ -463,6 +488,121 @@ struct DecodeState {
 };
 
 // --- 1. signal onset + coarse line rate -----------------------------------
+// One 15 s window's odd-comb score against each candidate line rate.
+struct OnsetWindow {
+    size_t s;
+    double score[3];  // per kCombRates entry
+};
+constexpr int kCombRates[3] = {60, 90, 120};
+
+// Scan the recording in 15 s windows and score each against the candidate
+// line rates; *gate comes out relative to the strongest window in the
+// file, with an absolute floor. Measured on the library (session 3): fill
+// <= 0.05 (looped stall-fill up to 0.12), 120 lpm signal 0.10-0.60,
+// 60 lpm newspaper fax 0.07-0.18 — a fixed gate cannot serve both, a
+// relative one can.
+std::vector<OnsetWindow> scan_comb_windows(DecodeState& st,
+                                           const std::vector<float>& v200,
+                                           size_t start200, double* gate) {
+    const DecodeOptions& opt = st.opt;
+    const double kGateFloor = 0.06;
+    const size_t kWin = 3000, kHop = 1500;  // 15 s / 7.5 s at 200 Hz
+
+    const size_t avail200 = v200.size() - start200;
+    const size_t wlen = avail200 >= kWin ? kWin : avail200;
+    const size_t hop = avail200 >= kWin ? kHop : 1;
+    std::vector<OnsetWindow> wins;
+    double file_max = 0.0;
+    for (size_t s = start200; s + wlen <= v200.size(); s += hop) {
+        throw_if_cancelled(st.hooks, "onset");
+        OnsetWindow w{s, {0.0, 0.0, 0.0}};
+        for (size_t ri = 0; ri < 3; ri++) {
+            if (opt.lpm != 0 && kCombRates[ri] != opt.lpm) continue;
+            w.score[ri] = comb_score(v200, s, wlen, kCombRates[ri] / 60.0);
+            file_max = std::max(file_max, w.score[ri]);
+        }
+        wins.push_back(w);
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: comb win@%.1fs 60=%.3f 90=%.3f 120=%.3f",
+             s / 200.0, w.score[0], w.score[1], w.score[2]);
+        report(st.hooks, "onset",
+               static_cast<double>(s - start200) /
+                   std::max<size_t>(1, v200.size() - wlen));
+        if (wlen == avail200) break;  // short file: single window
+    }
+    *gate = std::max(kGateFloor, 0.5 * file_max);
+    return wins;
+}
+
+// Rate rule: the LOWEST rate whose odd teeth clear the gate wins. A
+// true 60 lpm comb has energy at its 1 Hz fundamental; a true 120 lpm
+// signal has nothing at 1/3/5 Hz, so its 60-candidate never clears
+// (measured <= 0.01). The reverse rule would be ambiguous: 120's
+// teeth are a subset of 60's comb.
+//
+// Onset = first window of the first pair of consecutive windows that
+// clear the gate on the same rate (isolated clears can be fill
+// artifacts; a real transmission sustains).
+size_t find_comb_onset(const std::vector<OnsetWindow>& wins, double gate,
+                       int* lpm) {
+    auto clearing_rate = [&](const OnsetWindow& w) -> int {
+        for (size_t ri = 0; ri < 3; ri++)
+            if (w.score[ri] >= gate) return kCombRates[ri];
+        return 0;
+    };
+    size_t onset200 = 0;
+    bool have_onset = false;
+    for (size_t i = 1; i < wins.size(); i++) {
+        const int r0 = clearing_rate(wins[i - 1]);
+        const int r1 = clearing_rate(wins[i]);
+        if (r0 != 0 && r0 == r1) {
+            onset200 = wins[i - 1].s;
+            if (*lpm == 0) *lpm = r0;
+            have_onset = true;
+            break;
+        }
+    }
+    if (!have_onset && wins.size() == 1 && clearing_rate(wins[0]) != 0) {
+        onset200 = wins[0].s;  // short file: one window is all we have
+        if (*lpm == 0) *lpm = clearing_rate(wins[0]);
+        have_onset = true;
+    }
+    if (!have_onset)
+        throw DecodeError(DecodeErrorKind::kNoSignal,
+                          "decode_fax: no fax line comb found (fill or no "
+                          "signal)");
+    return onset200;
+}
+
+// Refine the coarse period against the whole recording before anything
+// is measured on it. The coarse fit is off by 30-180 ppm on real
+// signals (session 5, measured against pass B across the library: JSC6
+// +261 coarse vs +438 fitted, XSG ASPN +26 vs -90). A pulse station
+// survives that because pass B refits from its locks; a white-only
+// station draws on it directly and slants by exactly that error.
+void refine_and_set_period(DecodeState& st, double period_200) {
+    const DecodeOptions& opt = st.opt;
+    const size_t avail = st.video.size() - st.start;
+    int n_lines0 = static_cast<int>(avail / (period_200 * st.fs / 200.0));
+    if (opt.max_lines > 0) n_lines0 = std::min(n_lines0, opt.max_lines);
+    const double period0 = refine_period(st.video, st.start,
+                                         period_200 * st.fs / 200.0, n_lines0,
+                                         st.hooks);
+    dlog(st.hooks, LogTopic::kInfo, "dbg: period refined to %.4f (%+.1f ppm)",
+         period0, (period0 / st.nominal - 1.0) * 1e6);
+    st.period0 = period0;
+
+    st.pulse = kPulseFrac * period0;
+    st.dead = kDeadFrac * period0;
+
+    int n_lines = static_cast<int>(avail / period0);
+    if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
+    if (n_lines < 4)
+        throw DecodeError(DecodeErrorKind::kTooFewLines,
+                          "decode_fax: too few lines");
+    st.n_lines = n_lines;
+}
+
 void stage_onset(DecodeState& st) {
     const DecodeOptions& opt = st.opt;
     DecodeResult& res = st.res;
@@ -484,78 +624,11 @@ void stage_onset(DecodeState& st) {
         throw DecodeError(DecodeErrorKind::kTooShort,
                           "decode_fax: recording too short");
 
-    // Gate: relative to the strongest window in the file, with an absolute
-    // floor. Measured on the library (session 3): fill <= 0.05 (looped
-    // stall-fill up to 0.12), 120 lpm signal 0.10-0.60, 60 lpm newspaper
-    // fax 0.07-0.18 — a fixed gate cannot serve both, a relative one can.
-    const double kGateFloor = 0.06;
-    const size_t kWin = 3000, kHop = 1500;  // 15 s / 7.5 s at 200 Hz
-    static const int kRates[] = {60, 90, 120};
-
-    const size_t avail200 = v200.size() - start200;
-    const size_t wlen = avail200 >= kWin ? kWin : avail200;
-    const size_t hop = avail200 >= kWin ? kHop : 1;
-    struct Win {
-        size_t s;
-        double score[3];  // per kRates entry
-    };
-    std::vector<Win> wins;
-    double file_max = 0.0;
-    for (size_t s = start200; s + wlen <= v200.size(); s += hop) {
-        throw_if_cancelled(st.hooks, "onset");
-        Win w{s, {0.0, 0.0, 0.0}};
-        for (size_t ri = 0; ri < 3; ri++) {
-            if (opt.lpm != 0 && kRates[ri] != opt.lpm) continue;
-            w.score[ri] = comb_score(v200, s, wlen, kRates[ri] / 60.0);
-            file_max = std::max(file_max, w.score[ri]);
-        }
-        wins.push_back(w);
-        dlog(st.hooks, LogTopic::kInfo,
-             "dbg: comb win@%.1fs 60=%.3f 90=%.3f 120=%.3f",
-             s / 200.0, w.score[0], w.score[1], w.score[2]);
-        report(st.hooks, "onset",
-               static_cast<double>(s - start200) /
-                   std::max<size_t>(1, v200.size() - wlen));
-        if (wlen == avail200) break;  // short file: single window
-    }
-    const double gate = std::max(kGateFloor, 0.5 * file_max);
-
-    // Rate rule: the LOWEST rate whose odd teeth clear the gate wins. A
-    // true 60 lpm comb has energy at its 1 Hz fundamental; a true 120 lpm
-    // signal has nothing at 1/3/5 Hz, so its 60-candidate never clears
-    // (measured <= 0.01). The reverse rule would be ambiguous: 120's
-    // teeth are a subset of 60's comb.
-    auto clearing_rate = [&](const Win& w) -> int {
-        for (size_t ri = 0; ri < 3; ri++)
-            if (w.score[ri] >= gate) return kRates[ri];
-        return 0;
-    };
-
-    // Onset = first window of the first pair of consecutive windows that
-    // clear the gate on the same rate (isolated clears can be fill
-    // artifacts; a real transmission sustains).
-    size_t onset200 = 0;
+    double gate = 0.0;
+    const std::vector<OnsetWindow> wins =
+        scan_comb_windows(st, v200, start200, &gate);
     int lpm = opt.lpm;
-    bool have_onset = false;
-    for (size_t i = 1; i < wins.size(); i++) {
-        const int r0 = clearing_rate(wins[i - 1]);
-        const int r1 = clearing_rate(wins[i]);
-        if (r0 != 0 && r0 == r1) {
-            onset200 = wins[i - 1].s;
-            if (lpm == 0) lpm = r0;
-            have_onset = true;
-            break;
-        }
-    }
-    if (!have_onset && wins.size() == 1 && clearing_rate(wins[0]) != 0) {
-        onset200 = wins[0].s;  // short file: one window is all we have
-        if (lpm == 0) lpm = clearing_rate(wins[0]);
-        have_onset = true;
-    }
-    if (!have_onset)
-        throw DecodeError(DecodeErrorKind::kNoSignal,
-                          "decode_fax: no fax line comb found (fill or no "
-                          "signal)");
+    const size_t onset200 = find_comb_onset(wins, gate, &lpm);
 
     // Period: autocorrelation over everything from onset to EOF (the
     // onset gate has already excluded fill, the historical bias source).
@@ -576,38 +649,155 @@ void stage_onset(DecodeState& st) {
     st.start = onset200 * static_cast<size_t>(fs) / 200;
     st.nominal = fs * 60.0 / lpm;
 
-    // Refine the coarse period against the whole recording before anything
-    // is measured on it. The coarse fit is off by 30-180 ppm on real
-    // signals (session 5, measured against pass B across the library: JSC6
-    // +261 coarse vs +438 fitted, XSG ASPN +26 vs -90). A pulse station
-    // survives that because pass B refits from its locks; a white-only
-    // station draws on it directly and slants by exactly that error.
-    const size_t avail = video.size() - st.start;
-    int n_lines0 = static_cast<int>(avail / (period_200 * fs / 200.0));
-    if (opt.max_lines > 0) n_lines0 = std::min(n_lines0, opt.max_lines);
-    const double period0 = refine_period(video, st.start,
-                                         period_200 * fs / 200.0, n_lines0,
-                                         st.hooks);
-    dlog(st.hooks, LogTopic::kInfo, "dbg: period refined to %.4f (%+.1f ppm)",
-         period0, (period0 / st.nominal - 1.0) * 1e6);
-    st.period0 = period0;
-
-    st.pulse = kPulseFrac * period0;
-    st.dead = kDeadFrac * period0;
-
-    int n_lines = static_cast<int>(avail / period0);
-    if (opt.max_lines > 0) n_lines = std::min(n_lines, opt.max_lines);
-    if (n_lines < 4)
-        throw DecodeError(DecodeErrorKind::kTooFewLines,
-                          "decode_fax: too few lines");
-    st.n_lines = n_lines;
+    refine_and_set_period(st, period_200);
 }
 
 // --- 2. coarse phase + dead-sector style, from across-line consistency ----
+// Wrapped window mean of a profile; the dead sector straddles the line
+// boundary, so every window here wraps.
+double win_mean(const std::vector<double>& f, int at, int win, int plen) {
+    double s = 0.0;
+    for (int j = 0; j < win; j++) s += f[((at + j) % plen + plen) % plen];
+    return s / win;
+}
+
+// Stack prof_lines lines on the coarse period and count, per position, the
+// fraction of lines that are dark (or white) there.
+void build_consistency_profiles(const DecodeState& st, int prof0,
+                                int prof_lines, int plen,
+                                std::vector<double>& dark_frac,
+                                std::vector<double>& white_frac) {
+    for (int l = 0; l < prof_lines; l++) {
+        throw_if_cancelled(st.hooks, "dead-sector");
+        const double base = st.start + (prof0 + l) * st.period0;
+        for (int i = 0; i < plen; i++) {
+            const float x = fax_lerp_at(st.video, base + i);
+            if (x < kDarkLevel) dark_frac[i] += 1.0;
+            if (x > kWhiteLevel) white_frac[i] += 1.0;
+        }
+    }
+    for (int i = 0; i < plen; i++) {
+        dark_frac[i] /= prof_lines;
+        white_frac[i] /= prof_lines;
+    }
+}
+
+// The two anchor candidates of the across-line consistency scan, and the
+// consistency each scored. See stage_dead_sector.
+struct AnchorCandidates {
+    double pulse_shape = -1.0, white_shape = -1.0;
+    int pulse_at = 0, white_at = 0;
+    double pulse_cons = 0.0, white_cons = 0.0;
+};
+
+// Both anchors score a SHAPE, not a level. Level alone is not enough:
+// a full-disk satellite image carries black space at both line margins,
+// dark on 100% of lines over hundreds of samples, so "darkest window"
+// lands anywhere inside that band (measured: FAXSignal and himawari,
+// session 4). What identifies the pulse is that black is followed
+// immediately by white [WMO §5.1.3.3] — so score the pair, and take the
+// weaker half, which the black band cannot fake.
+AnchorCandidates scan_anchor_shapes(const DecodeState& st,
+                                    const std::vector<double>& dark_frac,
+                                    const std::vector<double>& white_frac,
+                                    int plen, int pulse_w, int dead_w) {
+    AnchorCandidates ac;
+    for (int i = 0; i < plen; i++) {
+        const double s =
+            std::min(win_mean(dark_frac, i, pulse_w, plen),
+                     win_mean(white_frac, i + pulse_w, pulse_w, plen));
+        if (s > ac.pulse_shape) {
+            ac.pulse_shape = s;
+            ac.pulse_at = i;
+        }
+        // White-only: the anchor is the entry into the dead sector — where
+        // consistent whiteness starts [WMO §5.2.3.4 puts the phasing
+        // reference at exactly that edge]. A rising edge in white-fraction
+        // survives the run being wider than the dead sector, which happens
+        // whenever the chart also has a white margin (VMW 2215Z: 45 ms of
+        // always-white for a 22.5 ms dead sector).
+        const double e = win_mean(white_frac, i, dead_w, plen) -
+                         win_mean(white_frac, i - dead_w, dead_w, plen);
+        if (e > ac.white_shape) {
+            ac.white_shape = e;
+            ac.white_at = i;
+        }
+    }
+    ac.pulse_cons = win_mean(dark_frac, ac.pulse_at, pulse_w, plen);
+    ac.white_cons = win_mean(white_frac, ac.white_at, dead_w, plen);
+    if (st.hooks.log)
+        for (int i = 0; i < plen; i += std::max(1, plen / 200))
+            dlog(st.hooks, LogTopic::kProfile, "prof %5d dark=%.2f white=%.2f",
+                 i, dark_frac[i], white_frac[i]);
+    return ac;
+}
+
+// --- the operator's PHASE: seed the search, then refine [docs/05 §7.1]
+// The scan in stage_dead_sector is global, and that is exactly what fails
+// when it fails: it takes the strongest candidate in the whole line, and
+// on the
+// recordings that need this field the strongest candidate is not the
+// dead sector. So run the SAME score again over a window around the
+// operator's hint and take the best position there. What that buys is
+// the split the decision is built on — the operator says which feature,
+// the profile says where in it — and it costs nothing when the hint is
+// already right, because the same score has the same maximum.
+//
+// The window is `search_frac` (±3% of a line, ±120 samples on a 4000-
+// sample line), which is not a new constant: it is the same latitude
+// the per-line tracker is given below for the same quantity, how far
+// from where we think it is the line start may actually be. A wider one
+// would let the global winner back in and swallow the hint, which is
+// the one thing this field exists to prevent.
+//
+// The STYLE decision above is deliberately left upstream of this, on
+// the global scan. Which of the two dead-sector styles a station sends
+// [WMO §5.1.3.3] is a property of the transmission measured across
+// every line; a click is about position. Refining the style here too
+// would let a hint pointed at a white feature on a pulse station turn
+// `per_line_sync` off and silently disable the tracker — a click with a
+// consequence the operator did not ask for and cannot see.
+double refine_anchor_from_hint(DecodeState& st, bool has_pulse, int plen,
+                               int pulse_w, int dead_w,
+                               const std::vector<double>& dark_frac,
+                               const std::vector<double>& white_frac) {
+    DecodeResult& res = st.res;
+    const double frac = std::fmod(st.opt.phase_anchor_hint, 1.0);
+    const int hint_at = static_cast<int>(frac * plen);
+    const int win = std::max(2, static_cast<int>(st.opt.search_frac * plen));
+    auto score_at = [&](int i) {
+        return has_pulse
+                   ? std::min(win_mean(dark_frac, i, pulse_w, plen),
+                              win_mean(white_frac, i + pulse_w, pulse_w,
+                                       plen))
+                   : win_mean(white_frac, i, dead_w, plen) -
+                         win_mean(white_frac, i - dead_w, dead_w, plen);
+    };
+    double best = -2.0;
+    int best_at = hint_at;
+    for (int i = hint_at - win; i <= hint_at + win; i++) {
+        const double s = score_at(i);
+        if (s > best) {
+            best = s;
+            best_at = i;
+        }
+    }
+    const double dead_start0 = ((best_at % plen) + plen) % plen;
+    res.dead_consistency =
+        has_pulse ? win_mean(dark_frac, best_at, pulse_w, plen)
+                  : win_mean(white_frac, best_at, dead_w, plen);
+    res.anchor_from_hint = true;
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: phase hint %.4f -> %d, refined to %.0f (%+d samples), "
+         "cons %.2f",
+         st.opt.phase_anchor_hint, hint_at, dead_start0, best_at - hint_at,
+         res.dead_consistency);
+    return dead_start0;
+}
+
 void stage_dead_sector(DecodeState& st) {
     const DecodeOptions& opt = st.opt;
     DecodeResult& res = st.res;
-    const std::vector<float>& video = st.video;
     const double period0 = st.period0;
     const int n_lines = st.n_lines;
 
@@ -643,130 +833,25 @@ void stage_dead_sector(DecodeState& st) {
         std::min(n_lines / 4, static_cast<int>(30.0 * st.lpm / 60.0));
     const int prof_lines = std::min(n_lines - prof0, 120);
     std::vector<double> dark_frac(plen, 0.0), white_frac(plen, 0.0);
-    for (int l = 0; l < prof_lines; l++) {
-        throw_if_cancelled(st.hooks, "dead-sector");
-        const double base = st.start + (prof0 + l) * period0;
-        for (int i = 0; i < plen; i++) {
-            const float x = fax_lerp_at(video, base + i);
-            if (x < kDarkLevel) dark_frac[i] += 1.0;
-            if (x > kWhiteLevel) white_frac[i] += 1.0;
-        }
-    }
-    for (int i = 0; i < plen; i++) {
-        dark_frac[i] /= prof_lines;
-        white_frac[i] /= prof_lines;
-    }
+    build_consistency_profiles(st, prof0, prof_lines, plen, dark_frac,
+                               white_frac);
 
-    // Wrapped window mean of a profile; the dead sector straddles the line
-    // boundary, so every window here wraps.
-    auto win_mean = [&](const std::vector<double>& f, int at, int win) {
-        double s = 0.0;
-        for (int j = 0; j < win; j++) s += f[((at + j) % plen + plen) % plen];
-        return s / win;
-    };
     const int pulse_w = std::max(2, static_cast<int>(kPulseFrac * plen));
     const int dead_w = std::max(2, static_cast<int>(kDeadFrac * plen));
-
-    // Both anchors score a SHAPE, not a level. Level alone is not enough:
-    // a full-disk satellite image carries black space at both line margins,
-    // dark on 100% of lines over hundreds of samples, so "darkest window"
-    // lands anywhere inside that band (measured: FAXSignal and himawari,
-    // session 4). What identifies the pulse is that black is followed
-    // immediately by white [WMO §5.1.3.3] — so score the pair, and take the
-    // weaker half, which the black band cannot fake.
-    double pulse_shape = -1.0, white_shape = -1.0;
-    int pulse_at = 0, white_at = 0;
-    for (int i = 0; i < plen; i++) {
-        const double s = std::min(win_mean(dark_frac, i, pulse_w),
-                                  win_mean(white_frac, i + pulse_w, pulse_w));
-        if (s > pulse_shape) {
-            pulse_shape = s;
-            pulse_at = i;
-        }
-        // White-only: the anchor is the entry into the dead sector — where
-        // consistent whiteness starts [WMO §5.2.3.4 puts the phasing
-        // reference at exactly that edge]. A rising edge in white-fraction
-        // survives the run being wider than the dead sector, which happens
-        // whenever the chart also has a white margin (VMW 2215Z: 45 ms of
-        // always-white for a 22.5 ms dead sector).
-        const double e = win_mean(white_frac, i, dead_w) -
-                         win_mean(white_frac, i - dead_w, dead_w);
-        if (e > white_shape) {
-            white_shape = e;
-            white_at = i;
-        }
-    }
-    const double pulse_cons = win_mean(dark_frac, pulse_at, pulse_w);
-    const double white_cons = win_mean(white_frac, white_at, dead_w);
-    if (st.hooks.log)
-        for (int i = 0; i < plen; i += std::max(1, plen / 200))
-            dlog(st.hooks, LogTopic::kProfile, "prof %5d dark=%.2f white=%.2f",
-                 i, dark_frac[i], white_frac[i]);
+    const AnchorCandidates ac =
+        scan_anchor_shapes(st, dark_frac, white_frac, plen, pulse_w, dead_w);
 
     // The pulse is optional. Take it when the station really sends one,
     // because it is by far the stronger template; otherwise anchor on the
     // always-white dead sector itself.
-    const bool has_pulse = pulse_shape >= kPulseConsistency;
+    const bool has_pulse = ac.pulse_shape >= kPulseConsistency;
     res.dead_sector =
         has_pulse ? DeadSector::kBlackPulse : DeadSector::kWhiteOnly;
-    res.dead_consistency = has_pulse ? pulse_cons : white_cons;
-    double dead_start0 = has_pulse ? pulse_at : white_at;
-
-    // --- the operator's PHASE: seed the search, then refine [docs/05 §7.1]
-    // The scan above is global, and that is exactly what fails when it
-    // fails: it takes the strongest candidate in the whole line, and on the
-    // recordings that need this field the strongest candidate is not the
-    // dead sector. So run the SAME score again over a window around the
-    // operator's hint and take the best position there. What that buys is
-    // the split the decision is built on — the operator says which feature,
-    // the profile says where in it — and it costs nothing when the hint is
-    // already right, because the same score has the same maximum.
-    //
-    // The window is `search_frac` (±3% of a line, ±120 samples on a 4000-
-    // sample line), which is not a new constant: it is the same latitude
-    // the per-line tracker is given below for the same quantity, how far
-    // from where we think it is the line start may actually be. A wider one
-    // would let the global winner back in and swallow the hint, which is
-    // the one thing this field exists to prevent.
-    //
-    // The STYLE decision above is deliberately left upstream of this, on
-    // the global scan. Which of the two dead-sector styles a station sends
-    // [WMO §5.1.3.3] is a property of the transmission measured across
-    // every line; a click is about position. Refining the style here too
-    // would let a hint pointed at a white feature on a pulse station turn
-    // `per_line_sync` off and silently disable the tracker — a click with a
-    // consequence the operator did not ask for and cannot see.
-    if (opt.phase_anchor_hint >= 0.0) {
-        const double frac = std::fmod(opt.phase_anchor_hint, 1.0);
-        const int hint_at = static_cast<int>(frac * plen);
-        const int win = std::max(2, static_cast<int>(opt.search_frac * plen));
-        auto score_at = [&](int i) {
-            return has_pulse
-                       ? std::min(win_mean(dark_frac, i, pulse_w),
-                                  win_mean(white_frac, i + pulse_w, pulse_w))
-                       : win_mean(white_frac, i, dead_w) -
-                             win_mean(white_frac, i - dead_w, dead_w);
-        };
-        double best = -2.0;
-        int best_at = hint_at;
-        for (int i = hint_at - win; i <= hint_at + win; i++) {
-            const double s = score_at(i);
-            if (s > best) {
-                best = s;
-                best_at = i;
-            }
-        }
-        dead_start0 = ((best_at % plen) + plen) % plen;
-        res.dead_consistency =
-            has_pulse ? win_mean(dark_frac, best_at, pulse_w)
-                      : win_mean(white_frac, best_at, dead_w);
-        res.anchor_from_hint = true;
-        dlog(st.hooks, LogTopic::kInfo,
-             "dbg: phase hint %.4f -> %d, refined to %.0f (%+d samples), "
-             "cons %.2f",
-             opt.phase_anchor_hint, hint_at, dead_start0, best_at - hint_at,
-             res.dead_consistency);
-    }
+    res.dead_consistency = has_pulse ? ac.pulse_cons : ac.white_cons;
+    double dead_start0 = has_pulse ? ac.pulse_at : ac.white_at;
+    if (opt.phase_anchor_hint >= 0.0)
+        dead_start0 = refine_anchor_from_hint(st, has_pulse, plen, pulse_w,
+                                              dead_w, dark_frac, white_frac);
     // Only a black pulse gives per-line phase. See the note on white_score
     // above: a white-only dead sector is decoded on the measured clock.
     res.per_line_sync = has_pulse;
@@ -775,48 +860,26 @@ void stage_dead_sector(DecodeState& st) {
     dlog(st.hooks, LogTopic::kInfo,
          "dbg: pulse shape %.2f cons %.2f @%d | white shape %.2f "
          "cons %.2f @%d -> %s",
-         pulse_shape, pulse_cons, pulse_at, white_shape,
-         white_cons, white_at,
+         ac.pulse_shape, ac.pulse_cons, ac.pulse_at, ac.white_shape,
+         ac.white_cons, ac.white_at,
          has_pulse ? "black-pulse" : "white-only");
 }
 
 // --- 2b. phasing: the line-start reference the picture cannot give --------
-void stage_phasing(DecodeState& st) {
+// WHICH phasing interval, when a recording holds more than one, is
+// decided by the control tones — so they are detected here rather than
+// at §4c, and the one scan is shared by both. See PhasingOptions::t_lo:
+// inside a known transmission the last opening before the picture is
+// the one that matters, and outside one the first is the safe answer.
+// The tone scan also selects IOC when the caller did not: ISO §4.2.5
+// makes the 300/675 Hz start signal the receiver's IOC selection, not
+// merely a crop boundary. Keep the scan shared with segmentation and
+// the phasing window rather than running it twice.
+PhasingOptions scan_tones_and_ioc(DecodeState& st) {
     const DecodeOptions& opt = st.opt;
     DecodeResult& res = st.res;
-    const std::vector<float>& video = st.video;
-    const int fs = st.fs;
-    const double period0 = st.period0;
-
-    // [WMO §5.2.3.4] puts the leading edge of the phasing white at entry
-    // into the dead sector — the same feature the image profile above is
-    // hunting for, measured on 30 s that contain no picture content to be
-    // fooled by. Measured on the library (session 7), on a black-pulse
-    // station the two land on the same edge (JMH: phasing white edge at
-    // -73 samples, image black run starts at -67, of 4000); on a WHITE-ONLY
-    // station they do not, and the image one is the one that is wrong.
-    //
-    // The white-only anchor scores the rising edge of always-white, which
-    // is dead-sector entry only if nothing else on the line is reliably
-    // white. On VMW 2230Z the chart's blank right margin is: the always-
-    // white run is 1350 samples where the dead sector is 180, so the anchor
-    // sat 1149 samples early and the picture was drawn rotated by 520 px of
-    // 1810 — the paper's right margin wrapped around to the left. The
-    // phasing wedge sits in the LAST 4.5% of that white run, which is the
-    // dead sector. Verified against the decoded picture, not just the
-    // numbers (session 5's lesson).
-    //
-    // WHICH phasing interval, when a recording holds more than one, is
-    // decided by the control tones — so they are detected here rather than
-    // at §4c, and the one scan is shared by both. See PhasingOptions::t_lo:
-    // inside a known transmission the last opening before the picture is
-    // the one that matters, and outside one the first is the safe answer.
-    // The tone scan also selects IOC when the caller did not: ISO §4.2.5
-    // makes the 300/675 Hz start signal the receiver's IOC selection, not
-    // merely a crop boundary. Keep the scan shared with segmentation and
-    // the phasing window rather than running it twice.
     st.tones = (opt.segment || opt.ioc == 0)
-                   ? detect_tones(video, fs, ToneOptions(), st.hooks)
+                   ? detect_tones(st.video, st.fs, ToneOptions(), st.hooks)
                    : std::vector<ToneEvent>();
     const std::vector<ToneEvent>& tones = st.tones;
     int ioc = opt.ioc;
@@ -842,8 +905,14 @@ void stage_phasing(DecodeState& st) {
             popt.t_hi = e.t_start;
             break;
         }
-    const PhasingResult ph = detect_phasing(video, fs, period0, popt,
-                                            st.hooks);
+    return popt;
+}
+
+// Records the phasing result, and lets its anchor overrule the image
+// anchor only where the image and the operator both have nothing to offer.
+void apply_phasing_anchor(DecodeState& st, const PhasingResult& ph) {
+    DecodeResult& res = st.res;
+    const double period0 = st.period0;
     res.phasing_found = ph.found;
     if (ph.found) {
         res.phasing_t_start = ph.t_start;
@@ -875,17 +944,45 @@ void stage_phasing(DecodeState& st) {
         // white-only ones, which are the recordings that need it most. The
         // delta is still reported, so the two answers can still be
         // compared afterwards.
-        if (opt.use_phasing && !st.has_pulse && !res.anchor_from_hint) {
+        if (st.opt.use_phasing && !st.has_pulse && !res.anchor_from_hint) {
             st.dead_start0 = phase;
             res.anchor_from_phasing = true;
         }
     }
+}
+
+void stage_phasing(DecodeState& st) {
+    const std::vector<float>& video = st.video;
+    const int fs = st.fs;
+    const double period0 = st.period0;
+
+    // [WMO §5.2.3.4] puts the leading edge of the phasing white at entry
+    // into the dead sector — the same feature the image profile above is
+    // hunting for, measured on 30 s that contain no picture content to be
+    // fooled by. Measured on the library (session 7), on a black-pulse
+    // station the two land on the same edge (JMH: phasing white edge at
+    // -73 samples, image black run starts at -67, of 4000); on a WHITE-ONLY
+    // station they do not, and the image one is the one that is wrong.
+    //
+    // The white-only anchor scores the rising edge of always-white, which
+    // is dead-sector entry only if nothing else on the line is reliably
+    // white. On VMW 2230Z the chart's blank right margin is: the always-
+    // white run is 1350 samples where the dead sector is 180, so the anchor
+    // sat 1149 samples early and the picture was drawn rotated by 520 px of
+    // 1810 — the paper's right margin wrapped around to the left. The
+    // phasing wedge sits in the LAST 4.5% of that white run, which is the
+    // dead sector. Verified against the decoded picture, not just the
+    // numbers (session 5's lesson).
+    const PhasingOptions popt = scan_tones_and_ioc(st);
+    const PhasingResult ph = detect_phasing(video, fs, period0, popt,
+                                            st.hooks);
+    apply_phasing_anchor(st, ph);
     dlog(st.hooks, LogTopic::kInfo,
          "dbg: phasing found=%d %.2f-%.2f s lines=%d "
          "anchor=%.1f delta=%+.1f -> %s",
          ph.found, ph.t_start, ph.t_end, ph.lines, ph.anchor,
-         res.phasing_anchor_delta,
-         res.anchor_from_phasing ? "USED" : "image anchor");
+         st.res.phasing_anchor_delta,
+         st.res.anchor_from_phasing ? "USED" : "image anchor");
 }
 
 }  // namespace
@@ -893,6 +990,50 @@ void stage_phasing(DecodeState& st) {
 namespace {
 
 // --- 3. pass A: sequential sync tracking ------------------------------------
+// The per-line walk itself. Re-acquisition: a tracker that only ever looks
+// ±narrow around its own prediction can never come back from being wrong:
+// a coarse anchor off by more than the window, or a stream time-skip, puts
+// the sync outside every future window and the file coasts to EOF
+// (measured: himawari.wav, anchor 128 samples late, 14 locks of
+// 1988 — the signal itself is textbook). So after a run of misses,
+// sweep the whole line. The sweep only counts if the template
+// actually matches, so a white-only station cannot re-acquire onto
+// picture content: it simply keeps coasting, which is the honest
+// outcome.
+void track_locked_lines(DecodeState& st, bool hinted, double narrow,
+                        double pmin, double pmax, double last_good,
+                        long last_good_l) {
+    const std::vector<float>& video = st.video;
+    const int n_lines = st.n_lines;
+    const double period0 = st.period0;
+    const double lock = st.lock;
+    std::vector<double>& spos = st.spos;
+    std::vector<double>& sstr = st.sstr;
+    int miss = 0;
+    for (int l = 1; l < n_lines; l++) {
+        if ((l & 63) == 0) {
+            throw_if_cancelled(st.hooks, "sync-track");
+            report(st.hooks, "sync-track",
+                   static_cast<double>(l) / n_lines);
+        }
+        const double c = last_good + (l - last_good_l) * period0;
+        const bool reacq =
+            !hinted && miss >= kReacqMisses && (miss % kReacqEvery) == 0;
+        const double span = reacq ? 0.5 * period0 : narrow;
+        const double lo = std::max(pmin, c - span);
+        const double hi = std::min(pmax, c + span);
+        spos[l] = fax_best_sync(video, lo, hi, st.pulse, &sstr[l],
+                            reacq ? kReacqStep : 1.0);
+        if (sstr[l] >= lock) {
+            last_good = spos[l];
+            last_good_l = l;
+            miss = 0;
+        } else {
+            miss++;
+        }
+    }
+}
+
 void stage_track(DecodeState& st) {
     const DecodeOptions& opt = st.opt;
     DecodeResult& res = st.res;
@@ -960,39 +1101,109 @@ void stage_track(DecodeState& st) {
         double last_good = spos[0];
         long last_good_l = 0;
         if (sstr[0] < lock) last_good = pred;  // coast from coarse
-        // Re-acquisition. A tracker that only ever looks ±narrow around its
-        // own prediction can never come back from being wrong: a coarse
-        // anchor off by more than the window, or a stream time-skip, puts
-        // the sync outside every future window and the file coasts to EOF
-        // (measured: himawari.wav, anchor 128 samples late, 14 locks of
-        // 1988 — the signal itself is textbook). So after a run of misses,
-        // sweep the whole line. The sweep only counts if the template
-        // actually matches, so a white-only station cannot re-acquire onto
-        // picture content: it simply keeps coasting, which is the honest
-        // outcome.
-        int miss = 0;
-        for (int l = 1; l < n_lines; l++) {
-            if ((l & 63) == 0) {
-                throw_if_cancelled(st.hooks, "sync-track");
-                report(st.hooks, "sync-track",
-                       static_cast<double>(l) / n_lines);
-            }
-            const double c = last_good + (l - last_good_l) * period0;
-            const bool reacq =
-                !hinted && miss >= kReacqMisses && (miss % kReacqEvery) == 0;
-            const double span = reacq ? 0.5 * period0 : narrow;
-            const double lo = std::max(pmin, c - span);
-            const double hi = std::min(pmax, c + span);
-            spos[l] = fax_best_sync(video, lo, hi, st.pulse, &sstr[l],
-                                reacq ? kReacqStep : 1.0);
-            if (sstr[l] >= lock) {
-                last_good = spos[l];
-                last_good_l = l;
-                miss = 0;
-            } else {
-                miss++;
-            }
+        track_locked_lines(st, hinted, narrow, pmin, pmax, last_good,
+                           last_good_l);
+    }
+}
+
+// --- pass B helpers ------------------------------------------------------------
+// The long-baseline fit itself: pairs of locked lines far enough apart that
+// sample quantization in spos is small against the accumulated drift, cut
+// at every step so no pair straddles a regime change. Returns whether a
+// usable baseline existed at all.
+bool long_baseline_fit(DecodeState& st, double* a, double* b) {
+    const int n_lines = st.n_lines;
+    const double period0 = st.period0;
+    const double lock = st.lock;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
+    bool fitted = false;
+    std::vector<int> lk;
+    for (int l = 0; l < n_lines; l++)
+        if (sstr[l] >= lock) lk.push_back(l);
+    // Cut the locked lines at every STEP first. A long baseline is only
+    // meaningful inside one regime: phasing lines and image lines anchor
+    // the template a step apart (measured on the 60 s KiwiSDR fixture:
+    // +167 samples between line 39 and line 53), and a stream time-skip
+    // does the same mid-recording. A pair straddling a step reads that
+    // step as drift — on a short fixture, where most pairs straddle,
+    // that alone put the clock at +607 ppm against a true -88.
+    // Line-to-line jitter is a sample or two, so the cut is unambiguous.
+    // Test the TOTAL deviation over the gap, not a per-line slope: the
+    // step usually falls across unlocked lines (the fixture's lands
+    // between locked line 39 and locked line 53), and dividing 167
+    // samples by a 14-line gap hides it under any sane per-line
+    // threshold. period0 is the fold estimate, good to a few ppm, so
+    // genuine drift across a gap of even 100 lines is a few samples.
+    std::vector<size_t> cut{0};
+    for (size_t i = 1; i < lk.size(); i++) {
+        const double gap = lk[i] - lk[i - 1];
+        const double jump =
+            (spos[lk[i]] - spos[lk[i - 1]]) - period0 * gap;
+        if (std::fabs(jump) > 0.02 * period0) cut.push_back(i);
+    }
+    cut.push_back(lk.size());
+
+    // Baseline inside a segment: long enough that sample quantization in
+    // spos is small against the accumulated drift, short enough that one
+    // discontinuity contaminates only a minority of pairs. Both ends
+    // measured (session 5) by sweeping the baseline k: JSC2 reads -75 ppm
+    // at k<=8 and settles at +175 from k=128; the Himawari time-skip is
+    // invisible up to k=512 and swings the answer to -393 at k=1024,
+    // where every pair straddles it. An eighth of the segment sits inside
+    // both limits by construction and grows with the recording.
+    std::vector<double> slopes;
+    for (size_t c = 0; c + 1 < cut.size(); c++) {
+        const size_t lo = cut[c], hi = cut[c + 1];
+        const size_t n = hi - lo;
+        if (n < 16) continue;
+        const size_t k = std::min(std::max<size_t>(64, n / 8), n / 2);
+        for (size_t i = lo; i + k < hi; i++) {
+            const int l0 = lk[i], l1 = lk[i + k];
+            const double s = (spos[l1] - spos[l0]) / (l1 - l0);
+            if (std::fabs(s - period0) < 0.02 * period0)
+                slopes.push_back(s);
         }
+    }
+    if (!slopes.empty()) {
+        *b = median(slopes);
+        std::vector<double> intercepts;
+        for (int l = 0; l < n_lines; l++)
+            if (sstr[l] >= lock) intercepts.push_back(spos[l] - *b * l);
+        *a = median(intercepts);
+        // ...and only counts as a baseline if the picture is going to
+        // be drawn on it. `autolock = false` throws this fit away in the
+        // caller, so claiming a measurement there would hand
+        // the operator's value to nothing.
+        fitted = st.opt.autolock;
+    }
+    return fitted;
+}
+
+// --- the operator's SYNC, where and only where nothing measured it ----
+// [docs/05 §7.1] The fit above wins wherever it ran, and this is the
+// half of the decision most easily written as a plain override — which
+// would be the quiet bug, because it fails on exactly the recordings
+// that look fine: a healthy pulse station would be drawn on an
+// eyeballed ppm instead of a fitted one and nothing would say so.
+//
+// Where the fit did NOT run there is no measurement to outrank it. The
+// period is then `period0`, the whole-file fold refinement, which is
+// the number that is off by 30-180 ppm on real signals (session 5) and
+// slants a white-only station by exactly that error — the one thing
+// the operator can see and the fold cannot. So their trim replaces it,
+// as a ppm against nominal, the same quantity `res.clock_ppm` reports
+// and the same one `StreamPreview::set_clock_ppm` applies live.
+void apply_clock_fallback(DecodeState& st, bool fitted) {
+    DecodeResult& res = st.res;
+    if (!fitted && !std::isnan(st.opt.clock_ppm_fallback)) {
+        st.b = st.nominal * (1.0 + st.opt.clock_ppm_fallback * 1e-6);
+        res.line_period_s = st.b / st.fs;
+        res.clock_ppm = st.opt.clock_ppm_fallback;
+        res.clock_from_fallback = true;
+        dlog(st.hooks, LogTopic::kInfo,
+             "dbg: no fit baseline -> operator SYNC %+.1f ppm, b=%.4f",
+             st.opt.clock_ppm_fallback, st.b);
     }
 }
 
@@ -1002,7 +1213,6 @@ void stage_fit(DecodeState& st) {
     DecodeResult& res = st.res;
     const int n_lines = st.n_lines;
     const double period0 = st.period0;
-    const double lock = st.lock;
     const std::vector<double>& spos = st.spos;
     const std::vector<double>& sstr = st.sstr;
 
@@ -1032,68 +1242,7 @@ void stage_fit(DecodeState& st) {
     // white-only station, a forced start and too few locked lines, and all
     // three arrive here as the same fact — no segment of locked lines long
     // enough to pair across. See the fallback below.
-    bool fitted = false;
-    {
-        std::vector<int> lk;
-        for (int l = 0; l < n_lines; l++)
-            if (sstr[l] >= lock) lk.push_back(l);
-        // Cut the locked lines at every STEP first. A long baseline is only
-        // meaningful inside one regime: phasing lines and image lines anchor
-        // the template a step apart (measured on the 60 s KiwiSDR fixture:
-        // +167 samples between line 39 and line 53), and a stream time-skip
-        // does the same mid-recording. A pair straddling a step reads that
-        // step as drift — on a short fixture, where most pairs straddle,
-        // that alone put the clock at +607 ppm against a true -88.
-        // Line-to-line jitter is a sample or two, so the cut is unambiguous.
-        // Test the TOTAL deviation over the gap, not a per-line slope: the
-        // step usually falls across unlocked lines (the fixture's lands
-        // between locked line 39 and locked line 53), and dividing 167
-        // samples by a 14-line gap hides it under any sane per-line
-        // threshold. period0 is the fold estimate, good to a few ppm, so
-        // genuine drift across a gap of even 100 lines is a few samples.
-        std::vector<size_t> cut{0};
-        for (size_t i = 1; i < lk.size(); i++) {
-            const double gap = lk[i] - lk[i - 1];
-            const double jump =
-                (spos[lk[i]] - spos[lk[i - 1]]) - period0 * gap;
-            if (std::fabs(jump) > 0.02 * period0) cut.push_back(i);
-        }
-        cut.push_back(lk.size());
-
-        // Baseline inside a segment: long enough that sample quantization in
-        // spos is small against the accumulated drift, short enough that one
-        // discontinuity contaminates only a minority of pairs. Both ends
-        // measured (session 5) by sweeping the baseline k: JSC2 reads -75 ppm
-        // at k<=8 and settles at +175 from k=128; the Himawari time-skip is
-        // invisible up to k=512 and swings the answer to -393 at k=1024,
-        // where every pair straddles it. An eighth of the segment sits inside
-        // both limits by construction and grows with the recording.
-        std::vector<double> slopes;
-        for (size_t c = 0; c + 1 < cut.size(); c++) {
-            const size_t lo = cut[c], hi = cut[c + 1];
-            const size_t n = hi - lo;
-            if (n < 16) continue;
-            const size_t k = std::min(std::max<size_t>(64, n / 8), n / 2);
-            for (size_t i = lo; i + k < hi; i++) {
-                const int l0 = lk[i], l1 = lk[i + k];
-                const double s = (spos[l1] - spos[l0]) / (l1 - l0);
-                if (std::fabs(s - period0) < 0.02 * period0)
-                    slopes.push_back(s);
-            }
-        }
-        if (!slopes.empty()) {
-            b = median(slopes);
-            std::vector<double> intercepts;
-            for (int l = 0; l < n_lines; l++)
-                if (sstr[l] >= lock) intercepts.push_back(spos[l] - b * l);
-            a = median(intercepts);
-            // ...and only counts as a baseline if the picture is going to
-            // be drawn on it. `autolock = false` throws this fit away two
-            // statements below, so claiming a measurement there would hand
-            // the operator's value to nothing.
-            fitted = opt.autolock;
-        }
-    }
+    const bool fitted = long_baseline_fit(st, &a, &b);
     st.a = a;
     st.b = b;
     res.line_period_s = b / st.fs;
@@ -1105,29 +1254,7 @@ void stage_fit(DecodeState& st) {
         st.b = st.nominal;
     }
 
-    // --- the operator's SYNC, where and only where nothing measured it ----
-    // [docs/05 §7.1] The fit above wins wherever it ran, and this is the
-    // half of the decision most easily written as a plain override — which
-    // would be the quiet bug, because it fails on exactly the recordings
-    // that look fine: a healthy pulse station would be drawn on an
-    // eyeballed ppm instead of a fitted one and nothing would say so.
-    //
-    // Where the fit did NOT run there is no measurement to outrank it. The
-    // period is then `period0`, the whole-file fold refinement, which is
-    // the number that is off by 30-180 ppm on real signals (session 5) and
-    // slants a white-only station by exactly that error — the one thing
-    // the operator can see and the fold cannot. So their trim replaces it,
-    // as a ppm against nominal, the same quantity `res.clock_ppm` reports
-    // and the same one `StreamPreview::set_clock_ppm` applies live.
-    if (!fitted && !std::isnan(opt.clock_ppm_fallback)) {
-        st.b = st.nominal * (1.0 + opt.clock_ppm_fallback * 1e-6);
-        res.line_period_s = st.b / st.fs;
-        res.clock_ppm = opt.clock_ppm_fallback;
-        res.clock_from_fallback = true;
-        dlog(st.hooks, LogTopic::kInfo,
-             "dbg: no fit baseline -> operator SYNC %+.1f ppm, b=%.4f",
-             opt.clock_ppm_fallback, st.b);
-    }
+    apply_clock_fallback(st, fitted);
 
     dlog(st.hooks, LogTopic::kInfo,
          "dbg: dead_start0=%.1f a=%.1f b=%.4f n_lines=%d",
@@ -1145,6 +1272,71 @@ void stage_fit(DecodeState& st) {
                  "dbg: l=%3d spos=%.1f sstr=%.2f resid=%+.1f",
                  l, spos[l], sstr[l], spos[l] - (st.a + st.b * l));
     }
+}
+
+// --- 4c helper: the first transmission's boundaries from the control tones --
+// Head at the opening (extended by this transmission's phasing), tail at
+// the first stop tone that follows it. Crops the OUTPUT only — see the
+// stage below.
+void segment_first_transmission(DecodeState& st, int* line_lo,
+                                int* line_hi) {
+    DecodeResult& res = st.res;
+    const int n_lines = st.n_lines;
+    const std::vector<ToneEvent>& ev = st.tones;  // scanned once, at §2b
+    // Segment the FIRST transmission. A recording can hold more than
+    // one: `jmh sample` carries a start at 6 s, its stop at 404 s, and
+    // then the NEXT transmission's start at 425 s. Every boundary rule
+    // here is therefore "the first one after the previous boundary",
+    // never "the last" or "the largest" — taking the latest start tone
+    // dropped that recording's entire chart and kept 143 s of the
+    // following one.
+    bool have_head = false, have_tail = false;
+    double t0 = 0.0;
+    for (const auto& e : ev)
+        if (e.kind != ToneKind::kStop) {
+            t0 = e.t_end;
+            have_head = true;
+            break;
+        }
+    // ...then the first stop tone that follows the opening.
+    double t1 = static_cast<double>(st.video.size()) / st.fs;
+    for (const auto& e : ev)
+        if (e.kind == ToneKind::kStop && e.t_start > t0) {
+            t1 = e.t_start;
+            have_tail = true;
+            break;
+        }
+    // Phasing belongs to this transmission's opening only if it sits
+    // between the start tone and that stop [WMO §5.2.3]. It runs longer
+    // than the tone, so where it is present it sets the boundary.
+    if (res.phasing_found && res.phasing_t_end > t0 &&
+        res.phasing_t_end <= t1) {
+        t0 = res.phasing_t_end;
+        have_head = true;
+    }
+    // Only crop an end a control signal actually bounds. Otherwise the
+    // rounding of the line index alone would report "dropped 1 line of
+    // stop" on a recording with no stop tone in it (JSC1).
+    const int lo = have_head
+                       ? static_cast<int>(std::ceil((t0 * st.fs - st.a) / st.b))
+                       : 0;
+    const int hi = have_tail
+                       ? static_cast<int>(std::floor((t1 * st.fs - st.a) / st.b))
+                       : n_lines;
+    const int clo = std::max(0, std::min(lo, n_lines));
+    const int chi = std::max(clo, std::min(hi, n_lines));
+    // A segment that leaves nothing is a detection failure, not an
+    // instruction to emit an empty picture: fall back to the whole
+    // recording and say so rather than returning a blank image.
+    if (chi - clo >= 4) {
+        *line_lo = clo;
+        *line_hi = chi;
+        res.segmented = (*line_lo != 0 || *line_hi != n_lines);
+    }
+    dlog(st.hooks, LogTopic::kInfo,
+         "dbg: segment t0=%.2f t1=%.2f -> lines [%d,%d) of %d%s",
+         t0, t1, *line_lo, *line_hi, n_lines,
+         res.segmented ? "" : " (not applied)");
 }
 
 // --- 4c. segmentation: start -> phasing -> image -> stop --------------------
@@ -1168,63 +1360,8 @@ void stage_segment(DecodeState& st) {
     // lines lock nowhere near the picture template anyway. Nothing measured
     // moves — only what is drawn.
     int line_lo = 0, line_hi = n_lines;
-    if (opt.segment) {
-        const std::vector<ToneEvent>& ev = st.tones;  // scanned once, at §2b
-        // Segment the FIRST transmission. A recording can hold more than
-        // one: `jmh sample` carries a start at 6 s, its stop at 404 s, and
-        // then the NEXT transmission's start at 425 s. Every boundary rule
-        // here is therefore "the first one after the previous boundary",
-        // never "the last" or "the largest" — taking the latest start tone
-        // dropped that recording's entire chart and kept 143 s of the
-        // following one.
-        bool have_head = false, have_tail = false;
-        double t0 = 0.0;
-        for (const auto& e : ev)
-            if (e.kind != ToneKind::kStop) {
-                t0 = e.t_end;
-                have_head = true;
-                break;
-            }
-        // ...then the first stop tone that follows the opening.
-        double t1 = static_cast<double>(st.video.size()) / st.fs;
-        for (const auto& e : ev)
-            if (e.kind == ToneKind::kStop && e.t_start > t0) {
-                t1 = e.t_start;
-                have_tail = true;
-                break;
-            }
-        // Phasing belongs to this transmission's opening only if it sits
-        // between the start tone and that stop [WMO §5.2.3]. It runs longer
-        // than the tone, so where it is present it sets the boundary.
-        if (res.phasing_found && res.phasing_t_end > t0 &&
-            res.phasing_t_end <= t1) {
-            t0 = res.phasing_t_end;
-            have_head = true;
-        }
-        // Only crop an end a control signal actually bounds. Otherwise the
-        // rounding of the line index alone would report "dropped 1 line of
-        // stop" on a recording with no stop tone in it (JSC1).
-        const int lo = have_head
-                           ? static_cast<int>(std::ceil((t0 * st.fs - st.a) / st.b))
-                           : 0;
-        const int hi = have_tail
-                           ? static_cast<int>(std::floor((t1 * st.fs - st.a) / st.b))
-                           : n_lines;
-        const int clo = std::max(0, std::min(lo, n_lines));
-        const int chi = std::max(clo, std::min(hi, n_lines));
-        // A segment that leaves nothing is a detection failure, not an
-        // instruction to emit an empty picture: fall back to the whole
-        // recording and say so rather than returning a blank image.
-        if (chi - clo >= 4) {
-            line_lo = clo;
-            line_hi = chi;
-            res.segmented = (line_lo != 0 || line_hi != n_lines);
-        }
-        dlog(st.hooks, LogTopic::kInfo,
-             "dbg: segment t0=%.2f t1=%.2f -> lines [%d,%d) of %d%s",
-             t0, t1, line_lo, line_hi, n_lines,
-             res.segmented ? "" : " (not applied)");
-    }
+    if (opt.segment)
+        segment_first_transmission(st, &line_lo, &line_hi);
     st.line_lo = line_lo;
     st.line_hi = line_hi;
     res.lines_dropped_head = line_lo;
@@ -1246,15 +1383,91 @@ void stage_segment(DecodeState& st) {
 
 namespace {
 
-// --- 4d. is the timebase linear? --------------------------------------------
-void stage_timebase(DecodeState& st) {
+// --- 4d helpers: the two statistics ------------------------------------------
+// Statistic (a), image domain: the step rate of the local-median-smoothed
+// sync residual, counted over the drawn lines.
+void image_timebase_steps(DecodeState& st) {
     DecodeResult& res = st.res;
     const int n_lines = st.n_lines;
-    const int fs = st.fs;
     const double lock = st.lock;
     const std::vector<double>& spos = st.spos;
     const std::vector<double>& sstr = st.sstr;
     const int line_lo = st.line_lo, line_hi = st.line_hi;
+    const double step_min = kStepSec * st.fs;
+    std::vector<double> smoothed;
+    for (int l = line_lo; l < line_hi; l++) {
+        std::vector<double> r;
+        for (int k = std::max(0, l - kMedRad);
+             k <= std::min(n_lines - 1, l + kMedRad); k++)
+            if (sstr[k] >= lock) r.push_back(spos[k] - (st.a + st.b * k));
+        if (!r.empty()) smoothed.push_back(median(r));
+    }
+    if (smoothed.size() >= kStepMinLines) {
+        res.timebase_lines = static_cast<int>(smoothed.size());
+        int n = 0;
+        for (size_t m = 1; m < smoothed.size(); m++)
+            if (std::fabs(smoothed[m] - smoothed[m - 1]) > step_min) n++;
+        res.timebase_step_lines = n;
+        res.timebase_step_rate =
+            1000.0 * n / static_cast<double>(smoothed.size() - 1);
+        res.timebase = res.timebase_step_rate > kStepRateLimit
+                           ? Timebase::kSteps
+                           : Timebase::kLinear;
+    }
+}
+
+// Statistic (b), phasing domain. Either statistic can convict on its own;
+// only one has to be available. They agree wherever both are (JSC2/3/4 both
+// ways).
+//
+// Session 10: "the edge is not straight" is not the same claim as
+// "the timebase steps", and until this session the second was read
+// off the first. Three things bend a phasing edge, and the library
+// holds one of each:
+//
+//   NOISE. GYA 2300Z's interval is faded; its per-line edge moves
+//   ~15 samples line to line, so a 10-sample threshold is below its
+//   own measurement floor and any verdict is a coin toss. Read raw
+//   it scored 46.2 — worse than JSC2, on a recording with no steps.
+//   ONE SKIP. JMH KiwiSDR Himawari's interval straddles a single
+//   ~95-sample jump with textbook-linear edge either side. Session 9
+//   already settled that one skip is not a rate — in the image
+//   domain, which counts steps. This domain measured a spread and so
+//   could not tell one jump from fifty; it now counts too. Its 1922
+//   tracked lines read 1.6 steps per 1000, i.e. linear, and the
+//   60-line phasing interval was over-ruling them.
+//   STEPS. JSC2 and JSC3, 16 and 17 persistent moves in 59 lines.
+//
+// The same kNonlinSec does all three jobs, so there is one number to
+// move and not three: it is the resolution the test claims. An
+// interval whose own line-to-line noise exceeds it cannot resolve it
+// in either direction, and says so rather than guessing.
+void phasing_timebase_witness(DecodeState& st) {
+    DecodeResult& res = st.res;
+    if (res.phasing_found && res.phasing_lines >= 8) {
+        const double limit = kNonlinSec * st.fs;
+        if (res.phasing_roughness >= limit) {
+            res.phasing_witness = PhasingWitness::kNoisy;
+        } else if (res.phasing_nonlinearity <= limit) {
+            res.phasing_witness = PhasingWitness::kStraight;
+        } else if (res.phasing_steps >= kMinPhasingSteps) {
+            res.phasing_witness = PhasingWitness::kSteps;
+        } else {
+            res.phasing_witness = PhasingWitness::kOneSkip;
+        }
+        if (res.phasing_witness == PhasingWitness::kSteps)
+            res.timebase = Timebase::kSteps;
+        else if (res.phasing_witness == PhasingWitness::kStraight &&
+                 res.timebase == Timebase::kUnknown)
+            res.timebase = Timebase::kLinear;
+    } else if (res.phasing_found) {
+        res.phasing_witness = PhasingWitness::kTooShort;
+    }
+}
+
+// --- 4d. is the timebase linear? --------------------------------------------
+void stage_timebase(DecodeState& st) {
+    DecodeResult& res = st.res;
 
     // Everything upstream models the recording's time axis as ONE straight
     // line: a period, an intercept, and a clock error in ppm. Two library
@@ -1298,71 +1511,8 @@ void stage_timebase(DecodeState& st) {
     // absorbs steps without being told they are there. What it changes is
     // the meaning of clock_ppm, and whether phasing_anchor_delta can be
     // compared against the rest of the library at all.
-    const double step_min = kStepSec * fs;
-    std::vector<double> smoothed;
-    for (int l = line_lo; l < line_hi; l++) {
-        std::vector<double> r;
-        for (int k = std::max(0, l - kMedRad);
-             k <= std::min(n_lines - 1, l + kMedRad); k++)
-            if (sstr[k] >= lock) r.push_back(spos[k] - (st.a + st.b * k));
-        if (!r.empty()) smoothed.push_back(median(r));
-    }
-    if (smoothed.size() >= kStepMinLines) {
-        res.timebase_lines = static_cast<int>(smoothed.size());
-        int n = 0;
-        for (size_t m = 1; m < smoothed.size(); m++)
-            if (std::fabs(smoothed[m] - smoothed[m - 1]) > step_min) n++;
-        res.timebase_step_lines = n;
-        res.timebase_step_rate =
-            1000.0 * n / static_cast<double>(smoothed.size() - 1);
-        res.timebase = res.timebase_step_rate > kStepRateLimit
-                           ? Timebase::kSteps
-                           : Timebase::kLinear;
-    }
-    // Either statistic can convict on its own; only one has to be
-    // available. They agree wherever both are (JSC2/3/4 both ways).
-    //
-    // Session 10: "the edge is not straight" is not the same claim as
-    // "the timebase steps", and until this session the second was read
-    // off the first. Three things bend a phasing edge, and the library
-    // holds one of each:
-    //
-    //   NOISE. GYA 2300Z's interval is faded; its per-line edge moves
-    //   ~15 samples line to line, so a 10-sample threshold is below its
-    //   own measurement floor and any verdict is a coin toss. Read raw
-    //   it scored 46.2 — worse than JSC2, on a recording with no steps.
-    //   ONE SKIP. JMH KiwiSDR Himawari's interval straddles a single
-    //   ~95-sample jump with textbook-linear edge either side. Session 9
-    //   already settled that one skip is not a rate — in the image
-    //   domain, which counts steps. This domain measured a spread and so
-    //   could not tell one jump from fifty; it now counts too. Its 1922
-    //   tracked lines read 1.6 steps per 1000, i.e. linear, and the
-    //   60-line phasing interval was over-ruling them.
-    //   STEPS. JSC2 and JSC3, 16 and 17 persistent moves in 59 lines.
-    //
-    // The same kNonlinSec does all three jobs, so there is one number to
-    // move and not three: it is the resolution the test claims. An
-    // interval whose own line-to-line noise exceeds it cannot resolve it
-    // in either direction, and says so rather than guessing.
-    if (res.phasing_found && res.phasing_lines >= 8) {
-        const double limit = kNonlinSec * fs;
-        if (res.phasing_roughness >= limit) {
-            res.phasing_witness = PhasingWitness::kNoisy;
-        } else if (res.phasing_nonlinearity <= limit) {
-            res.phasing_witness = PhasingWitness::kStraight;
-        } else if (res.phasing_steps >= kMinPhasingSteps) {
-            res.phasing_witness = PhasingWitness::kSteps;
-        } else {
-            res.phasing_witness = PhasingWitness::kOneSkip;
-        }
-        if (res.phasing_witness == PhasingWitness::kSteps)
-            res.timebase = Timebase::kSteps;
-        else if (res.phasing_witness == PhasingWitness::kStraight &&
-                 res.timebase == Timebase::kUnknown)
-            res.timebase = Timebase::kLinear;
-    } else if (res.phasing_found) {
-        res.phasing_witness = PhasingWitness::kTooShort;
-    }
+    image_timebase_steps(st);
+    phasing_timebase_witness(st);
     dlog(st.hooks, LogTopic::kInfo,
          "dbg: timebase %s step_lines=%d rate=%.1f/1000 "
          "phasing_nonlin=%.1f smp",
@@ -1373,13 +1523,106 @@ void stage_timebase(DecodeState& st) {
          res.phasing_nonlinearity);
 }
 
+// --- 4e helpers: detection, and the session-26 seam admission ---------------
+// Every line the comparison fires on is a change point, including
+// runs of adjacent ones. Thinning each run to its largest member —
+// "one skip is one line" — is the obvious tidy-up and it is WRONG,
+// measured both ways: it merges the genuinely separate steps of a
+// recording that inserts samples every few lines, and it made every
+// number worse (ground-truth synthetic 2.05 -> 2.39 px, its linear
+// control 0.19 -> 1.71, the JSC2 fixture's drawn edge p90 2.0 -> 5.0
+// px). Left un-thinned deliberately.
+void detect_change_points(DecodeState& st, const std::vector<int>& lk,
+                          double move_min) {
+    const std::vector<double>& spos = st.spos;
+    for (size_t j = kSegHalf; j + kSegHalf <= lk.size(); j++) {
+        std::vector<double> pre, post;
+        for (size_t k = j - kSegHalf; k < j; k++)
+            pre.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+        for (size_t k = j; k < j + kSegHalf; k++)
+            post.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+        if (std::fabs(median(post) - median(pre)) > move_min)
+            st.cpoint[lk[j]] = 1;
+    }
+}
+
+// A move the STREAM really took persists; a lock error cancels
+// itself the next time the tracker finds the true feature. Session
+// 26 measured this on HLL 2147Z: isolated hops of +50..+90 samples
+// that return to the family level one to three lines later, always
+// with a dipped lock score (0.62-0.71 against the family's
+// 0.88-0.91) — the pulse template's white window polluted by dark
+// content close behind the gap, so a position ~60 samples late
+// out-scores the true one (0.72 vs 0.44 measured on line 342,
+// where the audio itself is straight to ±5 samples). Two hops in
+// one four-line window beat the median above, the "move" is
+// vouched, and the dead-sector strip jogs — the raggedness Sara
+// sent back twice.
+//
+// So: a step that RETURNS within the vouching distance never
+// established a level — four lines at the new level is what "the
+// level moved" means to the detector above. The pair is cancelled
+// when the steps net to zero within the detection resolution and
+// the levels outside the pair agree the same way. The lines
+// between are then drawn by the same segment as their neighbours.
+//
+// The cost, stated: a real drop compensated by a real insertion
+// within three lines would also cancel, and its rows would be
+// drawn at the surrounding level — displaced by exactly the event
+// it hides. Nothing in the library does that: the warp drop and
+// the JSC insertions never return, and a browser catch-up pair is
+// unmeasured, not known.
+void cancel_returning_pairs(DecodeState& st, const std::vector<int>& lk,
+                            double move_min) {
+    const std::vector<double>& spos = st.spos;
+    const int n_lines = st.n_lines;
+    std::vector<int> cp;
+    for (int l = 0; l < n_lines; l++)
+        if (st.cpoint[l]) cp.push_back(l);
+    auto win_med = [&](int line, bool post_side) {
+        const size_t j = static_cast<size_t>(
+            std::lower_bound(lk.begin(), lk.end(), line) - lk.begin());
+        std::vector<double> v;
+        if (post_side) {
+            for (size_t k = j; k < j + kSegHalf && k < lk.size(); k++)
+                v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+        } else {
+            for (size_t k = j >= kSegHalf ? j - kSegHalf : 0; k < j; k++)
+                v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
+        }
+        return v.empty() ? 0.0 : median(v);
+    };
+    for (size_t i = 0; i + 1 < cp.size();) {
+        const int l1 = cp[i], l2 = cp[i + 1];
+        bool cancel = false;
+        if (l2 - l1 < kSegHalf) {
+            const double d1 = win_med(l1, true) - win_med(l1, false);
+            const double d2 = win_med(l2, true) - win_med(l2, false);
+            if (std::fabs(d1 + d2) <= move_min &&
+                std::fabs(win_med(l1, false) - win_med(l2, true)) <=
+                    move_min)
+                cancel = true;
+        }
+        if (cancel) {
+            st.cpoint[l1] = 0;
+            st.cpoint[l2] = 0;
+            dlog(st.hooks, LogTopic::kSeams,
+                 "dbg: seam pair at lines %d/%d cancelled: a lock hop "
+                 "that returned, not a stream move",
+                 l1, l2);
+            i += 2;
+        } else {
+            i++;
+        }
+    }
+}
+
 // --- 4e. change points: where the line start REALLY moves -------------------
 void stage_change_points(DecodeState& st) {
     const DecodeOptions& opt = st.opt;
     const int n_lines = st.n_lines;
     const int fs = st.fs;
     const double lock = st.lock;
-    const std::vector<double>& spos = st.spos;
     const std::vector<double>& sstr = st.sstr;
 
     // A smoother and a corrector want opposite things from the same window.
@@ -1418,89 +1661,8 @@ void stage_change_points(DecodeState& st) {
         for (int l = 0; l < n_lines; l++)
             if (sstr[l] >= lock) lk.push_back(l);
         const double move_min = kNonlinSec * fs;
-        // Every line the comparison fires on is a change point, including
-        // runs of adjacent ones. Thinning each run to its largest member —
-        // "one skip is one line" — is the obvious tidy-up and it is WRONG,
-        // measured both ways: it merges the genuinely separate steps of a
-        // recording that inserts samples every few lines, and it made every
-        // number worse (ground-truth synthetic 2.05 -> 2.39 px, its linear
-        // control 0.19 -> 1.71, the JSC2 fixture's drawn edge p90 2.0 -> 5.0
-        // px). Left un-thinned deliberately.
-        for (size_t j = kSegHalf; j + kSegHalf <= lk.size(); j++) {
-            std::vector<double> pre, post;
-            for (size_t k = j - kSegHalf; k < j; k++)
-                pre.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
-            for (size_t k = j; k < j + kSegHalf; k++)
-                post.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
-            if (std::fabs(median(post) - median(pre)) > move_min)
-                st.cpoint[lk[j]] = 1;
-        }
-
-        // A move the STREAM really took persists; a lock error cancels
-        // itself the next time the tracker finds the true feature. Session
-        // 26 measured this on HLL 2147Z: isolated hops of +50..+90 samples
-        // that return to the family level one to three lines later, always
-        // with a dipped lock score (0.62-0.71 against the family's
-        // 0.88-0.91) — the pulse template's white window polluted by dark
-        // content close behind the gap, so a position ~60 samples late
-        // out-scores the true one (0.72 vs 0.44 measured on line 342,
-        // where the audio itself is straight to ±5 samples). Two hops in
-        // one four-line window beat the median above, the "move" is
-        // vouched, and the dead-sector strip jogs — the raggedness Sara
-        // sent back twice.
-        //
-        // So: a step that RETURNS within the vouching distance never
-        // established a level — four lines at the new level is what "the
-        // level moved" means to the detector above. The pair is cancelled
-        // when the steps net to zero within the detection resolution and
-        // the levels outside the pair agree the same way. The lines
-        // between are then drawn by the same segment as their neighbours.
-        //
-        // The cost, stated: a real drop compensated by a real insertion
-        // within three lines would also cancel, and its rows would be
-        // drawn at the surrounding level — displaced by exactly the event
-        // it hides. Nothing in the library does that: the warp drop and
-        // the JSC insertions never return, and a browser catch-up pair is
-        // unmeasured, not known.
-        std::vector<int> cp;
-        for (int l = 0; l < n_lines; l++)
-            if (st.cpoint[l]) cp.push_back(l);
-        auto win_med = [&](int line, bool post_side) {
-            const size_t j = static_cast<size_t>(
-                std::lower_bound(lk.begin(), lk.end(), line) - lk.begin());
-            std::vector<double> v;
-            if (post_side) {
-                for (size_t k = j; k < j + kSegHalf && k < lk.size(); k++)
-                    v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
-            } else {
-                for (size_t k = j >= kSegHalf ? j - kSegHalf : 0; k < j; k++)
-                    v.push_back(spos[lk[k]] - (st.a + st.b * lk[k]));
-            }
-            return v.empty() ? 0.0 : median(v);
-        };
-        for (size_t i = 0; i + 1 < cp.size();) {
-            const int l1 = cp[i], l2 = cp[i + 1];
-            bool cancel = false;
-            if (l2 - l1 < kSegHalf) {
-                const double d1 = win_med(l1, true) - win_med(l1, false);
-                const double d2 = win_med(l2, true) - win_med(l2, false);
-                if (std::fabs(d1 + d2) <= move_min &&
-                    std::fabs(win_med(l1, false) - win_med(l2, true)) <=
-                        move_min)
-                    cancel = true;
-            }
-            if (cancel) {
-                st.cpoint[l1] = 0;
-                st.cpoint[l2] = 0;
-                dlog(st.hooks, LogTopic::kSeams,
-                     "dbg: seam pair at lines %d/%d cancelled: a lock hop "
-                     "that returned, not a stream move",
-                     l1, l2);
-                i += 2;
-            } else {
-                i++;
-            }
-        }
+        detect_change_points(st, lk, move_min);
+        cancel_returning_pairs(st, lk, move_min);
     }
 }
 
@@ -1508,35 +1670,120 @@ void stage_change_points(DecodeState& st) {
 
 namespace {
 
-// --- 5. assembly: segmented robust fit of the tracked residual --------------
-void stage_assembly(DecodeState& st) {
-    const DecodeOptions& opt = st.opt;
-    DecodeResult& res = st.res;
-    const std::vector<float>& video = st.video;
-    const int fs = st.fs;
-    const double lock = st.lock;
+// --- 5a. per-line correction ------------------------------------------------
+// The Theil-Sen half of the per-line correction: a robust line through the
+// segment (median of pairwise slopes, which a bad lock cannot lever),
+// evaluated at line l. Returns false where no pair has a usable slope; the
+// caller keeps the plain median there.
+bool segment_residual_line(const std::vector<double>& r,
+                           const std::vector<int>& rl, int l, double* corr) {
+    std::vector<double> slopes;
+    slopes.reserve(r.size() * (r.size() - 1) / 2);
+    for (size_t p = 0; p < r.size(); p++)
+        for (size_t q = p + 1; q < r.size(); q++)
+            if (rl[q] != rl[p])
+                slopes.push_back((r[q] - r[p]) / (rl[q] - rl[p]));
+    if (slopes.empty()) return false;
+    const double sl = median(slopes);
+    std::vector<double> icept;
+    icept.reserve(r.size());
+    for (size_t p = 0; p < r.size(); p++)
+        icept.push_back(r[p] - sl * (rl[p] - l));
+    *corr = median(icept);
+    return true;
+}
+
+// The windowed, seam-aware residual correction for one line: the median of
+// the locked neighbours inside the segment, refined by the Theil-Sen line
+// where there are enough points to see a slope.
+void line_correction(const DecodeState& st, int l, bool have_corr,
+                     double prev_corr, double* corr, bool* measured) {
     const std::vector<double>& spos = st.spos;
     const std::vector<double>& sstr = st.sstr;
+    const double lock = st.lock;
     const int line_lo = st.line_lo, line_hi = st.line_hi;
     const double a = st.a, b = st.b;
     const std::vector<char>& cpoint = st.cpoint;
+    // The window stops at a change point on either side, so the
+    // median never mixes two levels: within one segment it is the
+    // same noise-rejecting median as before, and at a seam it
+    // switches over in a single line instead of ramping across it.
+    // ...and at the edges of the drawn picture, because a phasing
+    // line and an image line do not anchor the same feature: the
+    // wedge is the mirror of the pulse, ~half a dead sector away
+    // [WMO §5.2.3.1]. Reaching back into the phasing region for a
+    // median drew the first lines of the picture at the control
+    // signal's phase and then jumped — 88.6 px into XSG FYCI, 76.7
+    // into `test chart`, at drawn lines 8 and 8.
+    int wlo = std::max(line_lo, l - kMedRad);
+    for (int k = l; k > wlo; k--)
+        if (cpoint[k]) { wlo = k; break; }
+    int whi = std::min(line_hi - 1, l + kMedRad);
+    for (int k = l + 1; k <= whi; k++)
+        if (cpoint[k]) { whi = k - 1; break; }
+    // No |residual| gate here. Until session 11 a residual further
+    // than 2*search from the FITTED line was dropped as bogus, which
+    // is a statement about the fit, not about the line: JMH KiwiSDR
+    // Himawari loses ~1270 samples mid-recording, so its first 720
+    // drawn lines sit 1100-1390 samples off the line fitted through
+    // the other 1200 — every one of them thrown away, corr frozen at
+    // 0, and the whole top of the chart drawn half a page across.
+    // That is the "sync lose at the top part" in Sara's review. What
+    // makes a residual bogus is disagreeing with its NEIGHBOURS, and
+    // the segment median already rejects that.
+    std::vector<double> r;
+    std::vector<int> rl;
+    for (int k = wlo; k <= whi; k++)
+        if (sstr[k] >= lock) {
+            r.push_back(spos[k] - (a + b * k));
+            rl.push_back(k);
+        }
+    // A line with nothing locked near it coasts: it keeps the level,
+    // it does not SET one. Until session 11 coasting counted as a
+    // level, so a picture whose first lines are unlocked started
+    // from a correction of zero and the clamp then walked it up to
+    // the truth at 0.03 lines each — on the warp fixture, whose
+    // first nine lines do not lock, the first two DRAWN lines came
+    // out 80.7 and 26.3 px from where the signal put them and ten
+    // lines were clamped. The clamp is there to stop a bad median,
+    // not to ration the first real measurement.
+    *measured = !r.empty();
+    // Inside a segment the residual is not flat: whatever the
+    // period fit could not absorb walks it, and on a recording that
+    // inserts samples the fit absorbs the MEAN insertion rate, so
+    // between two steps the residual ramps back down at that rate.
+    // On the ground-truth synthetic that ramp is 1.9 samples a line
+    // over an 11-line segment — 19 samples of tilt, twice the step
+    // it sits between — and a median through it is the average of a
+    // slope, wrong at both ends by half of it. So: a robust LINE
+    // through the segment (Theil-Sen, median of pairwise slopes,
+    // which a bad lock cannot lever) evaluated at this line, and the
+    // median only where there are too few points to see a slope.
+    *corr = have_corr ? prev_corr : 0.0;
+    if (*measured) {
+        *corr = median(r);
+        double ts = 0.0;
+        if (r.size() >= 4 && segment_residual_line(r, rl, l, &ts))
+            *corr = ts;
+    }
+}
 
-    // The template anchor is the sync-pulse start in image lines; in the
-    // phasing region the best template match sits ~half a dead sector
-    // earlier (phasing is white-wedge-then-black, the mirror image). The
-    // local window is cut at change points and at the phasing/image
-    // boundary, a Theil-Sen line carries the residual ramp inside each
-    // segment, and the clamp rejects moves the lines on both sides did not
-    // vouch for.
-    const int width = (res.ioc == 288) ? 905 : 1810;
-    const int out_lines = line_hi - line_lo;
-    Image img;
-    img.width = width;
-    img.height = out_lines;
-    img.px.resize(static_cast<size_t>(width) * out_lines);
-
-    std::vector<double> starts(static_cast<size_t>(out_lines), 0.0);
-    std::vector<char> unlocked(static_cast<size_t>(out_lines), 1);
+// The template anchor is the sync-pulse start in image lines; in the
+// phasing region the best template match sits ~half a dead sector
+// earlier (phasing is white-wedge-then-black, the mirror image). The
+// local window is cut at change points and at the phasing/image
+// boundary, a Theil-Sen line carries the residual ramp inside each
+// segment, and the clamp rejects moves the lines on both sides did not
+// vouch for. Returns the number of locked drawn lines, for the summary.
+int correct_line_starts(DecodeState& st, int width,
+                        std::vector<double>& starts,
+                        std::vector<char>& unlocked) {
+    DecodeResult& res = st.res;
+    const std::vector<double>& spos = st.spos;
+    const std::vector<double>& sstr = st.sstr;
+    const double lock = st.lock;
+    const int line_lo = st.line_lo, line_hi = st.line_hi;
+    const double a = st.a, b = st.b;
     const double corr_clamp = 0.03 * b;
     double prev_corr = 0.0;
     bool have_corr = false;
@@ -1544,87 +1791,14 @@ void stage_assembly(DecodeState& st) {
     int place_n = 0;
     for (int l = line_lo; l < line_hi; l++) {
         double line_start = a + b * l;  // sync-anchor position
-        if (opt.autolock) {
-            // The window stops at a change point on either side, so the
-            // median never mixes two levels: within one segment it is the
-            // same noise-rejecting median as before, and at a seam it
-            // switches over in a single line instead of ramping across it.
-            // ...and at the edges of the drawn picture, because a phasing
-            // line and an image line do not anchor the same feature: the
-            // wedge is the mirror of the pulse, ~half a dead sector away
-            // [WMO §5.2.3.1]. Reaching back into the phasing region for a
-            // median drew the first lines of the picture at the control
-            // signal's phase and then jumped — 88.6 px into XSG FYCI, 76.7
-            // into `test chart`, at drawn lines 8 and 8.
-            int wlo = std::max(line_lo, l - kMedRad);
-            for (int k = l; k > wlo; k--)
-                if (cpoint[k]) { wlo = k; break; }
-            int whi = std::min(line_hi - 1, l + kMedRad);
-            for (int k = l + 1; k <= whi; k++)
-                if (cpoint[k]) { whi = k - 1; break; }
-            // No |residual| gate here. Until session 11 a residual further
-            // than 2*search from the FITTED line was dropped as bogus, which
-            // is a statement about the fit, not about the line: JMH KiwiSDR
-            // Himawari loses ~1270 samples mid-recording, so its first 720
-            // drawn lines sit 1100-1390 samples off the line fitted through
-            // the other 1200 — every one of them thrown away, corr frozen at
-            // 0, and the whole top of the chart drawn half a page across.
-            // That is the "sync lose at the top part" in Sara's review. What
-            // makes a residual bogus is disagreeing with its NEIGHBOURS, and
-            // the segment median already rejects that.
-            std::vector<double> r;
-            std::vector<int> rl;
-            for (int k = wlo; k <= whi; k++)
-                if (sstr[k] >= lock) {
-                    r.push_back(spos[k] - (a + b * k));
-                    rl.push_back(k);
-                }
-            // A line with nothing locked near it coasts: it keeps the level,
-            // it does not SET one. Until session 11 coasting counted as a
-            // level, so a picture whose first lines are unlocked started
-            // from a correction of zero and the clamp then walked it up to
-            // the truth at 0.03 lines each — on the warp fixture, whose
-            // first nine lines do not lock, the first two DRAWN lines came
-            // out 80.7 and 26.3 px from where the signal put them and ten
-            // lines were clamped. The clamp is there to stop a bad median,
-            // not to ration the first real measurement.
-            const bool measured = !r.empty();
-            // Inside a segment the residual is not flat: whatever the
-            // period fit could not absorb walks it, and on a recording that
-            // inserts samples the fit absorbs the MEAN insertion rate, so
-            // between two steps the residual ramps back down at that rate.
-            // On the ground-truth synthetic that ramp is 1.9 samples a line
-            // over an 11-line segment — 19 samples of tilt, twice the step
-            // it sits between — and a median through it is the average of a
-            // slope, wrong at both ends by half of it. So: a robust LINE
-            // through the segment (Theil-Sen, median of pairwise slopes,
-            // which a bad lock cannot lever) evaluated at this line, and the
-            // median only where there are too few points to see a slope.
-            double corr = have_corr ? prev_corr : 0.0;
-            if (measured) {
-                corr = median(r);
-                if (r.size() >= 4) {
-                    std::vector<double> slopes;
-                    slopes.reserve(r.size() * (r.size() - 1) / 2);
-                    for (size_t p = 0; p < r.size(); p++)
-                        for (size_t q = p + 1; q < r.size(); q++)
-                            if (rl[q] != rl[p])
-                                slopes.push_back((r[q] - r[p]) /
-                                                 (rl[q] - rl[p]));
-                    if (!slopes.empty()) {
-                        const double sl = median(slopes);
-                        std::vector<double> icept;
-                        icept.reserve(r.size());
-                        for (size_t p = 0; p < r.size(); p++)
-                            icept.push_back(r[p] - sl * (rl[p] - l));
-                        corr = median(icept);
-                    }
-                }
-            }
+        if (st.opt.autolock) {
+            double corr = 0.0;
+            bool measured = false;
+            line_correction(st, l, have_corr, prev_corr, &corr, &measured);
             // A seam is a move the lines on both sides vouched for, so it
             // goes through whole; the clamp still guards everything else,
             // where a large single-line move means the median was fooled.
-            const bool seam = cpoint[l] != 0;
+            const bool seam = st.cpoint[l] != 0;
             if (have_corr && measured && !seam) {
                 if (corr > prev_corr + corr_clamp) {
                     corr = prev_corr + corr_clamp;
@@ -1667,30 +1841,292 @@ void stage_assembly(DecodeState& st) {
         starts[l - line_lo] = line_start;
         unlocked[l - line_lo] = sstr[l] >= lock ? 0 : 1;
     }
+    if (place_n > 0)
+        res.place_rms_px = std::sqrt(place_sq / place_n);
+    return place_n;
+}
 
-    // --- 5b. inside the line: where the samples actually went --------------
-    // A line start is one number per line, and a capture chain that inserts
-    // samples does not wait for a line boundary to do it. When it lands
-    // mid-line, everything after that point in THAT line is displaced while
-    // everything before it is not, so no per-line offset can place the row:
-    // the row is stretched, not moved.
-    //
-    // Measured in the session-11 decodes, which is how this was found: on
-    // JSC1 the left end and the right end of the same drawn row move
-    // independently (correlation +0.12, and they disagree by 5 px of 1810 at
-    // the 90th percentile; 10 px on JSC2). On XSG FYCI, a recording with a
-    // linear timebase, the same measurement reads 1 px. Sara's verdict on
-    // the session-11 decodes was "for JSCs, small zigzag are still zigzags,
-    // still cause difficulties of reading", and this is what is left.
-    //
-    // The size of the move is already known — it is how much this line's
-    // correction differs from the next line's. Only its POSITION in the line
-    // is unknown, and the picture itself says where: a weather fax moves
-    // 1/1810 of a page between one line and the next, so the break is where
-    // splitting the row there makes it agree best with the row above. The
-    // candidates include "at the very start" and "not in this line at all",
-    // so the search can only choose a row that matches its neighbour better
-    // than the un-split one did.
+// --- 5b. inside the line: where the samples actually went -------------------
+// A line start is one number per line, and a capture chain that inserts
+// samples does not wait for a line boundary to do it. When it lands
+// mid-line, everything after that point in THAT line is displaced while
+// everything before it is not, so no per-line offset can place the row:
+// the row is stretched, not moved.
+//
+// Measured in the session-11 decodes, which is how this was found: on
+// JSC1 the left end and the right end of the same drawn row move
+// independently (correlation +0.12, and they disagree by 5 px of 1810 at
+// the 90th percentile; 10 px on JSC2). On XSG FYCI, a recording with a
+// linear timebase, the same measurement reads 1 px. Sara's verdict on
+// the session-11 decodes was "for JSCs, small zigzag are still zigzags,
+// still cause difficulties of reading", and this is what is left.
+//
+// The size of the move is already known — it is how much this line's
+// correction differs from the next line's. Only its POSITION in the line
+// is unknown, and the picture itself says where: a weather fax moves
+// 1/1810 of a page between one line and the next, so the break is where
+// splitting the row there makes it agree best with the row above. The
+// candidates include "at the very start" and "not in this line at all",
+// so the search can only choose a row that matches its neighbour better
+// than the un-split one did.
+double intra_line_break(DecodeState& st, int row, double s0, double k,
+                        double b, int width, bool torn_row,
+                        const uint8_t* above) {
+    const std::vector<float>& video = st.video;
+    std::vector<uint8_t> cand(width);
+    auto fill = [&](std::vector<uint8_t>& dst, double brk, int step) {
+        for (int j = 0; j < width; j += step) {
+            const double off = b * j / width;
+            const double pos = s0 + off + (off > brk ? k : 0.0);
+            dst[j] = static_cast<uint8_t>(
+                std::lround(fax_lerp_at(video, pos) * 255.0f));
+        }
+    };
+    double brk = b;  // no break: the pre-session-11b behaviour
+    const double kcap = torn_row ? b : 0.25 * b;
+    if (st.opt.autolock && row > 0 && std::fabs(k) >= kIntraMin &&
+        std::fabs(k) < kcap) {
+        const int rough = width / 4;
+        auto cost = [&](double p) {
+            fill(cand, p, 4);
+            long acc = 0;
+            for (int j = 0; j < rough * 4; j += 4)
+                acc += std::abs(static_cast<int>(cand[j]) -
+                                static_cast<int>(above[j]));
+            return acc;
+        };
+        const int kSteps = 32;
+        long bestc = -1;
+        for (int t = 0; t <= kSteps; t++) {
+            const double p = b * t / kSteps;
+            const long c = cost(p);
+            if (bestc < 0 || c < bestc) { bestc = c; brk = p; }
+        }
+        // ...then refine within the coarse cell it won.
+        const double cell = b / kSteps;
+        double fine = brk;
+        for (int t = -3; t <= 3; t++) {
+            const double p = brk + cell * t / 3.0;
+            if (p < 0.0 || p > b) continue;
+            const long c = cost(p);
+            if (c < bestc) { bestc = c; fine = p; }
+        }
+        brk = fine;
+        st.res.intra_line_breaks++;
+    }
+    return brk;
+}
+
+// One row of a bracketed unlocked run, asked of the signal at both levels
+// (the probe below). The row the drop landed in matches neither and is
+// marked adrift for the split search and the picture; every other row is
+// placed by the signal. Returns true when the row re-locked.
+bool relock_row(DecodeState& st, int m, double po, double so, double pn,
+                double sn, std::vector<double>& starts,
+                std::vector<char>& unlocked, std::vector<char>& adrift) {
+    const double lock = st.lock;
+    if (sn >= lock && so < lock - 0.15) {
+        starts[m] = pn;
+        unlocked[m] = 0;
+        st.res.relocked_lines++;
+        return true;
+    }
+    if (so >= lock && sn < lock - 0.15) {
+        starts[m] = po;
+        unlocked[m] = 0;
+        st.res.relocked_lines++;
+        return true;
+    }
+    adrift[m] = 1;
+    return false;
+}
+
+// The signal probe of session 12: a run of unlocked rows bracketed by two
+// known levels is asked of the audio directly, row by row, at both levels.
+void relock_dropout_runs(DecodeState& st, std::vector<double>& starts,
+                         std::vector<char>& unlocked,
+                         std::vector<char>& adrift,
+                         std::vector<char>& torn) {
+    const std::vector<float>& video = st.video;
+    const double b = st.b;
+    const int out_lines = static_cast<int>(starts.size());
+    int i = 0;
+    while (i < out_lines) {
+        if (!unlocked[i]) { i++; continue; }
+        int j = i;
+        while (j + 1 < out_lines && unlocked[j + 1]) j++;
+        if (i > 0 && j + 1 < out_lines && j - i + 1 >= kSegHalf) {
+            const double moved =
+                std::fabs((starts[j + 1] - starts[i - 1]) -
+                          b * (j + 1 - (i - 1)));
+            dlog(st.hooks, LogTopic::kSeams,
+                 "dbg: unlocked run rows %d-%d (%d), phase "
+                 "moved %.1f smp across it",
+                 i, j, j - i + 1, moved);
+            if (moved > kNonlinSec * st.fs) {
+                // The run is bracketed by two known levels: the locked
+                // lines before it (old phase) and after it (new). The
+                // tracker never locked these rows because its narrow
+                // window sat on the old prediction until the re-acquire
+                // sweep fired — but the pulse is IN the audio (Sara,
+                // session 12: KiwiSDR over the internet drops samples;
+                // the signal either side of a drop is intact). So ask
+                // each row directly, at both levels, ±20 samples around
+                // the extrapolated positions. Measured on the three
+                // library dropouts: the far side scores 0.66-0.96, the
+                // near side <= 0.22, and exactly one row per run scores
+                // nothing at either level — the row the drop landed in,
+                // whose pulse it took. That row is left to the split
+                // search and the picture; every other row is placed by
+                // the signal, which no ±120 px picture match can do —
+                // the moves are 574 and 743 PIXELS.
+                bool any = false;
+                for (int m = i; m <= j; m++) {
+                    const double l_old =
+                        starts[i - 1] + b * (m - (i - 1));
+                    const double l_new =
+                        starts[j + 1] + b * (m - (j + 1));
+                    double so, sn;
+                    const double po = fax_best_sync(video, l_old - 20,
+                                                l_old + 20, st.pulse, &so);
+                    const double pn = fax_best_sync(video, l_new - 20,
+                                                l_new + 20, st.pulse, &sn);
+                    dlog(st.hooks, LogTopic::kSeams,
+                         "dbg: run row %d: old %.2f  new %.2f",
+                         m, so, sn);
+                    if (relock_row(st, m, po, so, pn, sn, starts, unlocked,
+                                   adrift))
+                        any = true;
+                }
+                if (any)
+                    for (int m = i - 1; m <= j; m++) torn[m] = 1;
+            }
+        }
+        i = j + 1;
+    }
+}
+
+// --- the picture-placement fallback ------------------------------------------
+// NOT DONE, and the measurement is why. A row with no sync of its
+// own is drawn where its neighbours are, which is right while
+// nothing moves and wrong at exactly the place where something did:
+// the eight lines bracketing JMH KiwiSDR Himawari's 1270-sample loss
+// carry no lock and sit ~75 px from the rest of the chart. The
+// obvious answer — let the PICTURE place them, by the offset that
+// best matches the row above (fldigi's per-line correlation, kept
+// per line instead of collapsed to a histogram mode) — was built and
+// measured, and it fails a screamer it should not: on the warp
+// fixture, whose first nine rows carry no lock but ARE placed
+// correctly by the ±8-line window, the search drags the head 41 px
+// off the body, and a 3% significance guard does not stop it. On a
+// white-only station, where every row coasts, it is worse still:
+// the page wanders off the phasing anchor and `roundtrip [7]` and
+// `fixture_phasing_anchor` both fail. The idea is right for rows
+// that nothing else can place; telling those apart from rows the
+// window already placed is the unsolved part, and it is the same
+// problem the white-only half of M2b has to solve.
+double place_adrift_row(DecodeState& st, int row, double brk, double k,
+                        double b, int width, const uint8_t* above,
+                        std::vector<double>& starts,
+                        const std::vector<char>& adrift,
+                        const std::vector<char>& torn) {
+    const std::vector<float>& video = st.video;
+    double draw0 = starts[row];
+    // A torn row that was just split is placed by the split, in two
+    // pieces; a whole-row offset on top of it would drag both halves
+    // off together, so the picture placement stays out of it.
+    if (adrift[row] && row > 0 &&
+        !(torn[row] && std::fabs(k) >= kIntraMin)) {
+        // fldigi computes this correlation per line and keeps only the
+        // mode of a histogram of them (docs/00, session 11); here it is
+        // kept per line, and asked only where nothing else can answer.
+        const int rough = width / 4;
+        const double px_smp = b / width;
+        auto sad = [&](double off) {
+            long acc = 0;
+            for (int j = 0; j < rough * 4; j += 4) {
+                const double o = b * j / width;
+                const double pos = draw0 + off + o + (o > brk ? k : 0.0);
+                const int v = static_cast<int>(
+                    std::lround(fax_lerp_at(video, pos) * 255.0f));
+                acc += std::abs(v - static_cast<int>(above[j]));
+            }
+            return acc;
+        };
+        const long stay = sad(0.0);
+        long bestc = stay;
+        double bestoff = 0.0;
+        for (int t = -kCoastSearchPx; t <= kCoastSearchPx; t += 2) {
+            const long acc = sad(t * px_smp);
+            if (acc < bestc) { bestc = acc; bestoff = t * px_smp; }
+        }
+        // These rows are already known to have nothing else placing
+        // them — the phase moved across the run they sit in — so any
+        // improvement is better evidence than the stale level they
+        // would otherwise keep.
+        if (bestc < stay) {
+            draw0 += bestoff;
+            starts[row] = draw0;  // the next adrift row follows this one
+            st.res.picture_placed++;
+        }
+    }
+    return draw0;
+}
+
+// --- the per-row draw: split search, picture placement, pixel fill ---------
+void draw_rows(DecodeState& st, Image& img, std::vector<double>& starts,
+               const std::vector<char>& adrift,
+               const std::vector<char>& torn) {
+    const std::vector<float>& video = st.video;
+    const double b = st.b;
+    const int width = img.width;
+    const int line_lo = st.line_lo, line_hi = st.line_hi;
+    const int out_lines = line_hi - line_lo;
+    std::vector<uint8_t> best(width);
+    for (int l = line_lo; l < line_hi; l++) {
+        const int row = l - line_lo;
+        if ((row & 31) == 0) {
+            throw_if_cancelled(st.hooks, "assembly");
+            report(st.hooks, "assembly",
+                   static_cast<double>(row) / out_lines);
+        }
+        const double s0 = starts[row];
+        const double k =
+            (row + 1 < out_lines) ? (starts[row + 1] - s0 - b) : 0.0;
+        const uint8_t* above =
+            row > 0 ? &img.px[static_cast<size_t>(row - 1) * width]
+                    : nullptr;
+        const double brk =
+            intra_line_break(st, row, s0, k, b, width, torn[row], above);
+        const double draw0 = place_adrift_row(st, row, brk, k, b, width,
+                                              above, starts, adrift, torn);
+        for (int j = 0; j < width; j++) {
+            const double o = b * j / width;
+            const double pos = draw0 + o + (o > brk ? k : 0.0);
+            best[j] = static_cast<uint8_t>(
+                std::lround(fax_lerp_at(video, pos) * 255.0f));
+        }
+        std::copy(best.begin(), best.end(),
+                  img.px.begin() + static_cast<size_t>(row) * width);
+    }
+}
+
+// --- 5. assembly: segmented robust fit of the tracked residual --------------
+void stage_assembly(DecodeState& st) {
+    const DecodeOptions& opt = st.opt;
+    DecodeResult& res = st.res;
+    const int width = (res.ioc == 288) ? 905 : 1810;
+    const int line_lo = st.line_lo, line_hi = st.line_hi;
+    const int out_lines = line_hi - line_lo;
+    Image img;
+    img.width = width;
+    img.height = out_lines;
+    img.px.resize(static_cast<size_t>(width) * out_lines);
+
+    std::vector<double> starts(static_cast<size_t>(out_lines), 0.0);
+    std::vector<char> unlocked(static_cast<size_t>(out_lines), 1);
+    const int place_n = correct_line_starts(st, width, starts, unlocked);
+
     // Which unlocked rows nothing can place but the picture — and which the
     // signal can still place after all.
     //
@@ -1723,196 +2159,11 @@ void stage_assembly(DecodeState& st) {
     // to a re-locked run has independent evidence the phase really moved,
     // so it is searched over the whole line instead.
     std::vector<char> torn(static_cast<size_t>(out_lines), 0);
-    if (opt.autolock && res.per_line_sync) {
-        int i = 0;
-        while (i < out_lines) {
-            if (!unlocked[i]) { i++; continue; }
-            int j = i;
-            while (j + 1 < out_lines && unlocked[j + 1]) j++;
-            if (i > 0 && j + 1 < out_lines && j - i + 1 >= kSegHalf) {
-                const double moved =
-                    std::fabs((starts[j + 1] - starts[i - 1]) -
-                              b * (j + 1 - (i - 1)));
-                dlog(st.hooks, LogTopic::kSeams,
-                     "dbg: unlocked run rows %d-%d (%d), phase "
-                     "moved %.1f smp across it",
-                     i, j, j - i + 1, moved);
-                if (moved > kNonlinSec * fs) {
-                    // The run is bracketed by two known levels: the locked
-                    // lines before it (old phase) and after it (new). The
-                    // tracker never locked these rows because its narrow
-                    // window sat on the old prediction until the re-acquire
-                    // sweep fired — but the pulse is IN the audio (Sara,
-                    // session 12: KiwiSDR over the internet drops samples;
-                    // the signal either side of a drop is intact). So ask
-                    // each row directly, at both levels, ±20 samples around
-                    // the extrapolated positions. Measured on the three
-                    // library dropouts: the far side scores 0.66-0.96, the
-                    // near side <= 0.22, and exactly one row per run scores
-                    // nothing at either level — the row the drop landed in,
-                    // whose pulse it took. That row is left to the split
-                    // search and the picture; every other row is placed by
-                    // the signal, which no ±120 px picture match can do —
-                    // the moves are 574 and 743 PIXELS.
-                    bool any = false;
-                    for (int m = i; m <= j; m++) {
-                        const double l_old =
-                            starts[i - 1] + b * (m - (i - 1));
-                        const double l_new =
-                            starts[j + 1] + b * (m - (j + 1));
-                        double so, sn;
-                        const double po = fax_best_sync(video, l_old - 20,
-                                                    l_old + 20, st.pulse, &so);
-                        const double pn = fax_best_sync(video, l_new - 20,
-                                                    l_new + 20, st.pulse, &sn);
-                        dlog(st.hooks, LogTopic::kSeams,
-                             "dbg: run row %d: old %.2f  new %.2f",
-                             m, so, sn);
-                        if (sn >= lock && so < lock - 0.15) {
-                            starts[m] = pn;
-                            unlocked[m] = 0;
-                            res.relocked_lines++;
-                            any = true;
-                        } else if (so >= lock && sn < lock - 0.15) {
-                            starts[m] = po;
-                            unlocked[m] = 0;
-                            res.relocked_lines++;
-                            any = true;
-                        } else {
-                            adrift[m] = 1;
-                        }
-                    }
-                    if (any)
-                        for (int m = i - 1; m <= j; m++) torn[m] = 1;
-                }
-            }
-            i = j + 1;
-        }
-    }
+    if (opt.autolock && res.per_line_sync)
+        relock_dropout_runs(st, starts, unlocked, adrift, torn);
 
-    const int rough = width / 4;
-    std::vector<uint8_t> cand(width), best(width);
-    for (int l = line_lo; l < line_hi; l++) {
-        const int row = l - line_lo;
-        if ((row & 31) == 0) {
-            throw_if_cancelled(st.hooks, "assembly");
-            report(st.hooks, "assembly",
-                   static_cast<double>(row) / out_lines);
-        }
-        const double s0 = starts[row];
-        const double k =
-            (row + 1 < out_lines) ? (starts[row + 1] - s0 - b) : 0.0;
-        auto fill = [&](std::vector<uint8_t>& dst, double brk, int step) {
-            for (int j = 0; j < width; j += step) {
-                const double off = b * j / width;
-                const double pos = s0 + off + (off > brk ? k : 0.0);
-                dst[j] = static_cast<uint8_t>(
-                    std::lround(fax_lerp_at(video, pos) * 255.0f));
-            }
-        };
-        double brk = b;  // no break: the pre-session-11b behaviour
-        const double kcap = torn[row] ? b : 0.25 * b;
-        if (opt.autolock && row > 0 && std::fabs(k) >= kIntraMin &&
-            std::fabs(k) < kcap) {
-            const uint8_t* above =
-                &img.px[static_cast<size_t>(row - 1) * width];
-            auto cost = [&](double p) {
-                fill(cand, p, 4);
-                long acc = 0;
-                for (int j = 0; j < rough * 4; j += 4)
-                    acc += std::abs(static_cast<int>(cand[j]) -
-                                    static_cast<int>(above[j]));
-                return acc;
-            };
-            const int kSteps = 32;
-            long bestc = -1;
-            for (int t = 0; t <= kSteps; t++) {
-                const double p = b * t / kSteps;
-                const long c = cost(p);
-                if (bestc < 0 || c < bestc) { bestc = c; brk = p; }
-            }
-            // ...then refine within the coarse cell it won.
-            const double cell = b / kSteps;
-            double fine = brk;
-            for (int t = -3; t <= 3; t++) {
-                const double p = brk + cell * t / 3.0;
-                if (p < 0.0 || p > b) continue;
-                const long c = cost(p);
-                if (c < bestc) { bestc = c; fine = p; }
-            }
-            brk = fine;
-            res.intra_line_breaks++;
-        }
-        // NOT DONE, and the measurement is why. A row with no sync of its
-        // own is drawn where its neighbours are, which is right while
-        // nothing moves and wrong at exactly the place where something did:
-        // the eight lines bracketing JMH KiwiSDR Himawari's 1270-sample loss
-        // carry no lock and sit ~75 px from the rest of the chart. The
-        // obvious answer — let the PICTURE place them, by the offset that
-        // best matches the row above (fldigi's per-line correlation, kept
-        // per line instead of collapsed to a histogram mode) — was built and
-        // measured, and it fails a screamer it should not: on the warp
-        // fixture, whose first nine rows carry no lock but ARE placed
-        // correctly by the ±8-line window, the search drags the head 41 px
-        // off the body, and a 3% significance guard does not stop it. On a
-        // white-only station, where every row coasts, it is worse still:
-        // the page wanders off the phasing anchor and `roundtrip [7]` and
-        // `fixture_phasing_anchor` both fail. The idea is right for rows
-        // that nothing else can place; telling those apart from rows the
-        // window already placed is the unsolved part, and it is the same
-        // problem the white-only half of M2b has to solve.
-        double draw0 = starts[row];
-        // A torn row that was just split is placed by the split, in two
-        // pieces; a whole-row offset on top of it would drag both halves
-        // off together, so the picture placement stays out of it.
-        if (adrift[row] && row > 0 &&
-            !(torn[row] && std::fabs(k) >= kIntraMin)) {
-            // fldigi computes this correlation per line and keeps only the
-            // mode of a histogram of them (docs/00, session 11); here it is
-            // kept per line, and asked only where nothing else can answer.
-            const uint8_t* above =
-                &img.px[static_cast<size_t>(row - 1) * width];
-            const double px_smp = b / width;
-            auto sad = [&](double off) {
-                long acc = 0;
-                for (int j = 0; j < rough * 4; j += 4) {
-                    const double o = b * j / width;
-                    const double pos = draw0 + off + o + (o > brk ? k : 0.0);
-                    const int v = static_cast<int>(
-                        std::lround(fax_lerp_at(video, pos) * 255.0f));
-                    acc += std::abs(v - static_cast<int>(above[j]));
-                }
-                return acc;
-            };
-            const long stay = sad(0.0);
-            long bestc = stay;
-            double bestoff = 0.0;
-            for (int t = -kCoastSearchPx; t <= kCoastSearchPx; t += 2) {
-                const long acc = sad(t * px_smp);
-                if (acc < bestc) { bestc = acc; bestoff = t * px_smp; }
-            }
-            // These rows are already known to have nothing else placing
-            // them — the phase moved across the run they sit in — so any
-            // improvement is better evidence than the stale level they
-            // would otherwise keep.
-            if (bestc < stay) {
-                draw0 += bestoff;
-                starts[row] = draw0;  // the next adrift row follows this one
-                res.picture_placed++;
-            }
-        }
-        for (int j = 0; j < width; j++) {
-            const double o = b * j / width;
-            const double pos = draw0 + o + (o > brk ? k : 0.0);
-            best[j] = static_cast<uint8_t>(
-                std::lround(fax_lerp_at(video, pos) * 255.0f));
-        }
-        std::copy(best.begin(), best.end(),
-                  img.px.begin() + static_cast<size_t>(row) * width);
-    }
+    draw_rows(st, img, starts, adrift, torn);
 
-    if (place_n > 0)
-        res.place_rms_px = std::sqrt(place_sq / place_n);
     dlog(st.hooks, LogTopic::kInfo,
          "dbg: place rms=%.2f px max=%.1f px over %d locked "
          "drawn lines; %d seam(s), largest %.1f px; %d intra-line "
