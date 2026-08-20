@@ -5,13 +5,13 @@
 #include "../core/resample.hpp"
 #include "../core/wav.hpp"
 #include "env_hooks.hpp"
+#include "internal_rate.hpp"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 namespace {
-constexpr int kInternalRate = 8000;
 
 // What the phasing witness had to say, in words. Each of these is a
 // DIFFERENT fact about the recording and they used to print as one.
@@ -40,15 +40,15 @@ void usage() {
                  "[--no-autolock] [--no-phasing] [--no-segment] "
                  "[--phase FRAC] [--sync PPM]\n");
 }
-}  // namespace
 
-int main(int argc, char** argv) {
+// Fill opt/deviation from the command line; false means bad arguments
+// (usage already printed) and main exits 2.
+bool parse_args(int argc, char** argv, nova::DecodeOptions& opt,
+                double& deviation) {
     if (argc < 3) {
         usage();
-        return 2;
+        return false;
     }
-    nova::DecodeOptions opt;
-    double deviation = 400.0;
     for (int i = 3; i < argc; i++) {
         if (!std::strcmp(argv[i], "--lpm") && i + 1 < argc)
             opt.lpm = std::atoi(argv[++i]);
@@ -75,162 +75,178 @@ int main(int argc, char** argv) {
             opt.clock_ppm_fallback = std::atof(argv[++i]);
         else {
             usage();
-            return 2;
+            return false;
         }
     }
-    opt.hooks = nova::hooks_from_env();
     const bool bad_lpm = opt.lpm != 0 && opt.lpm != 60 && opt.lpm != 90 &&
                          opt.lpm != 120;
     const bool bad_ioc = opt.ioc != 0 && opt.ioc != 288 && opt.ioc != 576;
     if (bad_lpm || bad_ioc ||
         (deviation != 150.0 && deviation != 400.0)) {
         usage();
-        return 2;
+        return false;
     }
+    return true;
+}
+
+// Print the decode result, one fact per line.
+void print_result(const nova::DecodeResult& r, const nova::DecodeOptions& opt,
+                  double deviation) {
+    std::printf(
+        "lpm=%d (measured %.3f)  ioc=%d  dev=%.0f Hz  clock=%+.1f ppm  "
+        "lines=%d  locked=%d  clamped=%d  max_step=%.2f px  "
+        "dead=%s(%.2f)%s\n",
+        r.lpm, 60.0 / r.line_period_s, r.ioc, deviation, r.clock_ppm,
+        r.lines, r.locked_lines, r.clamped_corrections, r.max_step_px,
+        r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
+                                                       : "white",
+        r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");
+    // How straight the drawn line starts came out, which is the number
+    // an operator can check against the picture in front of them: the
+    // dead sector's edge should be a straight vertical line, and this is
+    // how far from straight it is. Only printed where per-line sync
+    // exists, because nothing else can measure it (session 11).
+    if (r.per_line_sync) {
+        std::printf("  place   %.2f px rms, worst %.1f px", r.place_rms_px,
+                    r.place_max_px);
+        if (r.seams)
+            std::printf("; %d seam(s) followed, largest %.1f px",
+                        r.seams, r.max_seam_px);
+        if (r.relocked_lines)
+            std::printf("; %d dropped row(s) re-locked at the far side",
+                        r.relocked_lines);
+        std::printf("\n");
+    }
+    // What the operator's corrections actually did [docs/05 §7.1].
+    // Printed only when one was given, and printed even when it was
+    // ignored — a value that vanished silently is the whole failure
+    // mode this pair is designed around.
+    if (r.anchor_from_hint || opt.phase_anchor_hint >= 0.0)
+        std::printf("  PHASE hint %.4f of a line: %s\n",
+                    opt.phase_anchor_hint,
+                    r.anchor_from_hint ? "seeded the anchor search"
+                                       : "NOT USED");
+    if (!std::isnan(opt.clock_ppm_fallback))
+        std::printf("  SYNC %+.1f ppm: %s\n", opt.clock_ppm_fallback,
+                    r.clock_from_fallback
+                        ? "used — the fit had no baseline"
+                        : "outranked by the fit, as designed");
+    if (r.phasing_found)
+        std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp vs "
+                    "image  (%s)\n",
+                    r.phasing_t_start, r.phasing_t_end,
+                    r.phasing_anchor_delta,
+                    r.anchor_from_hint
+                        ? "OPERATOR hint used"
+                        : (r.anchor_from_phasing ? "PHASING anchor used"
+                                                 : "image anchor used"));
+    else
+        std::printf("  phasing none\n");
+    // Loud, for the same reason the NOT LINEAR block below is loud: it
+    // changes what the picture means. "phasing none" and
+    // "no-per-line-sync" are each unremarkable alone — the second is
+    // NORMAL on VMW, NMC and GYA — and together they mean nothing in
+    // the recording says where a line starts [audit Pass A,
+    // A-CLAIM-013].
+    if (r.no_phase_reference)
+        std::printf("  NO PHASE REFERENCE: this recording has a "
+                    "white-only dead sector (no per-line sync) AND no\n"
+                    "           phasing interval, so nothing in it "
+                    "establishes where a line begins. The picture\n"
+                    "           below is drawn at a rotation that was "
+                    "GUESSED from image content, and on a\n"
+                    "           station like this that is not a "
+                    "measurement of anything. A phasing interval\n"
+                    "           lost to fading looks exactly like this. "
+                    "Give --phase FRAC to set it by hand.\n");
+    switch (r.timebase) {
+        case nova::Timebase::kSteps:
+            // Loud, because it changes what the line above it means.
+            if (r.timebase_lines > 0)
+                std::printf("  timebase NOT LINEAR: %d stepped line(s), "
+                            "%.1f per 1000 over %d.\n",
+                            r.timebase_step_lines, r.timebase_step_rate,
+                            r.timebase_lines);
+            else
+                std::printf("  timebase NOT LINEAR: phasing edge %.1f "
+                            "smp off straight in %d step(s), noise "
+                            "%.1f.\n",
+                            r.phasing_nonlinearity, r.phasing_steps,
+                            r.phasing_roughness);
+            std::printf("           The clock figure above is this "
+                        "recording's clock PLUS its insertion rate, and "
+                        "the anchor delta\n"
+                        "           is not comparable with other "
+                        "recordings. Where lines lock, the steps are "
+                        "CORRECTED as well as\n"
+                        "           counted (session 11): the picture is "
+                        "drawn segment by segment, and `place` below "
+                        "says how\n"
+                        "           far from the signal the drawn lines "
+                        "ended up.\n");
+            break;
+        case nova::Timebase::kLinear:
+            // Only the evidence that exists. A white-only station has
+            // no tracked residual to measure, and a recording with no
+            // phasing interval has no edge to fit — printing 0.0 for
+            // either would read as a measurement rather than a gap.
+            std::printf("  timebase linear (");
+            if (r.timebase_lines > 0)
+                std::printf("%.1f step(s) per 1000 lines over %d",
+                            r.timebase_step_rate, r.timebase_lines);
+            else
+                std::printf("no per-line sync to track");
+            if (r.phasing_found)
+                std::printf("; %s, %.1f smp off straight, noise %.1f)\n",
+                            phasing_witness_text(r),
+                            r.phasing_nonlinearity, r.phasing_roughness);
+            else
+                std::printf("; no phasing interval)\n");
+            break;
+        case nova::Timebase::kUnknown:
+            // Say WHICH witness is missing. "No per-line sync" and
+            // "the recording is too short to measure a rate over" are
+            // different facts, and a 60 s cut of a pulse station hits
+            // the second while looking like the first. Since session 10
+            // a phasing interval can also be PRESENT and still unable to
+            // answer — too noisy to resolve the threshold, or bent by a
+            // single skip that is not a rate — and saying "no phasing
+            // interval" there would be a lie about a run that was found.
+            std::printf("  timebase not measurable (%s; %s)\n",
+                        !r.per_line_sync
+                            ? "no per-line sync to track"
+                            : "too few drawn lines for a step rate",
+                        phasing_witness_text(r));
+            break;
+    }
+    if (r.segmented)
+        std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
+                    "start/phasing, %d of stop)\n",
+                    r.image_t_start, r.image_t_end, r.lines_dropped_head,
+                    r.lines_dropped_tail);
+    else
+        std::printf("  image   whole recording (no control signals to "
+                    "segment on)\n");
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+    nova::DecodeOptions opt;
+    double deviation = 400.0;
+    if (!parse_args(argc, argv, opt, deviation)) return 2;
+    opt.hooks = nova::hooks_from_env();
 
     try {
         nova::Wav w = nova::read_wav(argv[1]);
         std::vector<float> mono =
-            nova::resample(w.samples, w.sample_rate, kInternalRate);
+            nova::resample(w.samples, w.sample_rate, nova::kInternalRate);
+        // 1900 Hz: the WEFAX audio subcarrier centre frequency [WMO §5.5.1].
         std::vector<float> video =
-            nova::fm_demod(mono, kInternalRate, 1900.0, deviation);
-        nova::DecodeResult r = nova::decode_fax(video, kInternalRate, opt);
+            nova::fm_demod(mono, nova::kInternalRate, 1900.0, deviation);
+        nova::DecodeResult r =
+            nova::decode_fax(video, nova::kInternalRate, opt);
         nova::write_pgm(argv[2], r.img);
-        std::printf(
-            "lpm=%d (measured %.3f)  ioc=%d  dev=%.0f Hz  clock=%+.1f ppm  "
-            "lines=%d  locked=%d  clamped=%d  max_step=%.2f px  "
-            "dead=%s(%.2f)%s\n",
-            r.lpm, 60.0 / r.line_period_s, r.ioc, deviation, r.clock_ppm,
-            r.lines, r.locked_lines, r.clamped_corrections, r.max_step_px,
-            r.dead_sector == nova::DeadSector::kBlackPulse ? "pulse"
-                                                           : "white",
-            r.dead_consistency, r.per_line_sync ? "" : " no-per-line-sync");
-        // How straight the drawn line starts came out, which is the number
-        // an operator can check against the picture in front of them: the
-        // dead sector's edge should be a straight vertical line, and this is
-        // how far from straight it is. Only printed where per-line sync
-        // exists, because nothing else can measure it (session 11).
-        if (r.per_line_sync) {
-            std::printf("  place   %.2f px rms, worst %.1f px", r.place_rms_px,
-                        r.place_max_px);
-            if (r.seams)
-                std::printf("; %d seam(s) followed, largest %.1f px",
-                            r.seams, r.max_seam_px);
-            if (r.relocked_lines)
-                std::printf("; %d dropped row(s) re-locked at the far side",
-                            r.relocked_lines);
-            std::printf("\n");
-        }
-        // What the operator's corrections actually did [docs/05 §7.1].
-        // Printed only when one was given, and printed even when it was
-        // ignored — a value that vanished silently is the whole failure
-        // mode this pair is designed around.
-        if (r.anchor_from_hint || opt.phase_anchor_hint >= 0.0)
-            std::printf("  PHASE hint %.4f of a line: %s\n",
-                        opt.phase_anchor_hint,
-                        r.anchor_from_hint ? "seeded the anchor search"
-                                           : "NOT USED");
-        if (!std::isnan(opt.clock_ppm_fallback))
-            std::printf("  SYNC %+.1f ppm: %s\n", opt.clock_ppm_fallback,
-                        r.clock_from_fallback
-                            ? "used — the fit had no baseline"
-                            : "outranked by the fit, as designed");
-        if (r.phasing_found)
-            std::printf("  phasing %.2f-%.2f s  anchor delta %+.1f smp vs "
-                        "image  (%s)\n",
-                        r.phasing_t_start, r.phasing_t_end,
-                        r.phasing_anchor_delta,
-                        r.anchor_from_hint
-                            ? "OPERATOR hint used"
-                            : (r.anchor_from_phasing ? "PHASING anchor used"
-                                                     : "image anchor used"));
-        else
-            std::printf("  phasing none\n");
-        // Loud, for the same reason the NOT LINEAR block below is loud: it
-        // changes what the picture means. "phasing none" and
-        // "no-per-line-sync" are each unremarkable alone — the second is
-        // NORMAL on VMW, NMC and GYA — and together they mean nothing in
-        // the recording says where a line starts [audit Pass A,
-        // A-CLAIM-013].
-        if (r.no_phase_reference)
-            std::printf("  NO PHASE REFERENCE: this recording has a "
-                        "white-only dead sector (no per-line sync) AND no\n"
-                        "           phasing interval, so nothing in it "
-                        "establishes where a line begins. The picture\n"
-                        "           below is drawn at a rotation that was "
-                        "GUESSED from image content, and on a\n"
-                        "           station like this that is not a "
-                        "measurement of anything. A phasing interval\n"
-                        "           lost to fading looks exactly like this. "
-                        "Give --phase FRAC to set it by hand.\n");
-        switch (r.timebase) {
-            case nova::Timebase::kSteps:
-                // Loud, because it changes what the line above it means.
-                if (r.timebase_lines > 0)
-                    std::printf("  timebase NOT LINEAR: %d stepped line(s), "
-                                "%.1f per 1000 over %d.\n",
-                                r.timebase_step_lines, r.timebase_step_rate,
-                                r.timebase_lines);
-                else
-                    std::printf("  timebase NOT LINEAR: phasing edge %.1f "
-                                "smp off straight in %d step(s), noise "
-                                "%.1f.\n",
-                                r.phasing_nonlinearity, r.phasing_steps,
-                                r.phasing_roughness);
-                std::printf("           The clock figure above is this "
-                            "recording's clock PLUS its insertion rate, and "
-                            "the anchor delta\n"
-                            "           is not comparable with other "
-                            "recordings. Where lines lock, the steps are "
-                            "CORRECTED as well as\n"
-                            "           counted (session 11): the picture is "
-                            "drawn segment by segment, and `place` below "
-                            "says how\n"
-                            "           far from the signal the drawn lines "
-                            "ended up.\n");
-                break;
-            case nova::Timebase::kLinear:
-                // Only the evidence that exists. A white-only station has
-                // no tracked residual to measure, and a recording with no
-                // phasing interval has no edge to fit — printing 0.0 for
-                // either would read as a measurement rather than a gap.
-                std::printf("  timebase linear (");
-                if (r.timebase_lines > 0)
-                    std::printf("%.1f step(s) per 1000 lines over %d",
-                                r.timebase_step_rate, r.timebase_lines);
-                else
-                    std::printf("no per-line sync to track");
-                if (r.phasing_found)
-                    std::printf("; %s, %.1f smp off straight, noise %.1f)\n",
-                                phasing_witness_text(r),
-                                r.phasing_nonlinearity, r.phasing_roughness);
-                else
-                    std::printf("; no phasing interval)\n");
-                break;
-            case nova::Timebase::kUnknown:
-                // Say WHICH witness is missing. "No per-line sync" and
-                // "the recording is too short to measure a rate over" are
-                // different facts, and a 60 s cut of a pulse station hits
-                // the second while looking like the first. Since session 10
-                // a phasing interval can also be PRESENT and still unable to
-                // answer — too noisy to resolve the threshold, or bent by a
-                // single skip that is not a rate — and saying "no phasing
-                // interval" there would be a lie about a run that was found.
-                std::printf("  timebase not measurable (%s; %s)\n",
-                            !r.per_line_sync
-                                ? "no per-line sync to track"
-                                : "too few drawn lines for a step rate",
-                            phasing_witness_text(r));
-                break;
-        }
-        if (r.segmented)
-            std::printf("  image   %.2f-%.2f s  (dropped %d line(s) of "
-                        "start/phasing, %d of stop)\n",
-                        r.image_t_start, r.image_t_end, r.lines_dropped_head,
-                        r.lines_dropped_tail);
-        else
-            std::printf("  image   whole recording (no control signals to "
-                        "segment on)\n");
+        print_result(r, opt, deviation);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "nova-decode: %s\n", e.what());
         return 1;
