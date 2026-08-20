@@ -106,6 +106,26 @@ auditors were given, and it was true when they were given it; editing it
 now would falsify the record rather than update it. The dated-artifact
 rule applies to Gate 0 as much as to the pass reports.
 
+**The release gate was verified against real history, all three ways.** On
+the true case — the record's commit an ancestor of HEAD with only the
+record differing — it passes. Given a record from before a code change it
+refuses and names the three files that moved. Given a commit on a
+divergent line of history (made in a throwaway clone, because every branch
+in this repo is on one chain and none of them is a real negative) it
+refuses too. That last one is the only part of the workflow that has been
+exercised at all; the workflows themselves still have not run.
+
+**One consequence, stated so it does not read as a defect later: committing
+this log entry makes the committed record stale.** That is the gate working
+— the record describes `bc1c595` and every later commit changes the code
+under it. Before any tag, re-run `tools/record-fixture-regression.sh`,
+commit the fresh record, and tag that. The record in the tree is the first
+one and a demonstration that the mechanism runs end to end, not a
+release-ready artifact.
+
+**Merged to `main`** at Sara's instruction this session — the first time
+`main` has moved since session 19. No push: there is still no remote.
+
 **Next step: the two by-hand GUI runs, which are now the only thing
 between here and Sara's publication decision.** Two transmissions through
 a real receiver with an edit open when the second arrives — does an
