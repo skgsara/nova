@@ -46,6 +46,12 @@ lives in `SESSION-LOG.md`; this is the short form.
   `README.md` and `ROADMAP.md` (38 → 39); ROADMAP's blocker list corrected
   — item 12 still said Pass C was unaddressed, which session 34 had
   already closed.
+- README gained a **Version** section and a **Continuous integration**
+  section, both stating what is and is not established; `--version` is
+  documented beside `--devices` and `--metrics`.
+  `docs/audit/HUMAN-SIGNOFF.md` gained a dated appendix recording where
+  its five listed blockers now stand — appended, not edited, because the
+  gate record is signed and dated.
 
 ### 2026-08-20 — Pass C remediated: all 16 minor findings, all 3 gaps
 

@@ -106,6 +106,17 @@ auditors were given, and it was true when they were given it; editing it
 now would falsify the record rather than update it. The dated-artifact
 rule applies to Gate 0 as much as to the pass reports.
 
+**Documentation pass, at Sara's request to close the session.** README
+gained a Version section and a Continuous integration section — both
+written to state the limit rather than the feature, since the CI's whole
+status is "exists, never ran" — and `--version` is documented beside
+`--devices` and `--metrics`. `docs/audit/HUMAN-SIGNOFF.md` got a dated
+appendix saying where its five listed blockers now stand, appended rather
+than edited because that gate record is signed and dated. Three remaining
+stale mentions were left alone on purpose: `CHANGELOG.md`'s "38/38" lines
+are inside earlier dated entries, and `docs/06-audit-gate0.md`'s "no CI and
+no git remote" is the record of what the auditors were given.
+
 **The release gate was verified against real history, all three ways.** On
 the true case — the record's commit an ancestor of HEAD with only the
 record differing — it passes. Given a record from before a code change it

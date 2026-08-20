@@ -145,3 +145,35 @@ fixtures the project does not have (x86-64, big-endian, IOC 288 and
 > An AI audit of AI-authored code is a filter, not an assurance.
 > Anything published under your name and callsign carries your
 > judgement, not the auditor's.
+
+---
+
+## Appended 2026-08-20 — where the five blockers stand
+
+The gate above is a dated record of what was signed on 2026-08-19 and is
+not edited. This note records what has since moved, so a reader does not
+take the list as current.
+
+1. **Pass C's 20 maintainability findings** — **closed** (session 34). All
+   16 minor findings conform, all 3 gaps closed, whole-tree scan clean.
+2. **No version number or tags** (E-GAP-001) — **closed** (session 35) for
+   the version: `project(nova VERSION 0.4.0)`, single-sourced, reported by
+   every binary, pinned by the `version_flag` suite. **No tag exists**, and
+   that is not an oversight — a tag is the release decision itself.
+3. **No CI** (E-GAP-002) — **partial** (session 35). Workflows, a release
+   gate and an out-of-band full-suite record mechanism all exist; **none of
+   it has ever run**, there being no remote. The inventory assertion was
+   verified by hand against real fixture-less builds, and the release gate
+   was verified three ways against real history. That makes the scripts
+   verified, not the CI.
+4. **Session 31's two by-hand GUI runs** — **still outstanding.** Unchanged,
+   and now the only blocker with evidentiary weight rather than
+   administrative weight: four of four on-air sessions have found a defect
+   a green suite could not see.
+5. **Registered gaps needing hardware or recordings the project does not
+   have** (x86-64, big-endian, IOC 288, 90 lpm) — **unchanged.** The CI's
+   Linux x86-64 row would speak to the first of these once it has actually
+   run; until then nothing is claimed.
+
+The sentence below the original list applies unchanged, and applies to
+this note too.

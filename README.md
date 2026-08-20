@@ -406,9 +406,47 @@ next to each test. So the claim being made — *this recording, this hash,
 decodes within these bounds* — is fully stated and checkable by anyone
 holding the same file.
 
-The 8 that run anywhere are not a token: they include the full
+The 9 that run anywhere are not a token: they include the full
 {IOC 288, 576} × {60, 90, 120 lpm} synthetic matrix and the
 untrusted-input guards, which generate their own malformed files.
+
+### Version
+
+Nova is **0.4.0** — milestone-based in the project's own M0–M4 language,
+M4 (the live shell) being the milestone that is complete. It stays below
+1.0 for the reasons in Platforms and Security posture above, not out of
+modesty. **There is no release tag yet**, because a tag is a release
+decision and that decision has not been made.
+
+Every binary reports it:
+
+```
+./build/nova-decode --version
+```
+
+The string is written in exactly one place — `project(nova VERSION ...)`
+in `CMakeLists.txt`, reaching the code through a generated header — and
+the `version_flag` suite fails if any binary disagrees with it.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` builds and runs the 9 fixture-independent
+suites on macOS arm64 and Linux x86-64, with and without the GUI.
+**It has never executed: this repository has no remote.** See Platforms
+for what was verified by hand instead, and for why that is a verified
+script rather than a verified platform.
+
+Because 30 suites cannot run without the recordings, a release tag is
+gated differently: whoever holds them runs
+`tools/record-fixture-regression.sh`, which runs the full suite and writes
+`docs/audit/FIXTURE-REGRESSION.md`, refusing to write anything if the tree
+is dirty, if the recordings are absent, or if a single suite fails or
+skips. `.github/workflows/release.yml` then refuses a `v*` tag unless the
+recorded commit is an ancestor of it with nothing but that record
+differing — that is, unless the code being released is the code that was
+tested. What this is worth, exactly: it does not prove the suite passed,
+it proves someone with the recordings ran it against these bytes and the
+tool would not have written the record otherwise.
 
 **The decoder, the command-line tools and the whole test suite have no
 external dependencies.** FLTK and RtAudio are needed by the GUI binary
@@ -431,12 +469,13 @@ Everything between the sound card and the saved file lives in the
 dependency-free `nova-live` library and is covered by the test suite; the
 GUI binary is widgets, one audio callback and a timer.
 
-It also answers two questions without opening anything — and opens no
-audio device when it does:
+It also answers questions without opening anything — and opens no audio
+device when it does:
 
 ```
 ./build/nova-gui --devices
 ./build/nova-gui --metrics
+./build/nova-gui --version
 ```
 
 ## License
