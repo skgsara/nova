@@ -642,4 +642,9 @@ if(NOVA_BUILD_GUI)
     message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
                    "${NOVA_RTAUDIO_VERSION})")
   endif()
+else()
+  # The OFF path said nothing at all until session 34 (C-GAP-003): the
+  # SKIPPED lines above only fire when the deps are missing, so a build
+  # deliberately configured without the GUI was silent about it.
+  message(STATUS "nova-gui: SKIPPED - NOVA_BUILD_GUI=OFF")
 endif()
