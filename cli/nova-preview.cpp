@@ -15,6 +15,7 @@
 #include "../core/resample.hpp"
 #include "../core/wav.hpp"
 #include "../live/session.hpp"
+#include "../core/version_flag.hpp"
 #include "env_hooks.hpp"
 #include "internal_rate.hpp"
 #include <cstdio>
@@ -37,7 +38,8 @@ void usage() {
                  "  --force  forced start with operator IOC and rate, for "
                  "recordings with no opening\n"
                  "  --phase/--sync  operator overrides, applied when drawing "
-                 "begins [docs/05 §7]\n");
+                 "begins [docs/05 §7]\n"
+                 "       nova-preview --version\n");
 }
 
 // Fill args from the command line; false means bad arguments (usage
@@ -95,6 +97,9 @@ void report_saved(nova::LiveSession& s,
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Ahead of the argument-count check: --version is a question
+    // about the program, not about a decode [E-GAP-001].
+    if (nova::handled_version_flag(argc, argv, "nova-preview")) return 0;
     Args args;
     if (!parse_args(argc, argv, args)) return 2;
 

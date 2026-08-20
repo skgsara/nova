@@ -1,0 +1,24 @@
+// version.hpp.in — the ONE place Nova's version string comes from.
+//
+// CMake expands this into ${CMAKE_BINARY_DIR}/generated/nova/version.hpp
+// from `project(nova VERSION ...)`, which is therefore the single source
+// of truth. Do not edit the generated copy, and do not write the version
+// as a literal anywhere else: a second copy is exactly the shape of bug
+// this project keeps finding — two mappings that are allowed to disagree
+// (session 28's ruler-vs-click, session 34's kPi in six files).
+//
+// `version_flag`'s screamer is what holds the rule: it compares what each
+// binary PRINTS against what CMake was told, so a hand-written literal in
+// one tool fails the suite instead of shipping.
+#pragma once
+
+namespace nova {
+
+// The version this build was configured with. "0.4.0" is milestone-based
+// in the project's own M0-M4 language: M4 (the live GUI shell) is the
+// milestone that is complete. It stays below 1.0 deliberately — see
+// README's Platforms and Security posture sections for what has not been
+// established, and `docs/audit/` for the register of what is still open.
+inline constexpr const char* kVersion = "@PROJECT_VERSION@";
+
+}  // namespace nova

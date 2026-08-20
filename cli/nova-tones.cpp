@@ -8,6 +8,7 @@
 #include "../core/resample.hpp"
 #include "../core/tones.hpp"
 #include "../core/wav.hpp"
+#include "../core/version_flag.hpp"
 #include "env_hooks.hpp"
 #include "internal_rate.hpp"
 #include <cstdio>
@@ -19,7 +20,8 @@ namespace {
 void usage() {
     std::fprintf(stderr,
                  "usage: nova-tones in.wav [--dump] [--purity P] "
-                 "[--win SEC] [--max N]\n");
+                 "[--win SEC] [--max N]\n"
+                 "       nova-tones --version\n");
 }
 
 // Fill opt/dump/max_sec from the command line; false means bad arguments
@@ -82,6 +84,9 @@ void report_phasing(const std::vector<float>& video,
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Ahead of the argument-count check: --version is a question
+    // about the program, not about a decode [E-GAP-001].
+    if (nova::handled_version_flag(argc, argv, "nova-tones")) return 0;
     nova::ToneOptions opt;
     bool dump = false;
     double max_sec = 0.0;

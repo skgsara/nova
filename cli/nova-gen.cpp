@@ -2,6 +2,7 @@
 // Test tool, not a product feature (ROADMAP M0).
 #include "../core/gen.hpp"
 #include "../core/wav.hpp"
+#include "../core/version_flag.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -12,11 +13,15 @@ void usage() {
                  "usage: nova-gen out.wav [--lpm 60|90|120] [--ioc 288|576]\n"
                  "       [--lines N] [--ppm X] [--noise X] [--dev 150|400]\n"
                  "       [--fs N] [--no-start] [--no-stop] [--no-phasing]\n"
-                 "       [--no-pulse] [--phasing-sym]\n");
+                 "       [--no-pulse] [--phasing-sym]\n"
+                 "       nova-gen --version\n");
 }
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Ahead of the argument-count check: --version is a question
+    // about the program, not about a decode [E-GAP-001].
+    if (nova::handled_version_flag(argc, argv, "nova-gen")) return 0;
     if (argc < 2) {
         usage();
         return 2;

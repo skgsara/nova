@@ -4,6 +4,7 @@
 #include "../core/image.hpp"
 #include "../core/resample.hpp"
 #include "../core/wav.hpp"
+#include "../core/version_flag.hpp"
 #include "env_hooks.hpp"
 #include "internal_rate.hpp"
 #include <cmath>
@@ -38,7 +39,8 @@ void usage() {
                  "usage: nova-decode in.wav out.pgm [--lpm 60|90|120] "
                  "[--ioc 288|576] [--dev 150|400] [--start SEC] "
                  "[--no-autolock] [--no-phasing] [--no-segment] "
-                 "[--phase FRAC] [--sync PPM]\n");
+                 "[--phase FRAC] [--sync PPM]\n"
+                 "       nova-decode --version\n");
 }
 
 // Fill opt/deviation from the command line; false means bad arguments
@@ -240,6 +242,9 @@ void print_timebase(const nova::DecodeResult& r) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Ahead of the argument-count check: --version is a question
+    // about the program, not about a decode [E-GAP-001].
+    if (nova::handled_version_flag(argc, argv, "nova-decode")) return 0;
     nova::DecodeOptions opt;
     double deviation = 400.0;
     if (!parse_args(argc, argv, opt, deviation)) return 2;

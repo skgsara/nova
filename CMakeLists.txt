@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-project(nova VERSION 0.0.0 LANGUAGES CXX)
+# 0.4.0 is milestone-based, in the project's own M0-M4 language: M4, the
+# live FLTK/RtAudio shell, is the milestone that is complete. It is the
+# ONLY place the version is written [E-GAP-001]; core/version.hpp.in is
+# expanded from it and `version_flag` fails if any binary disagrees.
+project(nova VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +21,11 @@ add_compile_options(-Wall -Wextra)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# The version string reaches the code through exactly one generated header,
+# so `--version` cannot drift from what this file declares [E-GAP-001].
+configure_file(${CMAKE_SOURCE_DIR}/core/version.hpp.in
+               ${CMAKE_BINARY_DIR}/generated/nova/version.hpp @ONLY)
+
 add_library(nova-core STATIC
   core/wav.cpp
   core/resample.cpp
@@ -28,7 +37,7 @@ add_library(nova-core STATIC
   core/tones.cpp
   core/phasing.cpp
 )
-target_include_directories(nova-core PUBLIC core)
+target_include_directories(nova-core PUBLIC core ${CMAKE_BINARY_DIR}/generated)
 
 # nova-live: everything M4 adds that can be wrong about a signal, with no
 # FLTK, no RtAudio and no real clock [docs/05 §1], so a test can drive it
@@ -88,7 +97,7 @@ enable_testing()
 # instead is fixtures/MANIFEST.md — every fixture's identity, provenance and
 # SHA-256 — plus the bounds, which are in this file beside each test.
 #
-# 30 of the 38 suites need one of those recordings. From a checkout without
+# 30 of the 39 suites need one of those recordings. From a checkout without
 # them they are still REGISTERED and reported Skipped, with the reason,
 # rather than quietly not existing — a suite that shrinks from 38 to 8 while
 # reporting a green run tells you nothing is wrong when two thirds of the
@@ -96,11 +105,16 @@ enable_testing()
 #
 # Known limit of the mechanism, stated because the alternative is believing
 # it does more than it does: ctest counts a skipped test as passed in its
-# headline, so `ctest` still ends with "100% tests passed out of 38". What
+# headline, so `ctest` still ends with "100% tests passed out of 39". What
 # carries the truth is the "The following tests did not run:" block printed
 # after it — 30 lines, each naming a suite — and the configure-time message
 # below. Making the skips FAIL instead would be louder and wrong: a checkout
 # without recordings is a supported state, not a broken one.
+#
+# Session 35: this is also why CI does not read ctest's exit code alone.
+# `tools/check-suite-inventory.sh` asserts the registered and skipped
+# counts, so a suite that quietly stops being registered fails the gate
+# instead of passing as a smaller green run [E-GAP-002].
 #
 # The other 8 — the synthetic matrices, the ruler, the PNG round-trip, the
 # audio ring, the untrusted-input guards and the GUI layout — generate what
@@ -113,7 +127,7 @@ else()
   set(NOVA_HAVE_FIXTURES OFF)
   message(STATUS
     "fixtures: ABSENT - 30 suites needing an off-air recording will be "
-    "SKIPPED (see fixtures/MANIFEST.md); 8 synthetic suites still run")
+    "SKIPPED (see fixtures/MANIFEST.md); 9 synthetic suites still run")
 endif()
 
 # Registers a suite that needs a recording. Present: a normal test. Absent:
@@ -407,7 +421,7 @@ nova_fixture_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
 # screen x is the column the ruler names there, at every zoom, scroll
 # offset and both IOC widths. Unguarded: it tests a pure nova-live
 # function, so it needs no window and no audio device and runs in every
-# build, including NOVA_BUILD_GUI=OFF. It is one of the 35 (+2 with the
+# build, including NOVA_BUILD_GUI=OFF. It is one of the 37 (+2 with the
 # GUI). (This line read "24, +1 with the GUI" until session 29 — two
 # counts out of date, and missed by session 28's sweep of exactly this
 # class of error, which corrected three others.)
@@ -611,7 +625,7 @@ if(NOVA_BUILD_GUI)
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
     # output identical to one dragged to it. The first test in the
-    # project to cover FLTK at all, and one of the two in "35 (+2 with the
+    # project to cover FLTK at all, and one of the two in "37 (+2 with the
     # GUI)".
     # It drives the built binary through a CMake script so it stays
     # portable; it exists only when nova-gui does.
@@ -627,7 +641,7 @@ if(NOVA_BUILD_GUI)
     # and the two-click slant. Driven through --state / --metrics /
     # --click / --nudge / --then-state, so it needs no window and no
     # audio device; guarded with nova-gui, the second of the two
-    # in "36 (+2 with the GUI)".
+    # in "37 (+2 with the GUI)".
     # NOVA_FIXTURE and NOVA_TMP arrived with session 31's offline capture:
     # §8.2's receiving indicator needs a transmission arriving behind an
     # edit, so this suite now feeds a real recording through the real
@@ -648,3 +662,21 @@ else()
   # deliberately configured without the GUI was silent about it.
   message(STATUS "nova-gui: SKIPPED - NOVA_BUILD_GUI=OFF")
 endif()
+
+# --version, and the rule that all of them agree [E-GAP-001, Pass E].
+# Registered last because the list of binaries depends on whether the GUI
+# was built; nova-gui joins the same suite rather than getting a second
+# one, because the claim is about the set, not about each tool.
+# Fixture-independent: it runs from any checkout, so CI reaches it.
+set(NOVA_VERSION_TOOLS
+  "nova-decode=$<TARGET_FILE:nova-decode>"
+  "nova-gen=$<TARGET_FILE:nova-gen>"
+  "nova-tones=$<TARGET_FILE:nova-tones>"
+  "nova-preview=$<TARGET_FILE:nova-preview>")
+if(TARGET nova-gui)
+  list(APPEND NOVA_VERSION_TOOLS "nova-gui=$<TARGET_FILE:nova-gui>")
+endif()
+add_test(NAME version_flag COMMAND ${CMAKE_COMMAND}
+  -DNOVA_VERSION=${PROJECT_VERSION}
+  "-DNOVA_TOOLS=$<JOIN:${NOVA_VERSION_TOOLS},;>"
+  -P ${CMAKE_SOURCE_DIR}/tests/version_flag.cmake)

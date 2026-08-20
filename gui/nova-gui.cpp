@@ -81,6 +81,8 @@
 //                 Apply, a count that names the buffered picture and not
 //                 the pane's — and a check spanning two processes cannot
 //                 observe a transition [session 28]
+#include "../core/version_flag.hpp"
+
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
 #include <FL/Fl_Button.H>
@@ -3524,7 +3526,7 @@ void print_usage() {
                  "...] [--stop-capture]\n"
                  "                [--type phase|sync V] [--apply] "
                  "[--auto] [--recv-click]\n"
-                 "                [--mark NAME]\n"
+                 "                [--mark NAME] [--version]\n"
                  "  window minimum %dx%d; states: idle ready start-tone "
                  "phasing\n  drawing stop-tone decoding saved\n",
                  kMinW, kMinH);
@@ -3699,6 +3701,9 @@ bool feed_without_folder(const ParsedArgs& args, bool any_feed) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Ahead of parse_args, and ahead of every window and sound card:
+    // --version is a question about the program [E-GAP-001].
+    if (nova::handled_version_flag(argc, argv, "nova-gui")) return 0;
     ParsedArgs args;
     if (!parse_args(argc, argv, &args)) return 2;
     bool any_feed = false;
