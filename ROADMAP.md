@@ -1148,6 +1148,66 @@ a page-read instead of a grep.
   similarity spot-check recorded (SOP L10 adapted: attribution check
   is the deliverable, since reuse is declared).
 
+## Audit (2026-08-16, session 32)  [5 of 5 passes DONE; cross-verification PENDING]
+
+Audited against `docs/07-audit-protocol.md` by an agent that did not
+author the code, under a different model (Sonnet 5). Gate 0 in `docs/06`,
+reports in `docs/audit/`, handover for the final step in `docs/08`.
+
+**Closed by remediation, same session:**
+1. ~~19 off-air recordings tracked with no redistribution basis, one from
+   a commercial news agency~~ **Done** [Pass B, critical]. Removed from
+   the working tree and from all git history (`330d408` → `aeff6a3`, all
+   seven branches). `fixtures/MANIFEST.md` ships identity, provenance and
+   SHA-256 instead. Cost, accepted: **30 of 38 suites now report Skipped
+   from a clean checkout.**
+2. ~~A 144-byte WAV reaching ~12.9 GB of footprint~~ **Done** [Pass D,
+   critical]. Data chunk clamped to the bytes that exist.
+3. ~~A well-formed WAV declaring 1 Hz hanging the resampler~~ **Done**
+   [Pass D, critical]. Sample rate bounded by Nyquist on the 2300 Hz white
+   tone [WMO §5.3.1.2]; resample ratio bounded independently.
+   `tests/test_malformed.cpp` pins 2 and 3 and generates its own inputs.
+4. ~~A white-only station that loses its phasing interval decodes silently
+   with no line-start phase~~ **Done** [Pass A, major]. Measured at ~1091
+   px of 1810 rotation. `DecodeResult::no_phase_reference`, a loud CLI
+   warning, and `roundtrip [16]`.
+5. ~~`NOTICE` naming the wrong licence for fldigi~~ **Done** [Pass B].
+6. ~~`docs/01` citing WMO §5.5.2 for an audio-domain claim~~ **Done**
+   [Pass A]. That clause is RF-carrier FSK about f₀.
+7. ~~README with no AI-authorship disclosure, unsupported platform tiers,
+   an unimplemented m4a/ffmpeg input claim, and no security posture~~
+   **Done** [Pass B, Pass E].
+
+**Open, and these are the release blockers:**
+8. **`D-PERF-003` — unbounded live-session retention on a sustained tone.**
+   Confirmed by three independent code readings and **never reproduced**;
+   two dynamic attempts failed, the second because process RSS on
+   `nova-preview` grows identically for silence and for a stuck tone, so
+   the instrument could not see it either way. None of `preroll_sec`,
+   `phasing_wait_sec` or `max_picture_sec` covers the window. **The fix is
+   a design decision, not a bug fix**: when a start tone never ends, Nova
+   must either abandon the transmission and return to monitoring, or force
+   drawing to begin. That is Sara's call.
+9. **No CI of any kind.** The protocol requires the fixture regression to
+   run in CI with failure blocking release. Complicated by the recordings
+   being private: CI can run the 8 synthetic suites, and the other 30 need
+   a secret or a self-hosted runner.
+10. **No version, no tags, no release notes.** `CMakeLists.txt` still
+    carries `VERSION 0.0.0`, deliberately — a version number is a release
+    decision. `CHANGELOG.md` now exists and records the unreleased state.
+11. **Cross-verification not run.** Needs a THIRD model, different from
+    Opus 5 (author) and Sonnet 5 (all five passes). Packet ready in
+    `docs/08`.
+12. **Pass C's 20 maintainability findings, unaddressed by choice.** None
+    load-bearing. `stage_assembly` at 416 lines is both the longest
+    function and the only nesting-depth violation in the tree.
+
+**Not fixed because they are not defects:** the 240 lpm omission (WMO
+§5.1.5 lists four rates, ISO §4.2.4 requires three of a receiver — now
+stated in the README), and the spectral-purity tone detection method
+(a declared deviation from ISO §4.2.5, kept because purity is stronger
+against false starts).
+
 ## Registered gaps
 - Short windows of a deeply faded signal. On the full recording GYA 2300Z
   measures −116.8 ppm and draws straight, but 120 s windows of its faded

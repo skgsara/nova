@@ -19,7 +19,7 @@ other 30 report Skipped** — they need off-air recordings, which this
 repository does not carry and never will (see `fixtures/MANIFEST.md`, which
 holds every recording's identity and SHA-256). Nothing is broken when that
 happens; ctest prints "The following tests did not run" and names all 30.
-(36 test suites (+2 with the GUI): three synthetic matrices + 22
+(38 with the GUI, 36 without: three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually
@@ -99,6 +99,10 @@ Each `--mark` prints a line: whether anything is buffered, how many rows it
 has, how many the PANE has, and whether the edit is still open.
 No FLTK or RtAudio? The build says `nova-gui: SKIPPED` and everything else
 builds and passes as before.
+**The demonstrations below need the recordings**, which live outside the
+repo at `../fixtures-private/` and are copied into `fixtures/` on Sara's
+machine. From a clone they will not run — that is the point of
+`fixtures/MANIFEST.md`, which says what each one is.
 Try the decoder: `./build/nova-decode fixtures/test-chart-jmh-kiwisdr-image-60s.wav out.pgm`
 See the control signals: `./build/nova-tones fixtures/vmw-start-phasing-100s.wav`
 See a recording that loses 1270 samples mid-picture drawn in one piece —
@@ -136,7 +140,14 @@ cut session 21 so the signal that ENDS a transmission is in the library:
 - `docs/03` — pre-M4 standards/provenance/GUI-readiness audit
 - `docs/04` — commercial receiver UI survey; the M4 design decisions
 - `docs/05` — the M4 shell design (all questions decided, session 17)
-- `docs/06` — the audit protocol's Gate 0, DRAFT: values gathered from
-  the tree, and the rows only Sara can close. No pass has run.
+- `docs/06` — the audit protocol's Gate 0: the declared facts the
+  auditors were given. Complete.
+- `docs/07` — the audit protocol itself
+- `docs/08` — the cross-verification handover, NOT yet run
+- `docs/audit/` — the five pass reports, A through E. Dated artifacts:
+  they are corrected by appending, never by editing, so some describe a
+  tree that has since been fixed.
+- `CHANGELOG.md` — the short form of what changed; `SESSION-LOG.md` is
+  the long one
 - `ROADMAP.md` — milestones, done vs pending
 - `SESSION-LOG.md` — newest first, append-only, tracked in git

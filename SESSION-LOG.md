@@ -7,6 +7,108 @@ anything as our develop history").
 
 ---
 
+## 2026-08-16 — Session 32 (closing): Passes A and E, and a finding I could
+## not make fail
+
+Agent: Claude (Opus 5) remediating; Passes A and E run by Claude Sonnet 5.
+Code changed: `core/fax.hpp` / `core/fax.cpp` (`no_phase_reference`),
+`cli/nova-decode.cpp` (the warning), `core/gen.hpp` (citation),
+`tests/test_roundtrip.cpp` (`[16]`). Files changed: `README.md`,
+`START-HERE.md`, `ROADMAP.md`, `CHANGELOG.md` (new), `docs/01`, `docs/02`,
+`docs/06`, `docs/08` (new), `docs/audit/PASS-{A,E}-REPORT.md` (new).
+Test count unchanged at 38; `roundtrip` gained check [16].
+
+**All five passes are now done.** The entry above covers B, C and D and
+the removal of the recordings; this one covers A and E, which are the two
+that most needed a non-authoring auditor and got one.
+
+**Pass A found the defect the audit existed to find, and it was in the
+case the documentation had reasoned about hardest.** A white-only station
+carries no per-line sync, so its phasing interval is the only place its
+line phase exists. Lose the interval and Nova drew a picture anyway, exit
+0, with a status line nearly identical to a healthy decode. The auditor
+constructed the case itself — no fixture covers it — and I reproduced it
+and then measured what the report had left as "very likely phase-rotated":
+**the dead sector moves from column 1495 to column 404 of 1810.** The
+picture is rotated by 1091 px and nothing says so. What makes it worth the
+whole exercise is that `docs/02` already described this exact scenario —
+"on a white-only station with no phasing interval nothing in the
+transmission says where the dead sector is" — as the JUSTIFICATION for the
+manual PHASE override. Documented, reasoned about, never checked on the
+automatic path. Third session running that the defect sat exactly there.
+
+Graded higher than the auditor did, for one reason: it called the
+precondition adversarial or accidental corruption, "narrower than generic
+noise". Fading is exactly this, and `gya-faded-phasing` is in the library
+because a faded interval is a real observed condition.
+
+**Pass A also caught a citation defect of the harder kind.** `docs/01`
+cited WMO §5.5.2 for ±400/±150 Hz "about the 1900 Hz centre". Verified
+against my own extraction: §5.5.1 is subcarrier FM about 1900 Hz; §5.5.2
+is direct FSK of the RF carrier about f₀ and says nothing about 1900 Hz.
+The numbers coincide, the domains do not — and `docs/01`'s own prose two
+paragraphs below states the distinction CORRECTLY. A right explanation
+sitting under a citation that does not support the claim beside it is much
+harder to see than a plain error, and it is the shape a same-model auditor
+would most likely have reproduced rather than caught.
+
+**Pass E's blockers, all verified by hand:** no ffmpeg or subprocess code
+anywhere against a README advertising m4a input; `VERSION 0.0.0`, zero
+tags, no changelog; no CI of any kind; no security-posture section. It
+also verified the remediations independently and correctly, re-hashed all
+19 fixtures against the manifest, and confirmed a genuine clone builds to
+exactly 8 passed / 30 skipped with zero warnings on both configurations.
+**It reported an isolation slip against itself** — it ran
+`git log --oneline -5` — which is recorded rather than dropped.
+
+**And the one I could not make fail.** D-PERF-003, unbounded live-session
+retention on a sustained tone, has now been asserted by three independent
+code readings and demonstrated by none. Two dynamic attempts failed, and
+the SECOND failure taught more than the first: process RSS on
+`nova-preview` grows linearly with input length, but **silence and a stuck
+tone grow identically — 269.2 against 269.3 MB at 1200 s** — so the
+measurement was dominated by a content-independent term and could never
+have seen the defect either way. Session 30's "two sides equal by
+construction" in new clothes, and I would have reported a confirmation off
+the first table had I not run the silence control. A direct probe of
+`retained_samples()` read zero throughout, because a synthetic square wave
+is never accepted as a start tone.
+
+What settled it was reading the three guards that could have covered the
+window: `trim_preroll()` returns immediately while `in_transmission_`;
+`phasing_wait_sec` is measured from the tone's END; `max_picture_sec` arms
+only when drawing begins. None bounds a transmission that is open with a
+tone run that never closes. **I had begun drafting the correction that
+both auditors had missed existing bounds; checking killed that draft.**
+The finding stays open and stays labelled reasoned rather than measured.
+
+**Next step: cross-verification, and it needs a THIRD model** — different
+from Opus 5, which wrote the code, and Sonnet 5, which ran all five
+passes. The packet is `docs/08-cross-verification-handover.md`: it holds
+the register of all 27 load-bearing findings split into the ones citing a
+standards clause (the real work, ten of them) and the ones that cannot be
+citation-checked without the tree. The verifier gets that file and the two
+reference PDFs and **nothing else** — not the source, not the reasoning —
+because a verifier holding the tree starts re-auditing the code, and a
+plausible finding then carries a bad citation through on the strength of
+the code agreeing with it. Highest priority in the register is A-CLAIM-007,
+the §5.5.2 correction, because a wrong verification there propagates both
+ways.
+
+After that, the human sign-off gate, which the protocol is explicit the
+audit does not replace.
+
+**Release blockers, in one place:** D-PERF-003's fix is a DESIGN decision
+and Sara's to make — when a start tone never ends, Nova either abandons
+the transmission or forces drawing, and those are different behaviours on
+a stuck carrier. No CI. No version or tags. Cross-verification unrun.
+Pass C's 20 findings unaddressed by choice. And session 31's two by-hand
+runs are still outstanding, which no amount of auditing substitutes for:
+four of four on-air sessions have found a defect a green suite could not
+see.
+
+---
+
 ## 2026-08-16 — Session 32: the audit, and the two things it found that
 ## nothing else was going to
 

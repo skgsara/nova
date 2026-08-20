@@ -61,7 +61,10 @@ count against release.
   the station sends one — no TCXO or GPS-disciplined clock required
 - Post-decode image realignment and line-start adjustment on the
   retained raw stream (non-destructive)
-- Input: WAV natively; m4a/AAC via an installed `ffmpeg`
+- Input: **WAV only.** m4a/AAC via an installed `ffmpeg` is planned and
+  **not implemented** — there is no ffmpeg or subprocess code in the tree,
+  and an m4a file fails with `not a RIFF file` [audit Pass E, E-CLAIM-003].
+  Convert first.
 - Live reception via sound input
 
 ## Status
@@ -323,6 +326,39 @@ input-amplitude span, dead-sector tolerance edges, the eight-tone gray
 scale, clock error to ±250 ppm (including a white-only signal with nothing
 to lock onto), heavy noise, and both phasing waveforms. See `ROADMAP.md`
 for the milestone map.
+
+## Security posture
+
+Nova decodes audio that arrives from somewhere else — a shared recording,
+a receiver nobody controls. A WAV header is a set of *claims* about a
+file, and until session 32 every one of them was believed.
+
+**What is assumed about input:** nothing. `read_wav` clamps the declared
+data-chunk size to the bytes that actually exist, and refuses a sample
+rate that cannot carry the signal (WEFAX white is 2300 Hz, so at or below
+4600 Hz Nyquist says it is not a recording of one). The resampler bounds
+its ratio independently, because a bound at the file boundary is one new
+entry point away from being absent.
+
+**What was found and fixed** (audit Pass D, 2026-08-16): a 144-byte file
+declaring a 4 GB data chunk reached ~12.9 GB of footprint and did not
+terminate; a *well-formed* file declaring a 1 Hz sample rate hung the
+resampler. Both now refuse in ~0.01 s at ~1.4 MB. `tests/test_malformed.cpp`
+pins the guards and generates its own inputs, so it runs from any
+checkout. Five mutations against it were each killed by the intended
+check.
+
+**What is still open:** a sustained tone on the live path can grow
+`LiveSession`'s retained buffer without an applicable bound — none of
+`preroll_sec`, `phasing_wait_sec` or `max_picture_sec` covers a
+transmission that is open with a tone run that never closes. This is
+confirmed by code reading and **has not been reproduced**; it is recorded
+as reasoned rather than measured [D-PERF-003 / E-RISK-002]. It affects
+unattended live capture, not file decoding.
+
+**What is not claimed:** Nova has had no coverage-guided fuzzing, no
+third-party security review, and no CI. The corrupted-input testing it has
+had is a hand-built corpus of ~30 malformed files across two audit passes.
 
 ## Platforms
 

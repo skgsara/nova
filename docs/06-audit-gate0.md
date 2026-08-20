@@ -1,9 +1,13 @@
 # 06 — Audit protocol, Gate 0
 
 Prepared 2026-08-16 against tree revision `893bdd9` (session 31, clean).
-**Status: partially filled. Three rows still need Sara.** No pass has
-run, and nothing in this file is an audit finding — Gate 0 preparation
-is not a pass.
+**Status: COMPLETE. Gate 0 is fully filled and all five passes have run.**
+Reports are in `audit/`. The remaining step is cross-verification by a
+third model — see `08-cross-verification-handover.md`.
+
+Nothing in this file is an audit finding; Gate 0 preparation is not a
+pass. It is kept as the record of what the auditors were given as
+declared fact, which is what makes the audit reproducible.
 
 The protocol requires the human to verify every value against the
 physical documents and real hardware before any pass runs. The rows
