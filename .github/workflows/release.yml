@@ -7,7 +7,7 @@
 #
 #   1. everything a public runner CAN check, which is what ci.yml checks;
 #   2. a record, written by `tools/record-fixture-regression.sh` on a
-#      machine that has the recordings, whose commit is THIS commit.
+#      machine that has the recordings, of code identical to this commit.
 #
 # What that is worth, stated exactly: it cannot verify that the full suite
 # passed — it verifies that someone with the recordings ran it against
@@ -57,21 +57,44 @@ jobs:
             exit 1
           fi
 
-      - name: The record must be OF this commit
+      # NOT a plain SHA comparison, and the reason is worth writing down:
+      # the record names the commit it was run against, and then committing
+      # the record MOVES HEAD. So the recorded SHA can never equal the
+      # tagged SHA — a strict equality check would refuse every tag that
+      # ever existed. What actually has to hold is the thing the equality
+      # was standing in for: the code being tagged is the code that was
+      # tested. That is the recorded commit being an ancestor of the tag,
+      # with nothing but the record itself changed in between.
+      - name: The record must be OF the code being tagged
         run: |
           recorded=$(sed -n 's/^- \*\*Commit:\*\* `\(.*\)`$/\1/p' \
                      docs/audit/FIXTURE-REGRESSION.md)
           tagged="${GITHUB_SHA}"
           echo "recorded: ${recorded:-<none>}"
           echo "tagged:   $tagged"
+
           if [ -z "$recorded" ]; then
             echo "::error::the record has no commit line; it was hand-edited"
             exit 1
           fi
-          if [ "$recorded" != "$tagged" ]; then
-            echo "::error::the full suite was recorded against $recorded, but"
-            echo "::error::the tag is on $tagged. Re-run the regression on the"
-            echo "::error::commit being released."
+          if ! git cat-file -e "${recorded}^{commit}" 2>/dev/null; then
+            echo "::error::the recorded commit $recorded is not in this history"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$recorded" "$tagged"; then
+            echo "::error::the recorded commit $recorded is not an ancestor of"
+            echo "::error::the tagged commit $tagged — the regression was run on"
+            echo "::error::a different line of history."
+            exit 1
+          fi
+          # Everything except the record must be byte-identical.
+          if ! git diff --quiet "$recorded" "$tagged" -- . \
+               ':(exclude)docs/audit/FIXTURE-REGRESSION.md'; then
+            echo "::error::the tree changed after the regression was run:"
+            git diff --name-only "$recorded" "$tagged" -- . \
+              ':(exclude)docs/audit/FIXTURE-REGRESSION.md' | sed 's/^/::error::  /'
+            echo "::error::re-run tools/record-fixture-regression.sh and commit"
+            echo "::error::the new record before tagging."
             exit 1
           fi
 
