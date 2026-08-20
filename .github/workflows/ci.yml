@@ -1,0 +1,112 @@
+# CI — build and run every suite that does not need an off-air recording.
+#
+# READ THIS BEFORE TRUSTING A GREEN TICK. On a public runner Nova has no
+# recordings: 30 of its 39 suites skip, and ctest still exits 0 and prints
+# "100% tests passed". A green run here means the 9 fixture-independent
+# suites passed — the synthetic {IOC 288,576} x {60,90,120} matrix, the
+# tone detector, the untrusted-input guards, the ruler mapping, the PNG
+# round-trip, the audio ring, the hooks, the GUI layout and the version
+# flag. It does NOT mean the real-signal regression ran. That is
+# `release.yml` plus `tools/record-fixture-regression.sh`, and it is
+# deliberately a human with the recordings.
+#
+# The `inventory` step is what keeps that distinction honest: it fails if
+# the number of registered or skipped suites moves, so a suite that
+# quietly stops existing cannot pass as a smaller green run.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS arm64 is the only platform Nova has ever been built on
+          # (README, Platforms). Linux x86-64 is here to find out, not
+          # because anything is claimed about it — a failure on this row
+          # is a finding, and the README must not be updated to claim the
+          # platform until this row has actually been seen green.
+          - os: macos-latest
+            label: macos-arm64
+          - os: ubuntu-latest
+            label: linux-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FLTK and RtAudio (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfltk1.3-dev librtaudio-dev pkg-config xvfb
+
+      - name: Install FLTK and RtAudio (macOS)
+        if: runner.os == 'macOS'
+        run: brew install fltk rtaudio
+
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+      # The GUI is optional by design and skips silently when its two
+      # dependencies are missing. On a runner where we just installed
+      # them, a silent skip would quietly drop gui_layout and gui_shell
+      # from the inventory — so require the target to exist.
+      - name: Require the GUI target to have been built
+        run: cmake --build build --target nova-gui
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Suites (9 run, 30 skipped without recordings)
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            xvfb-run -a tools/check-suite-inventory.sh build 39 30
+          else
+            tools/check-suite-inventory.sh build 39 30
+          fi
+
+      # -Wall -Wextra are on for every target; the project has been warning
+      # free since session 34 and says so in the changelog, so a new warning
+      # is a regression against a written claim.
+      - name: No warnings
+        run: |
+          rm -rf build-warnings
+          cmake -B build-warnings -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-warnings --parallel 2>&1 | tee warn.log
+          if grep -E "warning:" warn.log; then
+            echo "::error::the tree is meant to build warning free"
+            exit 1
+          fi
+
+  # The dependency-free path. nova-core and nova-live are claimed to need
+  # no FLTK, no RtAudio and no window; this job is what makes that claim
+  # falsifiable rather than merely stated (C-GAP-003, session 34).
+  no-gui:
+    name: ${{ matrix.label }} (NOVA_BUILD_GUI=OFF)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos-arm64
+          - os: ubuntu-latest
+            label: linux-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure without the GUI
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DNOVA_BUILD_GUI=OFF
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Suites (8 run, 29 skipped)
+        run: tools/check-suite-inventory.sh build 37 29

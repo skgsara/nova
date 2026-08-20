@@ -14,20 +14,33 @@ GPLv3+, C++17 — the standards-first successor to Isobar.
 ```
 cmake -B build -S . && cmake --build build && ctest --test-dir build
 ```
-**On Sara's machine that is 38 suites. From a fresh clone it is 8, and the
+**On Sara's machine that is 39 suites. From a fresh clone it is 9, and the
 other 30 report Skipped** — they need off-air recordings, which this
 repository does not carry and never will (see `fixtures/MANIFEST.md`, which
 holds every recording's identity and SHA-256). Nothing is broken when that
 happens; ctest prints "The following tests did not run" and names all 30.
-(38 with the GUI, 36 without: three synthetic matrices + 22
+(39 with the GUI, 37 without: three synthetic matrices + 22
 real-fixture screamers + the ruler mapping + the live/batch equivalence
 of the front end, of the tone detector, of the picture itself, of the
 whole session state machine and of the WIRING with the threads actually
 running + the audio ring + the PNG round-trip under an independent
 decoder + the two operator corrections behaving asymmetrically + the
 untrusted-input guards, which generate their own malformed files and read
-no recording at all;
+no recording at all + `version_flag`, session 35's, which holds every
+binary's `--version` to the one version CMake declares;
 `gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
+
+**Since session 35 the tree carries a version and a CI workflow.** Every
+binary answers `--version` with `0.4.0` — milestone-based, M4 being the
+milestone that is complete — and `.github/workflows/ci.yml` builds and runs
+the 9 fixture-independent suites on macOS and Linux. **That workflow has
+never executed**, because the repository still has no remote; it is written
+and its assertions were checked by hand against a fixture-less build, which
+is not the same as having been seen green. The 30 fixture-gated suites can
+only run where the recordings are, so a release tag is gated on a record
+written by `tools/record-fixture-regression.sh` instead
+(`.github/workflows/release.yml` refuses a tag whose commit is not the
+commit that was tested).
 See the M4 shell, if FLTK and RtAudio are installed — the full window,
 and since session 23 with the live decode behind it: `./build/nova-gui`
 It opens the remembered input device (the default on first run); the

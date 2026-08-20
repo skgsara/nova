@@ -7,6 +7,112 @@ anything as our develop history").
 
 ---
 
+## 2026-08-20 — Session 35: a version, and CI that has never run — which is
+## the only honest thing to call it
+
+Agent: Claude (Opus 5). Code changed: `CMakeLists.txt` (VERSION 0.4.0, the
+generated-header wiring, the `version_flag` registration, six stale suite
+counts), new `core/version.hpp.in` and `core/version_flag.hpp`, the four
+`cli/` mains and `gui/nova-gui.cpp` (`--version`, ahead of each tool's
+argument-count check; usage lines). New: `tests/version_flag.cmake`,
+`tools/check-suite-inventory.sh`, `tools/record-fixture-regression.sh`,
+`.github/workflows/ci.yml`, `.github/workflows/release.yml`. Files changed:
+`docs/audit/PASS-E-REPORT.md` (remediation appendix, dated-artifact rule
+kept), `README.md`, `START-HERE.md`, `ROADMAP.md`, `CHANGELOG.md`.
+Suite: 38 → **39** (37 without the GUI); 39/39 green, zero warnings.
+
+**Sara's call at the top of the session, from the four standing release
+blockers: close E-GAP-001 and E-GAP-002, publish to GitHub, then merge to
+`main` — leaving session 31's two by-hand GUI runs as the actual gate
+before publication.** Both are done as far as this machine can take them,
+and the second one is not all the way.
+
+**E-GAP-001 is closed.** `project(nova VERSION 0.4.0)` — milestone-based
+in the project's own M0-M4 language, M4 being the milestone that is
+complete, below 1.0 because nothing in Platforms or Security posture has
+changed. The string reaches the code through exactly one generated header,
+so CMakeLists.txt is the only place a version is written; all five
+binaries answer `--version`. **No tag was made.** A tag names a release
+and that decision is Sara's; the tree now has everything one needs.
+
+**The screamer, and why it is not scenery.** `version_flag` compares what
+each binary PRINTS with what CMake was told. Those two sides are not equal
+by construction — session 30's trap — because one is a CMake variable and
+the other is bytes out of a built program, and the ordinary failure is
+somebody writing "0.4.0" as a literal in one tool. Three mutations, one
+per shape (a hardcoded literal, a tool naming a different tool, the flag
+deleted): all three KILLED by the intended check, FAIL line read back and
+attributed; unmutated baseline SURVIVED before and after. It also refuses
+to pass having checked fewer than four tools, because a loop over an empty
+list is green by default.
+
+**E-GAP-002 is PARTIAL, and the word is load-bearing: none of the CI has
+ever run.** `ci.yml` builds and tests on macOS arm64 and Linux x86-64,
+with and without the GUI; `release.yml` gates a `v*` tag on the public
+suites, on the tag matching the declared version, and on a full-suite
+record. There is still no remote, so no execution of any of it exists.
+Calling that "CI added" would be the exact failure this project has found
+five times — an instrument that has never been seen to fail is not
+evidence.
+
+What was verified instead, on real builds rather than by reading: a
+fixture-less copy of the tree was configured, built and run, and it
+produces 39 registered / 9 ran / 30 skipped (37 / 8 / 29 with
+`-DNOVA_BUILD_GUI=OFF`) — which is exactly what the workflow asserts — and
+`check-suite-inventory.sh` was then given wrong numbers and seen to FAIL.
+The verified thing is the script. The unverified thing is Linux, and
+README's Platforms section still says macOS arm64 and nothing more.
+
+**Why CI checks an inventory instead of an exit code.** CMakeLists.txt has
+said for two sessions that ctest counts a skip as a pass, so without
+recordings it exits 0 and prints "100% tests passed" having run nine
+suites of thirty-nine. A gate reading the exit code would report a full
+regression that never happened — the same shape as session 32's RSS
+measurement, where the number moved convincingly and meant nothing. So the
+gate asserts registered and skipped counts, and a suite that quietly stops
+being registered fails instead of passing as a smaller green run.
+
+**The 30 fixture-gated suites are mechanised, not just documented.** They
+cannot run on a public runner and never will, so
+`tools/record-fixture-regression.sh` runs the full suite where the
+recordings are and writes `docs/audit/FIXTURE-REGRESSION.md`, refusing to
+write anything if the tree is dirty, if the recordings are absent, if
+anything failed, or if anything skipped; `release.yml` then refuses a tag
+whose commit is not the recorded commit. Worth exactly this: it does not prove the
+suite passed, it proves someone with the recordings ran it against these
+bytes and the tool would not write the record otherwise. Stronger than a
+promise, weaker than a hosted regression, and the most that is available
+while the recordings stay private.
+
+**Contradictions found — two, both surfaced by the work rather than by
+reading:**
+1. `ROADMAP.md` item 12 still said Pass C's 20 maintainability findings
+   were "unaddressed by choice". Session 34 closed all of them the day
+   before. Corrected.
+2. CMake's configure-time message told a fixture-less checkout that "8
+   synthetic suites still run" — stale the moment `version_flag` was
+   registered. It was the fixture-less build, not a re-read, that showed
+   it, which is the argument for building the thing you are describing.
+   Five more suite counts in `CMakeLists.txt`, `START-HERE.md`,
+   `README.md` and `ROADMAP.md` were stale the same way and are level now.
+
+**Deliberately not touched: `docs/06-audit-gate0.md`,** which still says
+"There is no CI and no git remote". That file is the record of what the
+auditors were given, and it was true when they were given it; editing it
+now would falsify the record rather than update it. The dated-artifact
+rule applies to Gate 0 as much as to the pass reports.
+
+**Next step: the two by-hand GUI runs, which are now the only thing
+between here and Sara's publication decision.** Two transmissions through
+a real receiver with an edit open when the second arrives — does an
+indicator beat losing your picture, is the RECEIVING panel noticed at all,
+does handing the pane over at a click read as control or as a lost page —
+plus session 30's relayout of the correction block, which no person has
+looked at. Four of four on-air sessions have found a defect a green suite
+could not see. After that: a remote, so the CI can stop being theoretical;
+then `tools/record-fixture-regression.sh`, commit the record, and
+`git tag v0.4.0`, in that order, because the release workflow checks it.
+
 ## 2026-08-20 — Session 34: Pass C remediated end to end, and the gate
 ## measures every function, not the ones you meant
 

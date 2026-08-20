@@ -358,18 +358,29 @@ abandons the opening and returns to listening, and the retained store
 falls back to its pre-roll bound [session 33; pinned by `live_session`
 T14].
 
-**What is not claimed:** Nova has had no coverage-guided fuzzing, no
-third-party security review, and no CI. The corrupted-input testing it has
-had is a hand-built corpus of ~30 malformed files across two audit passes.
+**What is not claimed:** Nova has had no coverage-guided fuzzing and no
+third-party security review. The corrupted-input testing it has had is a
+hand-built corpus of ~30 malformed files across two audit passes. A CI
+workflow exists as of session 35 but has never run — see Platforms.
 
 ## Platforms
 
-**Built and tested on macOS arm64 only.** That is the whole of it: there
-is no CI, and no other platform has been built, so any claim about one
-would be a guess. The decoder, the command-line tools and the test suite
-are plain C++17 with no external dependencies, which is a reason to
-expect other 64-bit platforms to work — not evidence that they do.
-Reports from anywhere else are welcome.
+**Built and tested on macOS arm64 only.** That is still the whole of it.
+The decoder, the command-line tools and the test suite are plain C++17
+with no external dependencies, which is a reason to expect other 64-bit
+platforms to work — not evidence that they do. Reports from anywhere else
+are welcome.
+
+`.github/workflows/ci.yml` (session 35) builds and tests on macOS arm64
+and Linux x86-64 and would be that evidence, **but it has never executed:
+this repository has no remote, so no run of it exists.** Its steps were
+checked by hand against a fixture-less local build — the inventory it
+asserts, 39 suites registered and 30 skipped without recordings, is the
+inventory such a build actually produces, and the check was seen to fail
+when given the wrong numbers. That is a verified script, not a verified
+platform. The Linux row is there to find out whether Nova builds on
+x86-64; until someone has watched it go green, this section says macOS
+arm64 and nothing more.
 
 No 32-bit build has been attempted, and nothing here is written against
 an old-hardware floor.
@@ -384,7 +395,7 @@ cmake --build build
 ctest --test-dir build
 ```
 
-**What you will see: 8 suites run, 30 report Skipped.** Nova's real-signal
+**What you will see: 9 suites run, 30 report Skipped.** Nova's real-signal
 tests need off-air recordings of weather-fax broadcasts, and this
 repository does not redistribute them — the copyright of a transmitted
 chart varies by issuing meteorological service, and one of the stations in

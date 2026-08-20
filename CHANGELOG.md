@@ -1,13 +1,48 @@
 # Changelog
 
-Nova has not been released. There are no version tags, and
-`CMakeLists.txt` still carries `VERSION 0.0.0` — deliberately, because a
-version number is a release decision and no release has been made.
+Nova has not been released: there is no tag, because making one is the
+release decision itself. Since session 35 it does carry a version —
+`project(nova VERSION 0.4.0)`, milestone-based in the project's own M0-M4
+language, reported by every binary's `--version`.
 
-Until then this file records what changed and when, newest first. The full
-narrative lives in `SESSION-LOG.md`; this is the short form.
+This file records what changed and when, newest first. The full narrative
+lives in `SESSION-LOG.md`; this is the short form.
 
-## Unreleased
+## Unreleased — 0.4.0
+
+### 2026-08-20 — a version, a `--version`, and CI that has never run
+
+- **`project(nova VERSION 0.4.0)`** [E-GAP-001, closed]. The version
+  reaches the code through one generated header (`core/version.hpp.in` →
+  `<nova/version.hpp>`), so CMakeLists.txt is the only place it is
+  written. `nova-decode`, `nova-gen`, `nova-tones`, `nova-preview` and
+  `nova-gui` all answer `--version`, ahead of their argument-count checks.
+- **New suite `version_flag`** (39 total, 37 without the GUI). It compares
+  what each binary PRINTS with what CMake was told, and fails if a tool
+  hardcodes a version, names a different tool, or lacks the flag — three
+  mutations, each killed by the intended check. It also refuses to pass
+  with fewer than four tools checked, because a loop over an empty list is
+  green by default.
+- **`.github/workflows/ci.yml`** — build and test on macOS arm64 and Linux
+  x86-64, with and without the GUI. **It has never executed: there is no
+  remote.** Verified by hand instead against a fixture-less build, which
+  is what a runner sees: 39 registered, 9 ran, 30 skipped (37/8/29 with
+  `NOVA_BUILD_GUI=OFF`), and the check seen to fail on wrong numbers.
+- **`tools/check-suite-inventory.sh`** — CI does not read ctest's exit
+  code alone. Without recordings 30 suites skip and ctest still prints
+  "100% tests passed", so the gate asserts the registered and skipped
+  counts and a vanished suite fails instead of passing as a smaller green
+  run.
+- **`.github/workflows/release.yml` + `tools/record-fixture-regression.sh`**
+  [E-GAP-002, partial]. The 30 fixture-gated suites cannot run on a public
+  runner, so a `v*` tag is gated on a record of a full-suite run whose
+  commit is the tagged commit, written by a script that refuses a dirty
+  tree, a fixture-less machine, any failure, or any skip. The tag is also
+  required to match the declared version.
+- Suite counts brought level in `CMakeLists.txt`, `START-HERE.md`,
+  `README.md` and `ROADMAP.md` (38 → 39); ROADMAP's blocker list corrected
+  — item 12 still said Pass C was unaddressed, which session 34 had
+  already closed.
 
 ### 2026-08-20 — Pass C remediated: all 16 minor findings, all 3 gaps
 

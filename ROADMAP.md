@@ -1162,7 +1162,7 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    a commercial news agency~~ **Done** [Pass B, critical]. Removed from
    the working tree and from all git history (`330d408` → `aeff6a3`, all
    seven branches). `fixtures/MANIFEST.md` ships identity, provenance and
-   SHA-256 instead. Cost, accepted: **30 of 38 suites now report Skipped
+   SHA-256 instead. Cost, accepted: **30 of 39 suites now report Skipped
    from a clean checkout.**
 2. ~~A 144-byte WAV reaching ~12.9 GB of footprint~~ **Done** [Pass D,
    critical]. Data chunk clamped to the bytes that exist.
@@ -1191,19 +1191,41 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    (Moonshot AI), a third model from a different vendor: 10 VERIFIED,
    0 CITATION FAILS, failure rate zero.
 
+**Closed by remediation, session 35:**
+10. ~~**No version, no tags, no release notes.**~~ **Done** [E-GAP-001].
+    `project(nova VERSION 0.4.0)` — milestone-based, M4 being the
+    milestone that is complete — reaches the code through one generated
+    header (`core/version.hpp.in`), and all five binaries answer
+    `--version`. `version_flag` is the screamer: it compares what each
+    binary PRINTS against what CMake was told, so a hand-written literal
+    or a sixth tool without the flag fails the suite. Three mutations, all
+    killed by the intended check. `CHANGELOG.md` carries the release
+    notes. **The tag itself is not made** — see item 14.
+12. ~~**Pass C's 20 maintainability findings, unaddressed by choice.**~~
+    **Done (session 34).** All 16 minor findings conform and all 3 gaps
+    are closed; `stage_assembly` went 416 → 64 lines and the tree now
+    measures zero functions over 80 anywhere.
+
 **Open, and these are the release blockers:**
-9. **No CI of any kind.** The protocol requires the fixture regression to
-   run in CI with failure blocking release. Complicated by the recordings
-   being private: CI can run the 8 synthetic suites, and the other 30 need
-   a secret or a self-hosted runner.
-10. **No version, no tags, no release notes.** `CMakeLists.txt` still
-    carries `VERSION 0.0.0`, deliberately — a version number is a release
-    decision. `CHANGELOG.md` now exists and records the unreleased state.
-12. **Pass C's 20 maintainability findings, unaddressed by choice.** None
-    load-bearing. `stage_assembly` at 416 lines is both the longest
-    function and the only nesting-depth violation in the tree.
+9. **CI exists but has never run** [E-GAP-002, partial].
+   `.github/workflows/ci.yml` builds and runs the 9 fixture-independent
+   suites on macOS arm64 and Linux x86-64; `.github/workflows/release.yml`
+   gates a `v*` tag on those suites, on the tag matching the declared
+   version, and on a full-suite record whose commit is the tagged commit.
+   **No run of any of it exists, because the repository has no remote.**
+   What was verified instead, by hand: the inventory assertion is the
+   inventory a fixture-less build really produces (39 registered, 9 ran,
+   30 skipped; 37 and 8 and 29 with `NOVA_BUILD_GUI=OFF`), and the check
+   was seen to FAIL when given wrong numbers. The recordings stay private,
+   so the 30 fixture-gated suites are run out of band by whoever holds
+   them (`tools/record-fixture-regression.sh`) rather than by a runner —
+   Pass E's RESOLVES IF names that as acceptable, and it is the strongest
+   available while the recordings are not published. What it does not do
+   is prove Nova builds on Linux; that stays unknown until a run happens.
 13. **Session 31's two by-hand GUI runs are still outstanding** — four of
     four on-air sessions have found a defect a green suite could not see.
+14. **No tag, because no release decision.** Everything a tag needs is in
+    place; making one is Sara's act, not an agent's.
 
 **Not fixed because they are not defects:** the 240 lpm omission (WMO
 §5.1.5 lists four rates, ISO §4.2.4 requires three of a receiver — now

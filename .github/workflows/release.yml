@@ -1,0 +1,104 @@
+# Release gate — what a version tag has to survive.
+#
+# Pass E requires that the fixture regression run and that failure block
+# release [E-GAP-002]. 30 of Nova's 39 suites need off-air recordings that
+# this repository does not redistribute, so no hosted runner can execute
+# them. This workflow therefore gates a tag on two things:
+#
+#   1. everything a public runner CAN check, which is what ci.yml checks;
+#   2. a record, written by `tools/record-fixture-regression.sh` on a
+#      machine that has the recordings, whose commit is THIS commit.
+#
+# What that is worth, stated exactly: it cannot verify that the full suite
+# passed — it verifies that someone with the recordings ran it against
+# these exact bytes and that the tool refused to write the record unless
+# every one of the 39 suites passed with none skipped. The trust sits on
+# the operator and the script, not on this workflow. That is a weaker
+# claim than a hosted regression and a stronger one than a promise, and it
+# is the strongest available while the recordings stay private.
+#
+# The tag itself is still a human act. Nothing here creates one.
+name: Release gate
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-suites:
+    name: Fixture-independent suites (macos-arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install fltk rtaudio
+      - run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --target nova-gui
+      - run: cmake --build build --parallel
+      - run: tools/check-suite-inventory.sh build 39 30
+
+  fixture-regression-record:
+    name: The out-of-band full-suite record
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The record must exist
+        run: |
+          if [ ! -f docs/audit/FIXTURE-REGRESSION.md ]; then
+            echo "::error::no docs/audit/FIXTURE-REGRESSION.md — run"
+            echo "::error::tools/record-fixture-regression.sh where the recordings are,"
+            echo "::error::commit the record, then tag."
+            exit 1
+          fi
+
+      - name: The record must be OF this commit
+        run: |
+          recorded=$(sed -n 's/^- \*\*Commit:\*\* `\(.*\)`$/\1/p' \
+                     docs/audit/FIXTURE-REGRESSION.md)
+          tagged="${GITHUB_SHA}"
+          echo "recorded: ${recorded:-<none>}"
+          echo "tagged:   $tagged"
+          if [ -z "$recorded" ]; then
+            echo "::error::the record has no commit line; it was hand-edited"
+            exit 1
+          fi
+          if [ "$recorded" != "$tagged" ]; then
+            echo "::error::the full suite was recorded against $recorded, but"
+            echo "::error::the tag is on $tagged. Re-run the regression on the"
+            echo "::error::commit being released."
+            exit 1
+          fi
+
+      - name: The record must claim a complete run
+        run: |
+          if ! grep -qE '^- \*\*Result:\*\* all [0-9]+ suites passed, 0 skipped' \
+               docs/audit/FIXTURE-REGRESSION.md; then
+            echo "::error::the record does not claim a complete run with nothing skipped"
+            exit 1
+          fi
+
+  version-matches-tag:
+    name: The tag and the version agree
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      # A tag naming a version the code does not report is exactly the
+      # drift E-GAP-001 is about, one level up from `version_flag`: that
+      # suite pins the binaries to CMakeLists, this pins CMakeLists to the
+      # tag.
+      - name: Compare
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(sed -n 's/^project(nova VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "tag: $tag   CMakeLists: $declared"
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag v$tag does not match project(nova VERSION $declared)"
+            exit 1
+          fi

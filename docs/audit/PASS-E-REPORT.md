@@ -651,3 +651,82 @@ rather than hidden:**
   is explicitly a separate, later step in the protocol, not part of Pass E itself.
 - **No file was modified.** This pass is audit-only, per its own hard rule; every build was
   performed in /tmp against a git clone, never against the working tree or `build/`.
+
+================================================================================
+REMEDIATION — appended 2026-08-20 (session 35), per the dated-artifact rule
+================================================================================
+
+Two gaps addressed: E-GAP-001 CLOSED, E-GAP-002 PARTIAL. Verification:
+ctest 39/39 on the fixture-holding machine, and 9/39 with 30 skipped on a
+fixture-less copy — both real builds, both run. Zero warnings.
+
+E-GAP-001    CLOSED    `project(nova VERSION 0.4.0)` replaces the 0.0.0
+             placeholder. The scheme is milestone-based, in the project's
+             own M0-M4 language, M4 being the milestone that is complete;
+             it stays below 1.0 because nothing in the Platforms or
+             Security-posture sections has changed. The string reaches the
+             code through exactly one generated header
+             (core/version.hpp.in -> <nova/version.hpp>), so CMakeLists.txt
+             is the only place it is written. All five binaries answer
+             `--version` on stdout as "<tool> <version>", ahead of their
+             own argument-count checks. CHANGELOG.md, which the finding
+             noted did not exist when Pass E ran, carries the release
+             notes and is now headed 0.4.0.
+
+             The screamer is `version_flag` (new; suite count 38 -> 39,
+             36 -> 37 without the GUI). Its two sides are NOT equal by
+             construction — one is CMakeLists.txt's declared version, the
+             other is the bytes a built binary writes — so the failures it
+             exists for are real: a hardcoded literal in one tool, a tool
+             naming a different tool, a tool without the flag. Three
+             mutations, one per shape, each KILLED by the intended check
+             with the FAIL line read back; unmutated baseline SURVIVED
+             before and after.
+
+             NOT done, deliberately: no tag exists. A tag names a release
+             and the release decision is the operator's. What the tree now
+             has is everything a tag needs.
+
+E-GAP-002    PARTIAL   .github/workflows/ci.yml builds and tests on macOS
+             arm64 and Linux x86-64, with FLTK and RtAudio installed and
+             the GUI target explicitly required (a silent GUI skip would
+             drop two suites from the inventory), plus a second job on the
+             -DNOVA_BUILD_GUI=OFF path. release.yml gates a `v*` tag on
+             the public suites, on the tag matching the declared version,
+             and on the fixture-regression record described below.
+
+             Against the finding's RESOLVES IF: (a) builds — yes; (b) runs
+             the fixture-independent suites on every push and PR — yes,
+             all 9 of them; (c) documents that the 30 fixture-gated suites
+             are run out-of-band by whoever holds the recordings — yes,
+             and mechanised rather than only documented:
+             tools/record-fixture-regression.sh runs the full suite and
+             writes docs/audit/FIXTURE-REGRESSION.md, refusing to write a
+             record if the tree is dirty, if the recordings are absent, if
+             anything failed, or if anything skipped; release.yml then
+             refuses a tag whose commit is not the recorded commit;
+             (d) failure blocks tagging — as far as a workflow can, which
+             is not as far as branch protection, a repository setting no
+             file in the tree can supply.
+
+             **Why PARTIAL and not CLOSED: none of it has ever run.** This
+             repository has no remote, so no execution of either workflow
+             exists. Recording that plainly rather than claiming the gap
+             closed is the point — an instrument that has never been seen
+             to fail is not evidence [SESSION-LOG, session 23 onward].
+
+             What WAS verified, by hand, on real builds: the inventory the
+             CI step asserts is the inventory a fixture-less build
+             actually produces (39 registered, 9 ran, 30 skipped; 37, 8
+             and 29 with the GUI off), and check-suite-inventory.sh was
+             seen to FAIL when given wrong numbers. The reason that check
+             exists at all is this report's own observation about the skip
+             mechanism: without recordings ctest exits 0 and prints "100%
+             tests passed" having run a quarter of the suite, so a gate
+             reading the exit code alone would report a regression that
+             never ran.
+
+             Still unknown, and not claimed anywhere: whether Nova builds
+             on Linux or on x86-64. The workflow's Linux row is there to
+             find out. README's Platforms section continues to say macOS
+             arm64 and nothing more.
