@@ -35,9 +35,12 @@ lives in `SESSION-LOG.md`; this is the short form.
   run.
 - **`.github/workflows/release.yml` + `tools/record-fixture-regression.sh`**
   [E-GAP-002, partial]. The 30 fixture-gated suites cannot run on a public
-  runner, so a `v*` tag is gated on a record of a full-suite run whose
-  commit is the tagged commit, written by a script that refuses a dirty
-  tree, a fixture-less machine, any failure, or any skip. The tag is also
+  runner, so a `v*` tag is gated on a record of a full-suite run of the
+  same CODE — the recorded commit an ancestor of the tag with nothing but
+  the record differing, since committing the record moves HEAD — written
+  by a script that refuses a dirty tree, a fixture-less machine, any
+  failure, or any skip. The first record is in the tree: 39/39, nothing
+  skipped. The tag is also
   required to match the declared version.
 - Suite counts brought level in `CMakeLists.txt`, `START-HERE.md`,
   `README.md` and `ROADMAP.md` (38 → 39); ROADMAP's blocker list corrected

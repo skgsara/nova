@@ -80,16 +80,18 @@ cat >"$record" <<EOF
 # FIXTURE-REGRESSION.md — the out-of-band full-suite run
 
 Written by \`tools/record-fixture-regression.sh\`. Do not edit by hand:
-\`.github/workflows/release.yml\` reads the commit below and refuses to
-pass a tag that does not match it, so a hand-edited record is a defeated
-release gate rather than a convenience.
+\`.github/workflows/release.yml\` reads the commit below, and a hand-edited
+record is a defeated release gate rather than a convenience.
 
 **Why this file exists instead of a CI job.** 30 of Nova's $registered suites need
 off-air recordings that this repository does not redistribute
 (\`fixtures/MANIFEST.md\` carries their identity and SHA-256 instead), so a
 public runner cannot execute them. Whoever holds the recordings runs them
-here, and the tag gate checks that the commit being released is the commit
-that was tested [E-GAP-002].
+here, and the tag gate then checks that the code being released is the code
+that was tested: the commit below must be an ancestor of the tag, with
+nothing but this file differing between them [E-GAP-002]. It is compared
+that way rather than by SHA equality because committing this record moves
+HEAD, so the recorded commit and the tagged commit are never the same one.
 
 - **Commit:** \`$sha\`
 - **Branch at the time:** \`$branch\`

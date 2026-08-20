@@ -78,9 +78,13 @@ cannot run on a public runner and never will, so
 recordings are and writes `docs/audit/FIXTURE-REGRESSION.md`, refusing to
 write anything if the tree is dirty, if the recordings are absent, if
 anything failed, or if anything skipped; `release.yml` then refuses a tag
-whose commit is not the recorded commit. Worth exactly this: it does not prove the
-suite passed, it proves someone with the recordings ran it against these
-bytes and the tool would not write the record otherwise. Stronger than a
+unless the recorded commit is an ancestor of it with nothing but the record
+differing — which is the check after a fix, because the first version
+compared SHAs for equality and committing the record moves HEAD, so it
+would have refused every tag that could ever exist. Worth exactly this: it
+does not prove the suite passed, it proves someone with the recordings ran
+it against these bytes and the tool would not write the record otherwise.
+The first record is committed: 39/39, nothing skipped, Darwin arm64. Stronger than a
 promise, weaker than a hosted regression, and the most that is available
 while the recordings stay private.
 
