@@ -1,11 +1,11 @@
 // tones.cpp — see tones.hpp for what this measures and why.
 #include "tones.hpp"
+#include "constants.hpp"
 #include <algorithm>
 #include <cmath>
 
 namespace nova {
 namespace {
-constexpr double kPi = 3.14159265358979323846;
 
 struct Cand {
     ToneKind kind;

@@ -1,14 +1,12 @@
 // gen.cpp
 #include "gen.hpp"
+#include "constants.hpp"
 #include "resample.hpp"
 #include <cmath>
 #include <random>
 #include <stdexcept>
 
 namespace nova {
-namespace {
-constexpr double kPi = 3.14159265358979323846;
-}
 
 Image gen_test_pattern(int width, int height) {
     Image img;

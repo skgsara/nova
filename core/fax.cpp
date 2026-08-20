@@ -1,5 +1,6 @@
 // fax.cpp
 #include "fax.hpp"
+#include "constants.hpp"
 #include "phasing.hpp"
 #include "tones.hpp"
 #include <algorithm>
@@ -27,7 +28,6 @@ constexpr double kPulseLock = kFaxPulseLock;
 // FULL line starting at the sync pulse (576*pi px at IOC 576 is the
 // full line, dead sector included; neither WMO nor ISO asks for any
 // cropping), so pulse/gap/picture/porch all render truthfully.
-constexpr double kPi = 3.14159265358979323846;
 
 constexpr int kReacqMisses = kFaxReacqMisses;
 constexpr int kReacqEvery = kFaxReacqEvery;

@@ -9,12 +9,12 @@
 // (cf. ACFax's px*qy - py*qx divided by pamp+qamp), so picture contrast does
 // not depend on input loudness [ISO §4.2.2 input range].
 #include "demod.hpp"
+#include "constants.hpp"
 #include <cmath>
 #include <vector>
 
 namespace nova {
 namespace {
-constexpr double kPi = 3.14159265358979323846;
 
 // Windowed-sinc lowpass FIR, odd length, unity DC gain.
 std::vector<double> make_lowpass(int fs, double cutoff, int taps) {
@@ -30,8 +30,7 @@ std::vector<double> make_lowpass(int fs, double cutoff, int taps) {
             s = std::sin(2.0 * kPi * cutoff / fs * d) / (kPi * d);
         // Blackman window
         const double u = 2.0 * i / (taps - 1) - 1.0;
-        const double w = 0.42 + 0.5 * std::cos(kPi * u) +
-                         0.08 * std::cos(2.0 * kPi * u);
+        const double w = blackman(u);
         h[i] = s * w;
         sum += h[i];
     }

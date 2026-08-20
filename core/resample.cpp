@@ -1,12 +1,12 @@
 // resample.cpp — windowed-sinc interpolator, direct (non-polyphase) form.
 // Adequate for offline decode of recordings; not optimized for realtime.
 #include "resample.hpp"
+#include "constants.hpp"
 #include <cmath>
 #include <algorithm>
 
 namespace nova {
 namespace {
-constexpr double kPi = 3.14159265358979323846;
 // Denial-of-service bounds, not DSP limits — see resample_ratio.
 constexpr double kMinRatio = 1.0 / 1024.0;
 constexpr double kMaxRatio = 64.0;
@@ -55,8 +55,7 @@ std::vector<float> resample_ratio(const std::vector<float>& in, double ratio,
             double w = 0.0;
             const double u = d / bw;  // -1..1 across window
             if (u > -1.0 && u < 1.0)
-                w = 0.42 + 0.5 * std::cos(kPi * u) +
-                    0.08 * std::cos(2 * kPi * u);
+                w = blackman(u);
             double s = 0.0;
             const double x = fc * d;
             if (std::fabs(x) < 1e-9)
