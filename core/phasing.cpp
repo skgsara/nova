@@ -175,6 +175,297 @@ double refine_leading_edge(const std::vector<float>& v, size_t s,
     return out;
 }
 
+// One candidate run of consecutive phasing-like lines, grown from a seed.
+struct RunGrowth {
+    std::vector<double> p, sc;
+    std::vector<size_t> mem;
+    size_t last;
+};
+
+// Grow the run from this seed. A line joins if it scores well OR if
+// it puts the white where the run already agrees the white is —
+// either witness is enough, and on a faded signal only the second
+// one survives. Every member is one of the two, so a line that is
+// merely NEAR in time cannot enter and pollute the spread test that
+// judges the run afterwards; the run simply ends after `max_gap`
+// consecutive non-members.
+//
+// The comparison is against the running median of the members so
+// far, which starts as the seed's own position: the first few
+// members are therefore judged against a single line, and the
+// reference gets more robust as the run grows. Judging them against
+// the whole run's median instead would need the run first.
+RunGrowth grow_run(const std::vector<double>& pos,
+                   const std::vector<double>& score, size_t n_lines,
+                   double period, double tol0, const PhasingOptions& opt,
+                   size_t seed) {
+    RunGrowth r;
+    r.p.push_back(pos[seed]);
+    r.sc.push_back(score[seed]);
+    r.mem.push_back(seed);
+    double med_run = pos[seed];
+    r.last = seed;
+    int gap = 0;
+    for (size_t l = seed + 1; l < n_lines; l++) {
+        const bool strong = score[l] >= opt.min_score;
+        const bool aligned = circ_dist(pos[l], med_run, period) <= tol0;
+        // The lease is renewed by SCORE alone. An aligned weak line is
+        // taken into the run but does not extend how much further the
+        // run may reach without fresh evidence — see `max_gap`.
+        if (strong)
+            gap = 0;
+        else if (++gap > opt.max_gap)
+            break;
+        if (!strong && !aligned) continue;
+        std::vector<double> q = r.p;
+        q.push_back(pos[l]);
+        unwrap_about(q, med_run, period);
+        r.p = q;
+        r.sc.push_back(score[l]);
+        r.mem.push_back(l);
+        med_run = median_of(r.p);
+        r.last = l;
+    }
+    return r;
+}
+
+// Trim a grown run back to the lines that are phasing on their own
+// evidence, and report the run's new first/last LINE numbers in i/j.
+// Returns false when nothing survives the trim.
+//
+// A run must END on a line that is phasing on its own evidence, not
+// on one that merely agrees with where the run has been. Carrying on
+// position is there to cross a fade INSIDE the interval; at the end
+// of the interval there is nothing on the far side to reconnect to,
+// so the same rule extrapolates instead of bridging.
+//
+// On a WHITE-ONLY station that is not a subtlety, it is the whole
+// interval: the dead sector is white and sits at the same place in
+// the line as the phasing wedge [WMO §5.2.3.4], so every image line
+// agrees with the phasing position for the rest of the recording.
+// Measured on the generated white-only signal (session 10), the run
+// grew from 30 phasing lines to 230 and ran off the end of the
+// picture, and the duration cap then threw the whole thing away —
+// which is how a screamer that had passed since session 9 started
+// failing. Score cannot be asked to draw this boundary either: those
+// image lines score 0.332 and GYA 2300Z's faintest REAL phasing line
+// scores 0.371.
+bool trim_run_ends(RunGrowth& r, double period, const PhasingOptions& opt,
+                   size_t& i, size_t& j) {
+    while (!r.mem.empty() && r.sc.back() < opt.min_score) {
+        r.mem.pop_back();
+        r.sc.pop_back();
+        r.p.pop_back();
+    }
+    if (r.mem.empty()) return false;
+    j = r.mem.back();
+    i = r.mem.front();
+    unwrap_about(r.p, median_of(r.p), period);
+
+    // Trim the ENDS back to lines that agree on where the white is.
+    // A run is seeded and extended on score too, and score alone lets a
+    // dark picture line adjacent to the interval join it: the 10-90% spread
+    // is a robust statistic, so up to a tenth of the run can disagree
+    // wildly and the spread never shows it. Measured (session 7): the
+    // last line of VMW 2230Z's "60-line" interval sits 718 samples off
+    // the median, and the generated pattern's first two picture rows
+    // sit 256 off — both were being counted as phasing, and both moved
+    // the t_end that segmentation cuts the picture on.
+    //
+    // Ends only. A dropout in the MIDDLE is HF fading, not a boundary,
+    // and the median is what makes that harmless.
+    const double tol = opt.max_spread_frac * period;
+    const double m0 = median_of(r.p);
+    size_t lo = 0, hi = r.p.size();
+    while (lo < hi && std::fabs(r.p[lo] - m0) > tol) lo++;
+    while (hi > lo && std::fabs(r.p[hi - 1] - m0) > tol) hi--;
+    if (lo > 0 || hi < r.p.size()) {
+        r.p = std::vector<double>(r.p.begin() + lo, r.p.begin() + hi);
+        r.sc = std::vector<double>(r.sc.begin() + lo, r.sc.begin() + hi);
+        r.mem = std::vector<size_t>(r.mem.begin() + lo, r.mem.begin() + hi);
+        if (!r.mem.empty()) {
+            j = r.mem.back();
+            i = r.mem.front();
+        }
+    }
+    return !r.p.empty();
+}
+
+// Non-linearity of the timebase across a run, in samples, plus the
+// line-to-line roughness of the residual.
+struct RunNonlin {
+    double nonlin = 0.0;
+    int n_steps = 0;
+    double meas_period = 0.0;
+    double rough = 0.0;
+    std::vector<double> resid;
+};
+
+// Non-linearity of the timebase across the run, in samples.
+//
+// `spread` alone cannot answer that question. The per-line positions
+// are measured in windows of the TRUNCATED period, so a clock that is
+// off by even 90 ppm walks the edge 0.66 samples per line and 40
+// samples across a 60-line interval — which is most of what `spread`
+// reports on a perfectly linear recording (measured: FAXSignal, whose
+// clock is exactly nominal, reads 1.0 where every -86 ppm recording
+// reads 25-43). Removing the best straight line first leaves the part
+// no constant clock can explain.
+//
+// Robust slope, session 5's lesson applied to a 60-line baseline:
+// pairs half the run apart, median over them, so one bad line moves
+// nothing and the quantization of a single position is divided by 30
+// rather than by 1.
+//
+// The x axis is the LINE NUMBER, not the member index. The two are
+// the same only when every line in the span is a member; a faded run
+// has gaps, and dividing by the wrong baseline would report a slope
+// — and therefore a residual — that no clock explains.
+RunNonlin measure_nonlin(const std::vector<double>& p,
+                         const std::vector<size_t>& mem, size_t plen) {
+    RunNonlin out;
+    const size_t len = p.size();
+    if (len >= 8) {
+        const size_t k = len / 2;
+        std::vector<double> sl;
+        for (size_t m = 0; m + k < len; m++)
+            sl.push_back((p[m + k] - p[m]) /
+                         static_cast<double>(mem[m + k] - mem[m]));
+        const double slope = median_of(sl);
+        // The white edge drifts by (true period - truncated period)
+        // per line inside its window, so the slope IS the rate
+        // measurement the live path seeds from [PhasingResult::period].
+        out.meas_period = plen + slope;
+        std::vector<double> icpt;
+        for (size_t m = 0; m < len; m++)
+            icpt.push_back(p[m] - slope * static_cast<double>(mem[m]));
+        const double c = median_of(icpt);
+        for (size_t m = 0; m < len; m++)
+            out.resid.push_back(p[m] -
+                                (c + slope * static_cast<double>(mem[m])));
+        const std::vector<double> smoothed =
+            smooth_local(out.resid, mem, kNonlinMedRad);
+        out.nonlin = spread_10_90(smoothed);
+        // Persistent moves, counted the way the image domain counts them
+        // (fax.cpp §4d): a transition of more than `kStepSmp` between
+        // ADJACENT lines of the smoothed residual. Adjacent only — across
+        // a gap the two lines are several lines apart and the clock walk
+        // between them is not a step.
+        for (size_t m = 1; m < smoothed.size(); m++)
+            if (mem[m] == mem[m - 1] + 1 &&
+                std::fabs(smoothed[m] - smoothed[m - 1]) > kStepSmp)
+                out.n_steps++;
+    }
+
+    // Line-to-line roughness of the residual: how much of its spread is
+    // measurement noise rather than anything persistent.
+    std::vector<double> d;
+    for (size_t m = 1; m < out.resid.size(); m++)
+        if (mem[m] == mem[m - 1] + 1)
+            d.push_back(std::fabs(out.resid[m] - out.resid[m - 1]));
+    if (!d.empty()) out.rough = median_of(d);
+    return out;
+}
+
+// Absolute anchor at the middle of the run. Each line's white edge
+// sits at l*plen + pos[l]; successive edges are one FRACTIONAL
+// period apart, so referring every line back to the middle one and
+// taking the median removes the integer-grid slip instead of
+// averaging over it. Without this the anchor carries up to
+// (period - plen) * lines/2 of error — 20 samples on a 60-line
+// interval at a typical -85 ppm clock, growing with run length.
+// An INTEGER line: the reference has to be a line that exists.
+// (i+j)/2 as a real number is a half-line whenever the run has an
+// even number of lines — which the 30 s phasing interval usually
+// does — and every such anchor came out exactly half a period off.
+// Odd-length runs looked perfect throughout, which is precisely why
+// this needed the picture to catch it and not the numbers.
+// The reference is the MEDIAN MEMBER, which is a line that exists
+// even when the run has gaps in it; the midpoint of the span need
+// not be a member at all on a faded signal.
+double absolute_anchor(const std::vector<double>& p,
+                       const std::vector<size_t>& mem, size_t plen,
+                       double period) {
+    const size_t len = p.size();
+    const double l_mid = static_cast<double>(mem[(len - 1) / 2]);
+    std::vector<double> abs_est;
+    abs_est.reserve(len);
+    for (size_t k = 0; k < len; k++) {
+        const double l = static_cast<double>(mem[k]);
+        abs_est.push_back(l * plen + p[k] - (l - l_mid) * period);
+    }
+    unwrap_about(abs_est, median_of(abs_est), period);
+    return median_of(abs_est);
+}
+
+// Judge one trimmed run against the acceptance tests and, if it
+// qualifies and wins the selection policy, record it in `res`.
+void judge_run(const DecodeHooks& hooks, const PhasingOptions& opt, int fs,
+               size_t plen, double period, size_t i, size_t j,
+               const RunGrowth& run, const RunNonlin& nl,
+               const std::vector<char>& asym, size_t max_lines,
+               PhasingResult& res) {
+    const size_t len = run.p.size();
+    int n_asym = 0;
+    for (size_t m = 0; m < len; m++) n_asym += asym[run.mem[m]];
+    const double med = median_of(run.p);
+    const double sp = spread_10_90(run.p);
+    const double anchor = absolute_anchor(run.p, run.mem, plen, period);
+    dlog(hooks, LogTopic::kInfo,
+         "dbg: phasing cand %zu lines of %zu @line %zu "
+         "pos=%.1f spread=%.1f (limit %.1f) score=%.3f",
+         len, j - i + 1, i, med, sp,
+         opt.max_spread_frac * period, median_of(run.sc));
+    for (size_t k = 0; k < run.p.size(); k++)
+        if (k < 3 || k + 3 >= run.p.size())
+            dlog(hooks, LogTopic::kDetail,
+                 "dbg:   line %zu pos=%.1f (%+.1f) score=%.3f",
+                 run.mem[k], run.p[k], run.p[k] - med, run.sc[k]);
+
+    // The spread test is what stops a stretch of dark picture lines
+    // from passing: they can each score well, but they do not agree on
+    // WHERE the white run is, and phasing lines do.
+    // `max_lines` is a duration falsification — phasing is ~30 s of the
+    // transmission, so it bounds the SPAN, not the member count. A run
+    // that covers eight minutes is not phasing however few of those
+    // lines agreed.
+    const bool ok = len >= static_cast<size_t>(opt.min_lines) &&
+                    (j - i + 1) <= max_lines &&
+                    sp <= opt.max_spread_frac * period;
+    if (ok)
+        dlog(hooks, LogTopic::kInfo,
+             "dbg:   -> qualifies: nonlin=%.1f (raw %.1f) "
+             "noise=%.1f steps=%d",
+             nl.nonlin, spread_10_90(nl.resid), nl.rough, nl.n_steps);
+    // Which qualifying run wins: the LAST one inside the transmission
+    // the caller named, or the FIRST one when it named none. Never the
+    // longest — see PhasingOptions::t_lo. Segmentation states the same
+    // policy three sections down in fax.cpp ("the first one after the
+    // previous boundary, never the last or the largest"); the phasing
+    // detector did not share it until session 10, and the right answer
+    // had been winning a one-line coin toss on `jmh sample`.
+    const double run_t0 = static_cast<double>(i * plen) / fs;
+    const double run_t1 = static_cast<double>((j + 1) * plen) / fs;
+    const bool windowed = opt.t_hi > opt.t_lo;
+    const bool inside =
+        !windowed || (run_t0 >= opt.t_lo - 1.0 && run_t1 <= opt.t_hi);
+    if (ok && inside && (windowed || !res.found)) {
+        res.found = true;
+        res.t_start = static_cast<double>(i * plen) / fs;
+        res.t_end = static_cast<double>((j + 1) * plen) / fs;
+        res.lines = static_cast<int>(len);
+        res.line_start = std::fmod(med + period, period);
+        res.anchor = anchor;
+        res.spread = sp;
+        res.period = nl.meas_period;
+        res.nonlinearity = nl.nonlin;
+        res.roughness = nl.rough;
+        res.steps = nl.n_steps;
+        res.asymmetric = n_asym * 2 >= static_cast<int>(len);
+        res.score = median_of(run.sc);
+    }
+}
+
 }  // namespace
 
 PhasingResult detect_phasing(const std::vector<float>& video, int fs,
@@ -218,258 +509,16 @@ PhasingResult detect_phasing(const std::vector<float>& video, int fs,
     while (i < n_lines) {
         if (score[i] < opt.min_score) { i++; continue; }
 
-        // Grow the run from this seed. A line joins if it scores well OR if
-        // it puts the white where the run already agrees the white is —
-        // either witness is enough, and on a faded signal only the second
-        // one survives. Every member is one of the two, so a line that is
-        // merely NEAR in time cannot enter and pollute the spread test that
-        // judges the run afterwards; the run simply ends after `max_gap`
-        // consecutive non-members.
-        //
-        // The comparison is against the running median of the members so
-        // far, which starts as the seed's own position: the first few
-        // members are therefore judged against a single line, and the
-        // reference gets more robust as the run grows. Judging them against
-        // the whole run's median instead would need the run first.
-        std::vector<double> p, sc;
-        std::vector<size_t> mem;
-        p.push_back(pos[i]);
-        sc.push_back(score[i]);
-        mem.push_back(i);
-        double med_run = pos[i];
-        size_t last = i;
-        int gap = 0;
-        for (size_t l = i + 1; l < n_lines; l++) {
-            const bool strong = score[l] >= opt.min_score;
-            const bool aligned = circ_dist(pos[l], med_run, period) <= tol0;
-            // The lease is renewed by SCORE alone. An aligned weak line is
-            // taken into the run but does not extend how much further the
-            // run may reach without fresh evidence — see `max_gap`.
-            if (strong)
-                gap = 0;
-            else if (++gap > opt.max_gap)
-                break;
-            if (!strong && !aligned) continue;
-            std::vector<double> q = p;
-            q.push_back(pos[l]);
-            unwrap_about(q, med_run, period);
-            p = q;
-            sc.push_back(score[l]);
-            mem.push_back(l);
-            med_run = median_of(p);
-            last = l;
-        }
-        // Where the next candidate starts, fixed before the trim below can
-        // move `last` — otherwise the trimmed-off tail is rescanned as a run
+        RunGrowth run = grow_run(pos, score, n_lines, period, tol0, opt, i);
+        // Where the next candidate starts, fixed before the trim can drop
+        // members — otherwise the trimmed-off tail is rescanned as a run
         // of its own.
-        const size_t next = last + 1;
-
-        // A run must END on a line that is phasing on its own evidence, not
-        // on one that merely agrees with where the run has been. Carrying on
-        // position is there to cross a fade INSIDE the interval; at the end
-        // of the interval there is nothing on the far side to reconnect to,
-        // so the same rule extrapolates instead of bridging.
-        //
-        // On a WHITE-ONLY station that is not a subtlety, it is the whole
-        // interval: the dead sector is white and sits at the same place in
-        // the line as the phasing wedge [WMO §5.2.3.4], so every image line
-        // agrees with the phasing position for the rest of the recording.
-        // Measured on the generated white-only signal (session 10), the run
-        // grew from 30 phasing lines to 230 and ran off the end of the
-        // picture, and the duration cap then threw the whole thing away —
-        // which is how a screamer that had passed since session 9 started
-        // failing. Score cannot be asked to draw this boundary either: those
-        // image lines score 0.332 and GYA 2300Z's faintest REAL phasing line
-        // scores 0.371.
-        while (!mem.empty() && sc.back() < opt.min_score) {
-            mem.pop_back();
-            sc.pop_back();
-            p.pop_back();
-        }
-        if (mem.empty()) { i = next; continue; }
-        size_t j = mem.back();
-        i = mem.front();
-        unwrap_about(p, median_of(p), period);
-
-        // Trim the ENDS back to lines that agree on where the white is.
-        // A run is seeded and extended on score too, and score alone lets a
-        // dark picture line adjacent to the interval join it: the 10-90% spread
-        // is a robust statistic, so up to a tenth of the run can disagree
-        // wildly and the spread never shows it. Measured (session 7): the
-        // last line of VMW 2230Z's "60-line" interval sits 718 samples off
-        // the median, and the generated pattern's first two picture rows
-        // sit 256 off — both were being counted as phasing, and both moved
-        // the t_end that segmentation cuts the picture on.
-        //
-        // Ends only. A dropout in the MIDDLE is HF fading, not a boundary,
-        // and the median is what makes that harmless.
-        const double tol = opt.max_spread_frac * period;
-        {
-            const double m0 = median_of(p);
-            size_t lo = 0, hi = p.size();
-            while (lo < hi && std::fabs(p[lo] - m0) > tol) lo++;
-            while (hi > lo && std::fabs(p[hi - 1] - m0) > tol) hi--;
-            if (lo > 0 || hi < p.size()) {
-                p = std::vector<double>(p.begin() + lo, p.begin() + hi);
-                sc = std::vector<double>(sc.begin() + lo, sc.begin() + hi);
-                mem = std::vector<size_t>(mem.begin() + lo, mem.begin() + hi);
-                if (!mem.empty()) {
-                    j = mem.back();
-                    i = mem.front();
-                }
-            }
-        }
-        if (p.empty()) { i = next; continue; }
-        const size_t len = p.size();
-
-        // Non-linearity of the timebase across the run, in samples.
-        //
-        // `spread` alone cannot answer that question. The per-line positions
-        // are measured in windows of the TRUNCATED period, so a clock that is
-        // off by even 90 ppm walks the edge 0.66 samples per line and 40
-        // samples across a 60-line interval — which is most of what `spread`
-        // reports on a perfectly linear recording (measured: FAXSignal, whose
-        // clock is exactly nominal, reads 1.0 where every -86 ppm recording
-        // reads 25-43). Removing the best straight line first leaves the part
-        // no constant clock can explain.
-        //
-        // Robust slope, session 5's lesson applied to a 60-line baseline:
-        // pairs half the run apart, median over them, so one bad line moves
-        // nothing and the quantization of a single position is divided by 30
-        // rather than by 1.
-        //
-        // The x axis is the LINE NUMBER, not the member index. The two are
-        // the same only when every line in the span is a member; a faded run
-        // has gaps, and dividing by the wrong baseline would report a slope
-        // — and therefore a residual — that no clock explains.
-        double nonlin = 0.0;
-        int n_steps = 0;
-        double meas_period = 0.0;
-        std::vector<double> resid, smoothed;
-        if (len >= 8) {
-            const size_t k = len / 2;
-            std::vector<double> sl;
-            for (size_t m = 0; m + k < len; m++)
-                sl.push_back((p[m + k] - p[m]) /
-                             static_cast<double>(mem[m + k] - mem[m]));
-            const double slope = median_of(sl);
-            // The white edge drifts by (true period - truncated period)
-            // per line inside its window, so the slope IS the rate
-            // measurement the live path seeds from [PhasingResult::period].
-            meas_period = plen + slope;
-            std::vector<double> icpt;
-            for (size_t m = 0; m < len; m++)
-                icpt.push_back(p[m] - slope * static_cast<double>(mem[m]));
-            const double c = median_of(icpt);
-            for (size_t m = 0; m < len; m++)
-                resid.push_back(p[m] -
-                                (c + slope * static_cast<double>(mem[m])));
-            smoothed = smooth_local(resid, mem, kNonlinMedRad);
-            nonlin = spread_10_90(smoothed);
-            // Persistent moves, counted the way the image domain counts them
-            // (fax.cpp §4d): a transition of more than `kStepSmp` between
-            // ADJACENT lines of the smoothed residual. Adjacent only — across
-            // a gap the two lines are several lines apart and the clock walk
-            // between them is not a step.
-            for (size_t m = 1; m < smoothed.size(); m++)
-                if (mem[m] == mem[m - 1] + 1 &&
-                    std::fabs(smoothed[m] - smoothed[m - 1]) > kStepSmp)
-                    n_steps++;
-        }
-        int n_asym = 0;
-        for (size_t m = 0; m < len; m++) n_asym += asym[mem[m]];
-        const double med = median_of(p);
-        const double sp = spread_10_90(p);
-
-        // Line-to-line roughness of the residual: how much of its spread is
-        // measurement noise rather than anything persistent.
-        double rough = 0.0;
-        {
-            std::vector<double> d;
-            for (size_t m = 1; m < resid.size(); m++)
-                if (mem[m] == mem[m - 1] + 1)
-                    d.push_back(std::fabs(resid[m] - resid[m - 1]));
-            if (!d.empty()) rough = median_of(d);
-        }
-
-        // Absolute anchor at the middle of the run. Each line's white edge
-        // sits at l*plen + pos[l]; successive edges are one FRACTIONAL
-        // period apart, so referring every line back to the middle one and
-        // taking the median removes the integer-grid slip instead of
-        // averaging over it. Without this the anchor carries up to
-        // (period - plen) * lines/2 of error — 20 samples on a 60-line
-        // interval at a typical -85 ppm clock, growing with run length.
-        // An INTEGER line: the reference has to be a line that exists.
-        // (i+j)/2 as a real number is a half-line whenever the run has an
-        // even number of lines — which the 30 s phasing interval usually
-        // does — and every such anchor came out exactly half a period off.
-        // Odd-length runs looked perfect throughout, which is precisely why
-        // this needed the picture to catch it and not the numbers.
-        // The reference is the MEDIAN MEMBER, which is a line that exists
-        // even when the run has gaps in it; the midpoint of the span need
-        // not be a member at all on a faded signal.
-        const double l_mid = static_cast<double>(mem[(len - 1) / 2]);
-        std::vector<double> abs_est;
-        abs_est.reserve(len);
-        for (size_t k = 0; k < len; k++) {
-            const double l = static_cast<double>(mem[k]);
-            abs_est.push_back(l * plen + p[k] - (l - l_mid) * period);
-        }
-        unwrap_about(abs_est, median_of(abs_est), period);
-        const double anchor = median_of(abs_est);
-        dlog(hooks, LogTopic::kInfo,
-             "dbg: phasing cand %zu lines of %zu @line %zu "
-             "pos=%.1f spread=%.1f (limit %.1f) score=%.3f",
-             len, j - i + 1, i, med, sp,
-             opt.max_spread_frac * period, median_of(sc));
-        for (size_t k = 0; k < p.size(); k++)
-            if (k < 3 || k + 3 >= p.size())
-                dlog(hooks, LogTopic::kDetail,
-                     "dbg:   line %zu pos=%.1f (%+.1f) score=%.3f",
-                     mem[k], p[k], p[k] - med, sc[k]);
-
-        // The spread test is what stops a stretch of dark picture lines
-        // from passing: they can each score well, but they do not agree on
-        // WHERE the white run is, and phasing lines do.
-        // `max_lines` is a duration falsification — phasing is ~30 s of the
-        // transmission, so it bounds the SPAN, not the member count. A run
-        // that covers eight minutes is not phasing however few of those
-        // lines agreed.
-        const bool ok = len >= static_cast<size_t>(opt.min_lines) &&
-                        (j - i + 1) <= max_lines &&
-                        sp <= opt.max_spread_frac * period;
-        if (ok)
-            dlog(hooks, LogTopic::kInfo,
-                 "dbg:   -> qualifies: nonlin=%.1f (raw %.1f) "
-                 "noise=%.1f steps=%d",
-                 nonlin, spread_10_90(resid), rough, n_steps);
-        // Which qualifying run wins: the LAST one inside the transmission
-        // the caller named, or the FIRST one when it named none. Never the
-        // longest — see PhasingOptions::t_lo. Segmentation states the same
-        // policy three sections down in fax.cpp ("the first one after the
-        // previous boundary, never the last or the largest"); the phasing
-        // detector did not share it until session 10, and the right answer
-        // had been winning a one-line coin toss on `jmh sample`.
-        const double run_t0 = static_cast<double>(i * plen) / fs;
-        const double run_t1 = static_cast<double>((j + 1) * plen) / fs;
-        const bool windowed = opt.t_hi > opt.t_lo;
-        const bool inside =
-            !windowed || (run_t0 >= opt.t_lo - 1.0 && run_t1 <= opt.t_hi);
-        if (ok && inside && (windowed || !res.found)) {
-            res.found = true;
-            res.t_start = static_cast<double>(i * plen) / fs;
-            res.t_end = static_cast<double>((j + 1) * plen) / fs;
-            res.lines = static_cast<int>(len);
-            res.line_start = std::fmod(med + period, period);
-            res.anchor = anchor;
-            res.spread = sp;
-            res.period = meas_period;
-            res.nonlinearity = nonlin;
-            res.roughness = rough;
-            res.steps = n_steps;
-            res.asymmetric = n_asym * 2 >= static_cast<int>(len);
-            res.score = median_of(sc);
-        }
+        const size_t next = run.last + 1;
+        size_t j = 0;
+        if (!trim_run_ends(run, period, opt, i, j)) { i = next; continue; }
+        const RunNonlin nl = measure_nonlin(run.p, run.mem, plen);
+        judge_run(hooks, opt, fs, plen, period, i, j, run, nl, asym,
+                  max_lines, res);
         i = next;
     }
     return res;

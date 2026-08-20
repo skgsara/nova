@@ -32,6 +32,94 @@ void wr_u16(std::ostream& s, uint16_t v) {
     s.write(reinterpret_cast<const char*>(b), 2);
 }
 
+// One PCM sample format on disk: bytes per sample, the accumulator a
+// frame's channels are summed into, and how one sample is read and the
+// frame sum normalized to [-1, 1]. 24-bit has no native integer type, so
+// it gets a tag; the float format (fmt == 3) reads through memcpy.
+template <typename Sample> struct pcm_traits;
+
+template <> struct pcm_traits<int16_t> {
+    using acc_t = int32_t;
+    static constexpr size_t bytes = 2;
+    static int32_t read(const unsigned char*& p) {
+        const int16_t v = static_cast<int16_t>(p[0] | (p[1] << 8));
+        p += 2;
+        return v;
+    }
+    static float finish(acc_t acc, int channels) {
+        return static_cast<float>(acc) / (32768.0f * channels);
+    }
+};
+
+template <> struct pcm_traits<uint8_t> {
+    using acc_t = int32_t;
+    static constexpr size_t bytes = 1;
+    static int32_t read(const unsigned char*& p) { return int(*p++) - 128; }
+    static float finish(acc_t acc, int channels) {
+        return static_cast<float>(acc) / (128.0f * channels);
+    }
+};
+
+struct pcm24 {};
+
+template <> struct pcm_traits<pcm24> {
+    using acc_t = int32_t;
+    static constexpr size_t bytes = 3;
+    static int32_t read(const unsigned char*& p) {
+        int32_t v = int32_t(p[0]) | (int32_t(p[1]) << 8) |
+                    (int32_t(p[2]) << 16);
+        if (v & 0x800000) v -= 0x1000000;
+        p += 3;
+        return v;
+    }
+    static float finish(acc_t acc, int channels) {
+        return static_cast<float>(acc) / (8388608.0f * channels);
+    }
+};
+
+template <> struct pcm_traits<int32_t> {
+    using acc_t = int64_t;
+    static constexpr size_t bytes = 4;
+    static int32_t read(const unsigned char*& p) {
+        const int32_t v = int32_t(uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
+                                  (uint32_t(p[2]) << 16) |
+                                  (uint32_t(p[3]) << 24));
+        p += 4;
+        return v;
+    }
+    static float finish(acc_t acc, int channels) {
+        return static_cast<float>(static_cast<double>(acc) /
+                                  (2147483648.0 * channels));
+    }
+};
+
+template <> struct pcm_traits<float> {
+    using acc_t = float;
+    static constexpr size_t bytes = 4;
+    static float read(const unsigned char*& p) {
+        float v;
+        std::memcpy(&v, p, 4);
+        p += 4;
+        return v;
+    }
+    static float finish(acc_t acc, int channels) { return acc / channels; }
+};
+
+// Decode every frame of one PCM format: sum the frame's channels and push
+// the normalized mean.
+template <typename Sample>
+void decode_frames(const std::vector<unsigned char>& data, int channels,
+                   Wav& w) {
+    using T = pcm_traits<Sample>;
+    const unsigned char* p = data.data();
+    const size_t frames = data.size() / (T::bytes * channels);
+    for (size_t i = 0; i < frames; i++) {
+        typename T::acc_t acc = 0;
+        for (int c = 0; c < channels; c++) acc += T::read(p);
+        w.samples.push_back(T::finish(acc, channels));
+    }
+}
+
 }  // namespace
 
 // Nyquist on the white frequency: WEFAX white is 2300 Hz [WMO §5.3.1.2],
@@ -106,69 +194,21 @@ Wav read_wav(const std::string& path) {
 
     Wav w;
     w.sample_rate = static_cast<int>(rate);
-    size_t frames = 0;
-    const unsigned char* p = data.data();
 
-    auto emit = [&](float v) { w.samples.push_back(v); };
-
-    if (fmt == 1 && bits == 16) {
-        frames = data.size() / (2 * channels);
-        for (size_t i = 0; i < frames; i++) {
-            int32_t acc = 0;
-            for (int c = 0; c < channels; c++, p += 2) {
-                int16_t v = static_cast<int16_t>(p[0] | (p[1] << 8));
-                acc += v;
-            }
-            emit(static_cast<float>(acc) / (32768.0f * channels));
-        }
-    } else if (fmt == 1 && bits == 8) {
-        frames = data.size() / channels;
-        for (size_t i = 0; i < frames; i++) {
-            int32_t acc = 0;
-            for (int c = 0; c < channels; c++) acc += int(*p++) - 128;
-            emit(static_cast<float>(acc) / (128.0f * channels));
-        }
-    } else if (fmt == 1 && bits == 24) {
-        frames = data.size() / (3 * channels);
-        for (size_t i = 0; i < frames; i++) {
-            int32_t acc = 0;
-            for (int c = 0; c < channels; c++, p += 3) {
-                int32_t v = int32_t(p[0]) | (int32_t(p[1]) << 8) |
-                            (int32_t(p[2]) << 16);
-                if (v & 0x800000) v -= 0x1000000;
-                acc += v;
-            }
-            emit(static_cast<float>(acc) / (8388608.0f * channels));
-        }
-    } else if (fmt == 1 && bits == 32) {
-        frames = data.size() / (4 * channels);
-        for (size_t i = 0; i < frames; i++) {
-            int64_t acc = 0;
-            for (int c = 0; c < channels; c++, p += 4) {
-                int32_t v = int32_t(uint32_t(p[0]) | (uint32_t(p[1]) << 8) |
-                                    (uint32_t(p[2]) << 16) |
-                                    (uint32_t(p[3]) << 24));
-                acc += v;
-            }
-            emit(static_cast<float>(static_cast<double>(acc) /
-                                    (2147483648.0 * channels)));
-        }
-    } else if (fmt == 3 && bits == 32) {
-        frames = data.size() / (4 * channels);
-        for (size_t i = 0; i < frames; i++) {
-            float acc = 0;
-            for (int c = 0; c < channels; c++, p += 4) {
-                float v;
-                std::memcpy(&v, p, 4);
-                acc += v;
-            }
-            emit(acc / channels);
-        }
-    } else {
+    if (fmt == 1 && bits == 16)
+        decode_frames<int16_t>(data, channels, w);
+    else if (fmt == 1 && bits == 8)
+        decode_frames<uint8_t>(data, channels, w);
+    else if (fmt == 1 && bits == 24)
+        decode_frames<pcm24>(data, channels, w);
+    else if (fmt == 1 && bits == 32)
+        decode_frames<int32_t>(data, channels, w);
+    else if (fmt == 3 && bits == 32)
+        decode_frames<float>(data, channels, w);
+    else
         throw std::runtime_error("unsupported WAV format (fmt=" +
                                  std::to_string(fmt) +
                                  " bits=" + std::to_string(bits) + ")");
-    }
     return w;
 }
 

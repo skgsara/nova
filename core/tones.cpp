@@ -117,6 +117,90 @@ double tone_purity_band(const std::vector<float>& v, size_t s, size_t n,
     return best;
 }
 
+namespace {
+
+struct W { double purity, freq; };
+
+// Score every window of `video` against one candidate tone and collect the
+// qualifying runs into `out`.
+void scan_tone(const std::vector<float>& video, int fs, size_t n, size_t hop,
+               const Cand& c, const ToneOptions& opt,
+               const DecodeHooks& hooks, std::vector<ToneEvent>& out) {
+    std::vector<W> wins;
+    for (size_t s = 0; s + n <= video.size(); s += hop) {
+        if ((wins.size() & 127) == 0)
+            throw_if_cancelled(hooks, "tones");
+        W best{0.0, c.nominal};
+        best.purity = tone_purity_band(video, s, n, fs, c.nominal,
+                                       opt.tol, &best.freq);
+        wins.push_back(best);
+    }
+
+    // Runs of hot windows, tolerating a dropout of up to max_gap_sec.
+    // This is HF: a station fades mid-tone, and the first version of
+    // this code (one cold window allowed) split real 5 s stop tones
+    // into sub-minimum halves and discarded them — measured on VMW
+    // 2230Z, NMC 2204Z and GYA 2300Z, session 6. Content never comes
+    // near the threshold (library max 0.16 against 0.35), so the
+    // discrimination is done by purity; the run rule only has to
+    // survive fading.
+    const size_t max_gap =
+        static_cast<size_t>(opt.max_gap_sec / opt.hop_sec);
+    size_t i = 0;
+    while (i < wins.size()) {
+        if (wins[i].purity < opt.purity) { i++; continue; }
+        size_t j = i, last_hot = i, cold = 0;
+        while (j + 1 < wins.size()) {
+            if (wins[j + 1].purity >= opt.purity) {
+                last_hot = j + 1;
+                cold = 0;
+            } else if (++cold > max_gap) {
+                break;
+            }
+            j++;
+        }
+
+        std::vector<double> fr, pu;
+        for (size_t k = i; k <= last_hot; k++)
+            if (wins[k].purity >= opt.purity) {
+                fr.push_back(wins[k].freq);
+                pu.push_back(wins[k].purity);
+            }
+        // Fraction of the run's span that is actually hot. A real tone
+        // that fades is still mostly present; a pair of unrelated
+        // bursts bridged by the gap rule is not.
+        const double hot_frac =
+            static_cast<double>(fr.size()) /
+            static_cast<double>(last_hot - i + 1);
+        const double t0 = static_cast<double>(i * hop) / fs;
+        const double t1 =
+            static_cast<double>(last_hot * hop + n) / fs;
+        const double dur = t1 - t0;
+        const double sp = tone_spread_10_90(fr) / c.nominal;
+        dlog(hooks, LogTopic::kInfo,
+             "dbg: tone %s run %.2f-%.2fs (%.2fs) f=%.1f "
+             "purity=%.3f spread=%.4f hot=%.2f",
+             tone_name(c.kind), t0, t1, dur, tone_median(fr),
+             tone_median(pu), sp, hot_frac);
+        // A real control tone holds ONE frequency. A run assembled out
+        // of noise wanders across the search band, so the frequency
+        // spread rejects it even when single windows look pure.
+        if (dur >= c.min_sec && sp <= opt.max_spread &&
+            hot_frac >= opt.min_hot_frac) {
+            ToneEvent e;
+            e.kind = c.kind;
+            e.t_start = t0;
+            e.t_end = t1;
+            e.freq_hz = tone_median(fr);
+            e.purity = tone_median(pu);
+            out.push_back(e);
+        }
+        i = last_hot + 1;
+    }
+}
+
+}  // namespace
+
 std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
                                     const ToneOptions& opt,
                                     const DecodeHooks& hooks) {
@@ -131,80 +215,8 @@ std::vector<ToneEvent> detect_tones(const std::vector<float>& video, int fs,
         {ToneKind::kStop,        450.0, opt.min_stop_sec},
     };
 
-    for (const Cand& c : cands) {
-        struct W { double purity, freq; };
-        std::vector<W> wins;
-        for (size_t s = 0; s + n <= video.size(); s += hop) {
-            if ((wins.size() & 127) == 0)
-                throw_if_cancelled(hooks, "tones");
-            W best{0.0, c.nominal};
-            best.purity = tone_purity_band(video, s, n, fs, c.nominal,
-                                           opt.tol, &best.freq);
-            wins.push_back(best);
-        }
-
-        // Runs of hot windows, tolerating a dropout of up to max_gap_sec.
-        // This is HF: a station fades mid-tone, and the first version of
-        // this code (one cold window allowed) split real 5 s stop tones
-        // into sub-minimum halves and discarded them — measured on VMW
-        // 2230Z, NMC 2204Z and GYA 2300Z, session 6. Content never comes
-        // near the threshold (library max 0.16 against 0.35), so the
-        // discrimination is done by purity; the run rule only has to
-        // survive fading.
-        const size_t max_gap =
-            static_cast<size_t>(opt.max_gap_sec / opt.hop_sec);
-        size_t i = 0;
-        while (i < wins.size()) {
-            if (wins[i].purity < opt.purity) { i++; continue; }
-            size_t j = i, last_hot = i, cold = 0;
-            while (j + 1 < wins.size()) {
-                if (wins[j + 1].purity >= opt.purity) {
-                    last_hot = j + 1;
-                    cold = 0;
-                } else if (++cold > max_gap) {
-                    break;
-                }
-                j++;
-            }
-
-            std::vector<double> fr, pu;
-            for (size_t k = i; k <= last_hot; k++)
-                if (wins[k].purity >= opt.purity) {
-                    fr.push_back(wins[k].freq);
-                    pu.push_back(wins[k].purity);
-                }
-            // Fraction of the run's span that is actually hot. A real tone
-            // that fades is still mostly present; a pair of unrelated
-            // bursts bridged by the gap rule is not.
-            const double hot_frac =
-                static_cast<double>(fr.size()) /
-                static_cast<double>(last_hot - i + 1);
-            const double t0 = static_cast<double>(i * hop) / fs;
-            const double t1 =
-                static_cast<double>(last_hot * hop + n) / fs;
-            const double dur = t1 - t0;
-            const double sp = tone_spread_10_90(fr) / c.nominal;
-            dlog(hooks, LogTopic::kInfo,
-                 "dbg: tone %s run %.2f-%.2fs (%.2fs) f=%.1f "
-                 "purity=%.3f spread=%.4f hot=%.2f",
-                 tone_name(c.kind), t0, t1, dur, tone_median(fr),
-                 tone_median(pu), sp, hot_frac);
-            // A real control tone holds ONE frequency. A run assembled out
-            // of noise wanders across the search band, so the frequency
-            // spread rejects it even when single windows look pure.
-            if (dur >= c.min_sec && sp <= opt.max_spread &&
-                hot_frac >= opt.min_hot_frac) {
-                ToneEvent e;
-                e.kind = c.kind;
-                e.t_start = t0;
-                e.t_end = t1;
-                e.freq_hz = tone_median(fr);
-                e.purity = tone_median(pu);
-                out.push_back(e);
-            }
-            i = last_hot + 1;
-        }
-    }
+    for (const Cand& c : cands)
+        scan_tone(video, fs, n, hop, c, opt, hooks, out);
 
     std::sort(out.begin(), out.end(),
               [](const ToneEvent& a, const ToneEvent& b) {

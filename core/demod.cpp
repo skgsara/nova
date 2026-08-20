@@ -63,6 +63,8 @@ class Fir {
 std::vector<float> fm_demod(const std::vector<float>& in, int fs,
                             double center, double deviation,
                             double iq_lowpass_hz) {
+    // 63: odd-length windowed-sinc tap count, chosen for the I/Q lowpass.
+    // live/stream.hpp:45-61 derives its kDemodOverlap from this number.
     const auto h = make_lowpass(fs, iq_lowpass_hz, 63);
     Fir fi(h), fq(h);
     const double dphi = 2.0 * kPi * center / fs;

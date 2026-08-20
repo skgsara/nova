@@ -4,7 +4,9 @@
 
 namespace nova {
 
-// Bandlimited resample. quality set by number of zero crossings per side.
+// Bandlimited resample. quality set by number of zero crossings per side;
+// the default of 16 is a tuned quality constant (kernel width per side),
+// not a standards value.
 std::vector<float> resample(const std::vector<float>& in, int fs_in, int fs_out,
                             int zero_crossings = 16);
 
