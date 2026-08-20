@@ -64,6 +64,21 @@ rather than drawing an empty band, for the same reason the meter says
 `-- dBFS`: a dead input must not look like a quiet one. View → Tuning
 strip turns it off and gives its 72 px back to the picture; the choice is
 remembered.
+Since session 37 the STATUS panel on the right tells you about the chart
+in front of you rather than about the menus above it. **IOC** and **Rate**
+are what Nova MEASURED — they fill in as the transmission gives them up,
+IOC at the start tone and the rate when the phasing interval locks one,
+and settle to the decode's own numbers when the chart is saved; `(forced)`
+appears when the number is yours. **Started** is the UTC time the
+transmission BEGAN, which is not the time in the filename: that one is
+stamped when the file is written, ten minutes of chart and a decode later.
+**Lines** and **Clock** are the decode's verdict — locked of total, the
+seam count, and the timebase in ppm — split into two rows because as one
+row they did not fit and were silently cut off. And the **Label** box is
+live: type a station name at any point and the chart that saves next takes
+it, so a run in AUTO that receives for hours no longer names every chart
+after the first with the first one's label.
+
 PHASE and SYNC go live while the preview is drawing — and since session 27
 they work on the SAVED chart too: type a column or a ppm, press Apply, and
 the picture is re-rendered from the raw stream kept behind it and written

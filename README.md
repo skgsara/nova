@@ -214,6 +214,23 @@ for byte, which is only possible because the decode's own settings were
 kept beside the stream. A correction that cannot be made says why rather
 than being a grey control with no explanation.
 
+**The status panel says what Nova measured, not what it was asked**
+(session 37, from the first time the M4.5 window was run by hand). IOC and
+Rate fill in as the transmission gives them up — IOC at the start tone,
+the rate when the phasing interval locks one — and settle to the decode's
+own values when the chart is saved, with `(forced)` marking a number the
+operator supplied. Until then those two rows echoed the dropdowns, so a
+run in AUTO reported "Auto" and `--` for the whole life of a chart whose
+PNG header, written beside it, carried both numbers. `Started` carries the
+UTC time the transmission BEGAN, which is a different quantity from the
+time in the filename: that is stamped when the file is written, a chart
+and a decode later, and for a scheduled broadcast the first is the one
+that names it. The same stamp goes into the PNG as `Nova:Started`. And the
+Label box is live — the label a chart is saved with is the one showing
+when that chart finished, not the one showing when Start was pressed,
+which for a run in AUTO meant every chart after the first inherited the
+first one's name.
+
 Session 28 gave SYNC four steppers — −10 −1 +1 +10 — because nulling a
 slant is a judgement made by eye ("a bit more"), not a number anyone can
 read off a chart. From a blank box a nudge starts at the clock the

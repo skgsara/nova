@@ -10,6 +10,49 @@ lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased — 0.4.5
 
+### 2026-08-20 — the status panel, wired
+
+Found by the first by-hand run of the M4.5 window (Sara, session 37). No
+milestone moved, so the version does not: this is five defects in a panel
+that had been reporting the question instead of the answer.
+
+- **The Label is live.** It was read once, when Start was pressed. A run
+  in AUTO presses Start once and receives for hours, so every chart after
+  the first was named with the first one's label and no amount of typing
+  could change it. The box now reaches the engine on every keystroke and
+  the engine uses it when it SAVES, so the label that names a chart is
+  the one showing when that chart finished. A device change re-sends it,
+  because a new engine has no label.
+- **IOC and Rate report what Nova measured.** IOC echoed the dropdown —
+  "Auto" — and Rate read `--` for the whole of a decoded chart while the
+  PNG header beside it carried both numbers. They now fill in as the
+  transmission measures them (IOC at the start tone, rate when the
+  phasing interval locks one) and settle to the decode's own values, with
+  `(forced)` marking the case where the number is the operator's. Both go
+  back to `--` when a new transmission begins, so the panel never
+  describes two charts at once.
+- **`Started` exists.** The field was built in session 17 and never
+  assigned: six boxes, five filled. It now carries the UTC time the
+  transmission BEGAN — which is not the time in the filename, stamped
+  when the file is written, a whole chart and a decode later. The same
+  stamp goes into the PNG as `Nova:Started`.
+- **The panel no longer clips its own readout.** At 200 px the value
+  column was 126 px and could not draw `DRAWING — PREVIEW` (132 px) or
+  the old one-line quality row (159 px). The sidebar is 220 px, the
+  quality row is split into `Lines` and `Clock`, and the status line at
+  the foot of the window takes the width it needs instead of a fixed
+  240 px. The picture gives up 20 px.
+- **The window's minimum height rises from 420 to 540.** Below about 530
+  the correction block and the receiving indicator were laid out past the
+  bottom of the sidebar and drawn over the tuning strip and the meter.
+  This had been reachable by dragging since session 29.
+- **Three new rules in the GUI screamers**, all of the declared-versus-
+  measured shape: every status value fits its box (the requirement is
+  FLTK measuring the widest string each field can produce, against a
+  declared column width), every sidebar widget is inside the sidebar at
+  every size **including the shell's own declared minimum**, and the
+  panel describes one transmission at a time. 15 mutations, 15 killed.
+
 ### 2026-08-20 — M4.5: the tuning strip
 
 - **The spectrum/waterfall display, cut from M4 on 2026-08-13 and parked

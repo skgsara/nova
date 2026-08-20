@@ -7,6 +7,154 @@ anything as our develop history").
 
 ---
 
+## 2026-08-20 — Session 37: the panel was answering a different question,
+## and only a person could tell
+
+Agent: Claude (Opus 5). Code changed: `gui/nova-gui.cpp` (the five status
+rows, the live Label callback, the panel's width, `kMinH`, the `fit` block
+in `--metrics`, `--type label`, the `panel` mark line, an elastic status
+line), `live/engine.{hpp,cpp}` (`EngineMessage::started_utc`,
+`in_transmission_state`, the three published measurements,
+`decode_qa`'s fifth argument), `live/session.hpp` (`lpm()`, `forced()`).
+Files changed: `tests/gui_layout.cmake` (rules 5 and 6),
+`tests/gui_shell.cmake` (the six panel rules),
+`tests/gui_metrics.cmake` (`panel_get`, `fit_line`),
+`tests/test_live_engine.cpp` (`test_started_stamp`, the `Nova:Started`
+provenance check), `README.md`, `START-HERE.md`, `ROADMAP.md`,
+`CHANGELOG.md`, `docs/05-m4-shell-design.md`. Suite: **40, unchanged** —
+no new target, seven new rules inside three existing ones. 40/40 green,
+zero warnings, 286 s. Version stays **0.4.5**: no milestone moved.
+
+**Sara ran the window.** That is the whole reason this session exists. She
+fed the M4.5 shell a signal through BlackHole, looked at what it told her,
+and asked five questions. Four of them were defects and the fifth was a
+design hole. **Every one of them shipped a green suite**, and it is now
+five of five on-air-or-by-hand sessions finding something no check could
+see.
+
+**Her questions, and what the code actually said.**
+
+1. *Does a force-started chart save after the stop tone?* **Yes**, and it
+   was already pinned twice — `live_session` T5 walks a real forced start
+   on VMW through STOP TONE, DECODING, SAVED with the operator's IOC
+   reaching the batch, and `live_engine`'s equivalence runs compare the
+   written PNG pixel-for-pixel at five block sizes on three forced
+   fixtures. Nothing to fix. What is still true is that all of it is from
+   a FILE: a forced start ended by an off-air stop tone through a sound
+   card has never happened.
+2. *Does the saved picture carry the current Label or the one from
+   Start?* **The one from Start**, and this is the defect with the worst
+   shape. `set_label` was sent from exactly two places — the Start button
+   and Force Start — and the box had no callback of its own. A run in
+   AUTO presses Start ONCE and then receives for hours, so the label
+   named the first chart of a session and every chart after it. The
+   engine had supported a live label all along; `save_image`'s own
+   comment says so. Nothing delivered the typing to it.
+3. *What does "Started" mean?* **Nothing. It was never assigned.** The
+   string appeared three times in the whole tree, all three in the field
+   name arrays. Six boxes were built and five were filled, from session 17
+   to session 36. What it was MEANT to be is legible in docs/05 §8.1's own
+   table — "date and time of reception, yes, system clock" — and it
+   matters because the only timestamp Nova recorded anywhere was
+   `utc_now()` called at SAVE time. On a ten-minute chart the filename is
+   ten minutes and a decode away from when the broadcast began.
+4. *Does AUTO display the detected IOC and Rate?* **No — it echoed the
+   dropdowns.** IOC printed `ioc->text()`, which on Auto is the word
+   "Auto"; Rate printed `--` unless the dropdown was explicit, so a
+   finished, saved chart reported no rate at all. Both numbers were in
+   hand the whole time: `EngineMessage::ioc` on every state change (the
+   shell already used it to size the ruler) and `DecodeResult::ioc/lpm`
+   at the end, written into the PNG header as `Nova:IOC` and `Nova:LPM`.
+   The panel was displaying the question beside a file that knew the
+   answer.
+5. *State and Quality are cut off.* **Measured, not estimated, and my
+   first estimate was wrong.** The value column is 126 px; I guessed
+   "DRAWING — PREVIEW" at about 115 and it is **132.0**. The one-line
+   quality row is **159.4**. Both clip. The measurement was three minutes
+   of `fl_width` in a throwaway FLTK program and it changed the design —
+   at 115 the caption column had enough slack to absorb it and nothing
+   else needed to move.
+
+**What was built.** The Label reaches the engine on every keystroke and
+the engine uses it when it SAVES, so a chart is named by what the box said
+when that chart finished; a device change re-sends it, because a new
+engine has no label. `started_utc` is stamped once, at the transition into
+a transmission, rides every state message and lands in the PNG as
+`Nova:Started`. IOC, rate and forcedness are published from thread 2 the
+same way `receiving_samples_` already was, and cleared when a new
+transmission begins. The sidebar is 220 px, quality is two rows, and the
+status line at the foot of the window takes the width it needs.
+
+**One question I chose not to answer by changing code, and it should be
+Sara's call.** `Mode` still reads FORCED whenever both dropdowns are
+explicit, which is about whether Force Start is ARMED — not about whether
+the transmission being received was forced. Now that the second fact is
+published, the panel can show `Mode FORCED` next to `IOC 576` with no
+`(forced)` marker, because a tone auto-started while the dropdowns
+happened to be set. I read that as two honest answers to two questions
+and left it; it is one line to change if she reads it as a contradiction.
+
+**The width rule, and why it is not scenery.** The obvious check —
+"the box is at least as wide as the text" — would have been measured with
+`fl_width` on both sides and passed by construction, which is session 30's
+trap exactly. What is written instead is DECLARED against MEASURED, the
+same shape as `version_flag`: `kPanelW` is a constant a human typed, and
+`--metrics` reports FLTK's own measurement of the widest string each field
+can produce, built by calling the real formatters with worst-case
+arguments and, for the State row, by looping over the session enum itself.
+Lengthening a state name in `live/session.cpp` fails a GUI layout test,
+which is the coupling that ought to exist. **What it cannot do is bound a
+value that has no bound** — the line counts are the session's own picture
+cap at 240 lpm and the seam count is a judgement — so it is a realistic
+worst case and is labelled as one in the source. What it buys is that
+nobody can widen a FORMAT without hearing about it, which is the failure
+that actually happened.
+
+**The mutation pass found a survivor, and the survivor was the
+instrument.** 15 mutations. 14 died first pass, attributed by reading the
+FAIL line. The one that lived was **`kMinH` back to 420** — the rule that
+every sidebar widget sits inside the sidebar, run against a hardcoded list
+of window sizes starting at 880x540. Session 29's third shape, exactly: *a
+real rule exercised only where it cannot fail.* The list could only ever
+check sizes somebody had thought of, and the defect was a minimum nobody
+had checked. Fixed by making the shell REPORT its own minimum (`min_w`,
+`min_h` in `--metrics`) and having the test build a window at whatever
+that says; re-run, killed, attributed. A second smaller version of the
+same thing: `M6` (IOC echoing the dropdown) died on the "an idle shell
+claims no geometry" rule rather than on the "drawing reports the
+measurement" rule, so a narrowed mutation — report 288 while measured —
+was added to attribute the second rule properly.
+
+**And a gap the mutation LIST found before any mutation ran.** Writing
+"what would kill this?" against the `Nova:Started` chunk showed that
+nothing checked it: `decode_qa` was unit-tested with the new argument, and
+`save_image` passing `started_utc_` to it was not. The test now reads the
+PNG's bytes directly — tEXt is stored uncompressed as `keyword\0text` —
+rather than asking the formatter again, and `M5` (pass an empty string
+instead) dies on it. That is session 31's one prospectively-useful habit
+working a second time.
+
+**The instrument that mattered most was not a test.** Four of the five
+findings were invisible to 40 green suites and visible in about ten
+seconds to somebody looking at the window. The status panel turns out to
+be the surface where "the code is correct" and "the operator is told the
+truth" come apart most quietly: every value in it was produced by working
+code doing what it was written to do.
+
+**Next step: unchanged, and now more clearly the gate — the by-hand run
+through a real RECEIVER.** Sara's plan is an MLite-880 in the park with an
+audio cable to the laptop. Three things in one sitting: two transmissions
+with an edit open when the second arrives (does the RECEIVING indicator
+beat losing your picture; does handing the pane over at a click read as
+control or as a lost page), session 30's relayout of the correction block,
+and M4.5's tuning strip looked at while actually tuning across a signal —
+the one surface whose whole job is to be looked at and which no headless
+check can judge. After that, unchanged from session 35: a remote, so the
+CI can stop being theoretical; then `tools/record-fixture-regression.sh`,
+commit the fresh record, and tag, in that order, because the release
+workflow checks it. The record in the tree still describes `bc1c595` and
+is stale.
+
 ## 2026-08-20 — Session 36: M4.5, and a tuning aid whose whole job is to be
 ## looked at has not been looked at
 

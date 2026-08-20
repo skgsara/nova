@@ -417,8 +417,9 @@ Pending:
     Finding 6: operator stop is the first of three ways a transmission
     ends, and the SR-97 holds the image at a SAVE? prompt].
   - **No sidebar waterfall reservation** — wrong shape for a 200 px
-    column, and that space is already §8.2's receiving indicator. M4.5's
-    waterfall extends the full-width meter strip.
+    column (220 since session 37, and no better a shape for it), and that
+    space is already §8.2's receiving indicator. M4.5's waterfall extends
+    the full-width meter strip.
   - **No autosave toggle**: every completed transmission is saved, which
     is the retention decision already taken (answer 7).
   - **Settings sets the folder; format stays greyscale PNG only.** BMP
@@ -905,7 +906,12 @@ one feature with several parts, plus one verification no test can do.
    remains open is only WHICH hop steps (SDR, network, WebAudio), and
    that is no longer Nova's question. **(c) is built** (session 26): the
    Quality field now reads e.g. "2106/2114, −86 ppm, 1 seams" — zero is
-   said too, since zero is what clears the capture chain. **(b) took a
+   said too, since zero is what clears the capture chain. [Session 37:
+   that one row is now two, `Lines` and `Clock`, because as one row it was
+   159 px of text in a 126 px column and the seam count was the part
+   falling off the end. The seams stayed with the line counts rather than
+   with the timebase: both describe how the CAPTURE went, and the ppm
+   describes the signal.] **(b) took a
    wrong turn and came back** (session 26): "hold the gap" (paint the
    hole mid-grey) was built, and Sara rejected it on sight — the nicks
    landed in the black porch, and the dead-zone raggedness they were
@@ -1254,13 +1260,28 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    Pass E's RESOLVES IF names that as acceptable, and it is the strongest
    available while the recordings are not published. What it does not do
    is prove Nova builds on Linux; that stays unknown until a run happens.
-13. **Session 31's two by-hand GUI runs are still outstanding** — four of
-    four on-air sessions have found a defect a green suite could not see.
-    Session 36 added a third surface to look at in the same sitting:
-    M4.5's tuning strip, which has never been on a screen in front of a
-    person either. It is the one surface whose whole job is to be LOOKED
-    at, so a headless check of its geometry is further from sufficient
-    here than anywhere else in the window.
+13. **Session 31's by-hand GUI runs, PARTLY done — and it is now five of
+    five.** Session 37: Sara ran the M4.5 window against a fed signal and
+    found five defects in the status panel in one sitting, none of which
+    a green suite could see (the Label frozen at Start, IOC and Rate
+    echoing the dropdowns, `Started` never written to, and two rows
+    clipped by a column too narrow to hold them). All five are fixed and
+    each is now pinned; the by-hand run remains the only instrument that
+    has ever found them.
+
+    **Still outstanding, and still the gate:** the run through a real
+    RECEIVER rather than a fed file. Three things in one sitting —
+    session 31's two transmissions with an edit open when the second
+    arrives (does the RECEIVING indicator beat losing your picture; does
+    handing the pane over at a click read as control or as a lost page),
+    session 30's relayout of the correction block, and M4.5's tuning
+    strip looked at while actually tuning across a signal. The strip is
+    the one surface in the window whose entire purpose is to be LOOKED
+    at — an unreadable colour ramp, a trace too small to see, a marker
+    line that vanishes under a strong signal, a 40-row waterfall too
+    short to show a fade — and none of those is a defect any headless
+    check can have. Sara's plan as of 2026-08-20: an MLite-880 in the
+    park, audio cable to the laptop.
 14. **No tag, because no release decision.** Everything a tag needs is in
     place; making one is Sara's act, not an agent's.
 

@@ -947,6 +947,52 @@ frequency, and the strip is not a frequency readout — it is a mistuning
 readout, which is the thing an audio-only decoder actually has evidence
 for.]
 
+**Session 37 — what those "yes" rows were actually doing, found by looking
+at the window.** The table above says Nova CAN source receive mode, IOC,
+line rate, operating state, date and time of reception, and signal
+quality. Five of the six were built as boxes; four were reporting
+something other than what the table promised, and the fifth was not
+reporting at all. From Sara's first by-hand run of the M4.5 window:
+
+- **IOC and line rate showed the DROPDOWNS.** On AUTO — which is the
+  normal way to run — IOC read "Auto" and Rate read `--` for the entire
+  life of a decoded chart, while the PNG written beside it carried
+  `Nova:IOC 576` and `Nova:LPM 120`. The table's word is *measured, or
+  operator-set*, and the panel was showing only the second half. They now
+  show the measurement, marked `(forced)` when it is the operator's own.
+  `Mode` still answers a different question — whether Force Start is
+  armed, which is about the dropdowns — and the two are allowed to
+  disagree: one says what you have selected, the other says what this
+  chart actually used.
+- **"Date and time of reception" was a box called `Started` that nothing
+  ever wrote to.** It reads `--` from session 17 to session 36. What it
+  now carries is the time the TRANSMISSION began, which is a different
+  quantity from the time in the filename — that is stamped when the file
+  is written, after ten minutes of chart and nine stages of decode. For a
+  scheduled broadcast the first is the one that names it. The same stamp
+  is written into the PNG as `Nova:Started`, so the distinction survives
+  the file leaving Nova.
+- **The operator label was read once, at Start.** §8.5 item 5 already said
+  Nova never renames and that "a label typed after the automatic save
+  reaches the text chunks on the next Apply" — true of the engine, and
+  undeliverable, because the box had no callback. A run in AUTO presses
+  Start once and receives for hours, so in practice the label named the
+  first chart of a session and every chart after it. It is now live: the
+  engine is told on every keystroke and uses the label when it SAVES, so
+  a chart is named by what the box said when that chart finished.
+- **The panel clipped two of its own rows.** `DRAWING — PREVIEW` needs
+  132 px and the one-line quality row needed 159; the value column was
+  126. This is a layout fact that four sessions of geometry checks could
+  not see, because every check compared geometry with geometry. The
+  sidebar is 220 px now, quality is two rows (`Lines`, `Clock`), and
+  `gui_layout` compares a DECLARED column width with FLTK's own
+  measurement of the widest string each field can produce.
+
+The lesson worth carrying past this section: **a status panel is the one
+surface where "the code is correct" and "the operator is told the truth"
+come apart silently.** Every one of these five shipped a green suite. What
+found them was somebody reading the window.
+
 ### 8.2 Which picture owns the pane while an edit is in progress
 
 **DECIDED 2026-08-13 (Sara, session 17): the edit holds the pane.**
@@ -1137,7 +1183,8 @@ decode, save. It declares that the transmission ended here, not that its
 picture is worthless.
 
 **5. No waterfall region is reserved in the sidebar.** The sidebar is
-200 px and a waterfall wants width for a frequency axis; its home in M4.5
+200 px — 220 since session 37, which changes nothing here — and a
+waterfall wants width for a frequency axis; its home in M4.5
 is the full-width strip where the level meter already sits. Reserving
 space early buys nothing, because §8's layout is computed from constants
 in one `layout(W, H)` function — adding a region later is an edit, not a
