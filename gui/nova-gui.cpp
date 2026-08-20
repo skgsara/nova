@@ -1343,19 +1343,31 @@ struct Shell {
     }
 
     void create() {
-        // --- menu bar [§8.3 items 7-8] --------------------------------------
-        // No receiver in the corpus has one, and that is not an objection:
-        // the survey constrains the picture-correction surface, not whether
-        // a desktop application has desktop chrome. Buttons were rejected
-        // because the control row is already the window's width constraint.
+        create_menu_bar();
+        create_control_row();
+        create_image_pane();
+        create_status_panel();
+        create_correction_boxes();
+        create_correction_controls();
+        create_meter_and_status();
+    }
+
+    // --- menu bar [§8.3 items 7-8] --------------------------------------
+    // No receiver in the corpus has one, and that is not an objection:
+    // the survey constrains the picture-correction surface, not whether
+    // a desktop application has desktop chrome. Buttons were rejected
+    // because the control row is already the window's width constraint.
+    void create_menu_bar() {
         menu = new Fl_Menu_Bar(0, 0, 0, 0);
         menu->textsize(kFontSize);
         menu->add("File/Quit", FL_COMMAND + 'q', cb_quit, this);
         menu->add("Settings/Image folder...", 0, cb_folder, this);
         menu->add("Help/About Nova", 0, cb_about, this);
         note("menu_bar", menu);
+    }
 
-        // --- control row [§8 row 1] -----------------------------------------
+    // --- control row [§8 row 1] -----------------------------------------
+    void create_control_row() {
         cap_device = caption("Device");
         device = new Fl_Choice(0, 0, 0, 0);
         device->textsize(kFontSize);
@@ -1418,8 +1430,10 @@ struct Shell {
         force->callback(cb_force, this);
         force->deactivate();
         note("force_start_button", force);
+    }
 
-        // --- image pane, its scroll and its ruler -----------------------------
+    // --- image pane, its scroll and its ruler -----------------------------
+    void create_image_pane() {
         ruler = new Ruler(0, 0, 0, 0);
         ruler->shell = this;
         ruler->deactivate();  // blank until the image width is known
@@ -1434,11 +1448,13 @@ struct Shell {
         view->callback(cb_image_click, this);
         note("image_view", view);
         pane->end();
+    }
 
-        // --- status panel [§8 right, fields per §8.1] -------------------------
-        // §8.1 is why there is no frequency, channel or call sign here: every
-        // receiver in the corpus contains its own radio, and Nova is a
-        // decoder on the end of a cable from someone else's.
+    // --- status panel [§8 right, fields per §8.1] -------------------------
+    // §8.1 is why there is no frequency, channel or call sign here: every
+    // receiver in the corpus contains its own radio, and Nova is a
+    // decoder on the end of a cable from someone else's.
+    void create_status_panel() {
         panel = new Fl_Box(0, 0, 0, 0);
         panel->box(FL_UP_BOX);
         note("status_panel", panel);
@@ -1470,22 +1486,24 @@ struct Shell {
 
         rule = new Fl_Box(0, 0, 0, 0);
         rule->box(FL_THIN_DOWN_FRAME);
+    }
 
-        // The two manual corrections, and the only two on any receiver in
-        // the corpus that has controls [docs/04, confirmed twice]. They are
-        // asymmetric behind the glass — PHASE seeds the batch anchor search,
-        // SYNC is only a fallback where the batch fit has no baseline
-        // [docs/05 §7.1] — but that asymmetry is not in this shell, which
-        // has no batch decode to hand them to. They stay deactivated for the
-        // same reason: an image with no raw behind it shows them visibly
-        // disabled rather than silently inert [§3].
-        // Both captions are named regions from session 29, because the
-        // layout makes a CLAIM through them. The claim changed in session 30
-        // — the two controls are now matching caption/box/arm rows with
-        // SYNC's steppers adjacent beneath, rather than SYNC's caption
-        // holding a row alone so the steppers could flank the box — but the
-        // reason for measuring it did not: a claim nobody can measure is a
-        // comment.
+    // The two manual corrections, and the only two on any receiver in
+    // the corpus that has controls [docs/04, confirmed twice]. They are
+    // asymmetric behind the glass — PHASE seeds the batch anchor search,
+    // SYNC is only a fallback where the batch fit has no baseline
+    // [docs/05 §7.1] — but that asymmetry is not in this shell, which
+    // has no batch decode to hand them to. They stay deactivated for the
+    // same reason: an image with no raw behind it shows them visibly
+    // disabled rather than silently inert [§3].
+    // Both captions are named regions from session 29, because the
+    // layout makes a CLAIM through them. The claim changed in session 30
+    // — the two controls are now matching caption/box/arm rows with
+    // SYNC's steppers adjacent beneath, rather than SYNC's caption
+    // holding a row alone so the steppers could flank the box — but the
+    // reason for measuring it did not: a claim nobody can measure is a
+    // comment.
+    void create_correction_boxes() {
         cap_phase = caption("PHASE");
         note("cap_phase", cap_phase);
         phase_input = new Fl_Int_Input(0, 0, 0, 0);
@@ -1502,7 +1520,9 @@ struct Shell {
         sync_input->callback(cb_edit, this);
         sync_input->deactivate();
         note("sync_input", sync_input);
+    }
 
+    void create_correction_controls() {
         // The two arming buttons [see Arm]. FL_TOGGLE_BUTTON because armed
         // is a state the operator can see and leave, not an action: the
         // pushed box IS the third witness that the gesture is live, beside
@@ -1572,8 +1592,10 @@ struct Shell {
         recv = new RecvIndicator(0, 0, 0, 0);
         recv->callback(cb_recv, this);
         note("recv_indicator", recv);
+    }
 
-        // --- level meter and status line -------------------------------------
+    // --- level meter and status line -------------------------------------
+    void create_meter_and_status() {
         meter = new LevelMeter(0, 0, 0, 0);
         note("level_meter", meter);
 
@@ -1636,6 +1658,20 @@ struct Shell {
         ruler->resize(kPad + kFrame, main_y, pane_interior_w(), kRulerH);
         layout_view();
 
+        layout_sidebar(W, main_y, main_h);
+
+        meter->resize(0, main_y + main_h, W, kMeterH);
+        const int sy = main_y + main_h + kMeterH;
+        status_bg->resize(0, sy, W, kStatusH);
+        status_state->resize(kPad, sy, 240, kStatusH);
+        status_lines->resize(kPad + 250, sy, 120, kStatusH);
+        progress->resize(W - kPad - 160, sy + 3, 160, kStatusH - 6);
+    }
+
+    // The sidebar, top to bottom in the panel's fixed width: the status
+    // fields, the correction block and, in the lower area §8.3 item 5 kept
+    // clear for it, the receiving indicator.
+    void layout_sidebar(int W, int main_y, int main_h) {
         const int px = W - kPanelW;
         const int fw = kPanelW - 2 * kPad;
         panel->resize(px, main_y, kPanelW, main_h);
@@ -1712,13 +1748,6 @@ struct Shell {
         // target that grows to fill a tall window would be a click target
         // mostly made of empty space.
         recv->resize(px + kPad, py, fw, 52);
-
-        meter->resize(0, main_y + main_h, W, kMeterH);
-        const int sy = main_y + main_h + kMeterH;
-        status_bg->resize(0, sy, W, kStatusH);
-        status_state->resize(kPad, sy, 240, kStatusH);
-        status_lines->resize(kPad + 250, sy, 120, kStatusH);
-        progress->resize(W - kPad - 160, sy + 3, 160, kStatusH - 6);
     }
 
     // The scrolled child's size is the image's size on screen, which is what
@@ -1854,11 +1883,28 @@ struct Shell {
         const bool overrides_live = live_surface();
         const bool can_rerender = retained.can_correct() && !busy;
 
-        // §8.5 item 4's other end: the edit ends when the pane stops showing
-        // the chart it was correcting, and the controls go back to
-        // measured-or-blank, because there is no memory between
-        // transmissions [§8.5 item 6].
         const bool no_surface = !retained.can_correct() && !overrides_live;
+
+        end_edit_on_surface_loss(no_surface);
+        hold_pane_for_edit(retained);
+        update_recv_indicator();
+
+        // One place decides all three, and it is a pure function so the
+        // truth table is checkable without a window [see correction_for].
+        const CorrectionUi cu = correction_for(
+            overrides_live, can_rerender, edit_dirty,
+            applied.phase_set || applied.sync_set);
+        update_correction_widgets(cu);
+        update_reason_line(busy, overrides_live, can_rerender, retained);
+        update_progress_and_fields(busy);
+        if (win) win->redraw();
+    }
+
+    // §8.5 item 4's other end: the edit ends when the pane stops showing
+    // the chart it was correcting, and the controls go back to
+    // measured-or-blank, because there is no memory between
+    // transmissions [§8.5 item 6].
+    void end_edit_on_surface_loss(bool no_surface) {
         if (no_surface &&
             (edit_dirty || applied.phase_set || applied.sync_set)) {
             edit_dirty = false;
@@ -1887,36 +1933,40 @@ struct Shell {
             arm = Arm::kNone;
             slant_note.clear();
         }
+    }
 
-        // §8.2 / ROADMAP M4 item 6: the edit holds the pane. The predicate
-        // lives on this thread because "an edit is in progress" is a fact
-        // about typed boxes and clicks [§8.5 item 4] that only thread 4 can
-        // see; the engine is told, and does the buffering.
-        //
-        // `retained.can_correct()` is part of the predicate rather than
-        // decoration: a dirty edit with no correctable surface behind it is
-        // not an edit anyone can finish, and holding the pane for it would
-        // freeze the live view with nothing to show for it.
-        // **Nothing promotes automatically** [Sara, session 30]. §8.2 said
-        // the buffered picture comes forward when the operator "switches or
-        // finishes", but §8.5 item 4 — written ten sessions later — made an
-        // edit END at Apply, and the two compose into something neither
-        // decided: the correction you just asked for is replaced by the
-        // incoming transmission at the moment it finishes rendering, so you
-        // never see it. Sara's call is that the pane changes hands ONLY at
-        // the indicator, which is also the plainest reading of §8.2's own
-        // purpose ("nothing interrupts a human mid-correction"). So this
-        // sets the hold and does not promote; `cb_recv` is the only caller
-        // of `promote_background` in the program.
+    // §8.2 / ROADMAP M4 item 6: the edit holds the pane. The predicate
+    // lives on this thread because "an edit is in progress" is a fact
+    // about typed boxes and clicks [§8.5 item 4] that only thread 4 can
+    // see; the engine is told, and does the buffering.
+    //
+    // `retained.can_correct()` is part of the predicate rather than
+    // decoration: a dirty edit with no correctable surface behind it is
+    // not an edit anyone can finish, and holding the pane for it would
+    // freeze the live view with nothing to show for it.
+    // **Nothing promotes automatically** [Sara, session 30]. §8.2 said
+    // the buffered picture comes forward when the operator "switches or
+    // finishes", but §8.5 item 4 — written ten sessions later — made an
+    // edit END at Apply, and the two compose into something neither
+    // decided: the correction you just asked for is replaced by the
+    // incoming transmission at the moment it finishes rendering, so you
+    // never see it. Sara's call is that the pane changes hands ONLY at
+    // the indicator, which is also the plainest reading of §8.2's own
+    // purpose ("nothing interrupts a human mid-correction"). So this
+    // sets the hold and does not promote; `cb_recv` is the only caller
+    // of `promote_background` in the program.
+    void hold_pane_for_edit(const nova::RetainedVideo& retained) {
         const bool hold_pane = edit_dirty && retained.can_correct();
         if (engine) engine->set_pane_held(hold_pane);
+    }
 
-        // The indicator reports the ENGINE's buffer, not the shell's
-        // predicate. They differ on purpose and the difference is the whole
-        // of Sara's decision: once a transmission is buffered the engine
-        // goes on buffering after `hold_pane` drops, until the click below
-        // promotes it. An indicator driven from `hold_pane` would go dark
-        // at Apply while the buffer it names was still there.
+    // The indicator reports the ENGINE's buffer, not the shell's
+    // predicate. They differ on purpose and the difference is the whole
+    // of Sara's decision: once a transmission is buffered the engine
+    // goes on buffering after `hold_pane` drops, until the click below
+    // promotes it. An indicator driven from `hold_pane` would go dark
+    // at Apply while the buffer it names was still there.
+    void update_recv_indicator() {
         if (recv) {
             const nova::LiveEngine::Background bg =
                 engine ? engine->background() : nova::LiveEngine::Background{};
@@ -1925,12 +1975,9 @@ struct Shell {
             recv->set(bg.active, state_text(state), bg.rows, bg.complete,
                       thumb);
         }
+    }
 
-        // One place decides all three, and it is a pure function so the
-        // truth table is checkable without a window [see correction_for].
-        const CorrectionUi cu = correction_for(
-            overrides_live, can_rerender, edit_dirty,
-            applied.phase_set || applied.sync_set);
+    void update_correction_widgets(const CorrectionUi& cu) {
         if (cu.inputs_active) {
             phase_input->activate();
             sync_input->activate();
@@ -1977,7 +2024,10 @@ struct Shell {
         sync_arm->value(arm == Arm::kSync ? 1 : 0);
         if (cu.apply_active) apply->activate(); else apply->deactivate();
         if (cu.auto_active) autob->activate(); else autob->deactivate();
+    }
 
+    void update_reason_line(bool busy, bool overrides_live, bool can_rerender,
+                            const nova::RetainedVideo& retained) {
         // §3: a correction that cannot be made says why. So does one that
         // can — what Apply will DO is the thing an operator most needs
         // told, because it overwrites a file with no prompt [§8.5 items
@@ -2034,7 +2084,9 @@ struct Shell {
         else
             correct_reason = retained.unavailable_reason;
         correct_why->copy_label(correct_reason.c_str());
+    }
 
+    void update_progress_and_fields(bool busy) {
         // The progress bar is populated ONLY during a decode, from the nine
         // decode stages [docs/05 §8, §4] — and a re-render is a decode. The
         // session stays in SAVED throughout one (it is the operator's
@@ -2050,7 +2102,6 @@ struct Shell {
         field_val[2]->label(rate_explicit() ? rate->text() : "--");
         field_val[0]->label(ioc_explicit() && rate_explicit() ? "FORCED"
                                                              : "AUTO");
-        if (win) win->redraw();
     }
 
     // --- the live half: bring it up, drive it, take it down -----------------
@@ -2766,12 +2817,17 @@ struct Shell {
             r.column = col;
             return r;
         }
+        return measure_sync_click(col, row, v);
+    }
 
-        // Second click. The one measurement that cannot be made is two
-        // points on the SAME row: there is no baseline at all, and the
-        // slant is 0/0. hamfax divides by zero here. Nova keeps the anchor
-        // and stays armed, because the operator's gesture is not finished —
-        // they aimed badly, and asking again is the whole of the fix.
+    // Second click. The one measurement that cannot be made is two
+    // points on the SAME row: there is no baseline at all, and the
+    // slant is 0/0. hamfax divides by zero here. Nova keeps the anchor
+    // and stays armed, because the operator's gesture is not finished —
+    // they aimed badly, and asking again is the whole of the fix.
+    ClickResult measure_sync_click(int col, int row,
+                                   const nova::RulerView& v) {
+        ClickResult r;
         const int drow = row - pending_row;
         if (drow == 0) {
             apply_state();
@@ -2935,9 +2991,7 @@ void print_mark(const char* name, const Shell& s) {
                 s.saves_seen, state_token(s.state));
 }
 
-int print_metrics(const Shell& s) {
-    // Real FLTK geometry, so docs/05 §8 is checked against pixels rather
-    // than against the HTML mockup that predicted them.
+void print_metrics_regions(const Shell& s) {
     const unsigned bg = Fl::get_color(FL_BACKGROUND_COLOR);
     std::printf("# nova-gui layout, FLTK %d.%d.%d\n", FL_MAJOR_VERSION,
                 FL_MINOR_VERSION, FL_PATCH_VERSION);
@@ -2948,11 +3002,9 @@ int print_metrics(const Shell& s) {
     for (const auto& n : s.named)
         std::printf("  %-20s %5d %5d %5d %5d\n", n.first, n.second->x(),
                     n.second->y(), n.second->w(), n.second->h());
+}
 
-    // The shell's state, so the §8.3/§8.4 behaviour rules are checkable
-    // without a window. Values are quoted, and no line here carries four
-    // integers, so the region table above stays unambiguous to parse.
-    const nova::RulerView v = s.view_state();
+void print_metrics_state(const Shell& s) {
     std::printf("# shell state [docs/05 8.3, 8.4]\n");
     std::printf("  state                \"%s\"\n", state_token(s.state));
     std::printf("  status_text          \"%s\"\n", state_text(s.state));
@@ -2993,6 +3045,9 @@ int print_metrics(const Shell& s) {
                 s.recv && s.recv->complete() ? 1 : 0);
     std::printf("  pane_held            \"%d\"\n",
                 s.engine && s.engine->pane_held() ? 1 : 0);
+}
+
+void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
     // The picture actually ON the pane, which is the number `recv_rows` has
     // to be told apart from. Without it the indicator's line count could
     // only be compared with itself, and "the count names the BUFFERED
@@ -3066,6 +3121,18 @@ int print_metrics(const Shell& s) {
     std::printf("  prefs_writable       \"%d\"\n", s.prefs.writable() ? 1 : 0);
     std::printf("  image_folder         \"%s\"\n",
                 s.image_folder.empty() ? "(unset)" : s.image_folder.c_str());
+}
+
+int print_metrics(const Shell& s) {
+    // Real FLTK geometry, so docs/05 §8 is checked against pixels rather
+    // than against the HTML mockup that predicted them.
+    print_metrics_regions(s);
+    // The shell's state, so the §8.3/§8.4 behaviour rules are checkable
+    // without a window. Values are quoted, and no line here carries four
+    // integers, so the region table above stays unambiguous to parse.
+    const nova::RulerView v = s.view_state();
+    print_metrics_state(s);
+    print_metrics_detail(s, v);
     return 0;
 }
 
@@ -3169,52 +3236,53 @@ int print_sync_step() {
     return 0;
 }
 
-}  // namespace
+// --arm and --click share ONE ordered list, and that is the whole point
+// of it: a gesture is a SEQUENCE — arm, click, click — and two separate
+// lists could only express "all the arming, then all the clicking",
+// which is not any gesture an operator makes. Session 28 learned the
+// general form of this the hard way (a check spanning two processes
+// cannot observe a transition); this is the same lesson applied before
+// the fact rather than after it.
+// Session 31 puts the offline capture into the SAME list, for the same
+// reason and one step further: §8.2's rules are transitions, so what has
+// to be expressible is "feed, edit, feed, mark, apply, mark, click,
+// mark" — an interleaving no set of separate lists can say.
+struct Action {
+    enum Kind {
+        kArm,
+        kClick,
+        kFeed,
+        kStopCapture,
+        kType,
+        kApply,
+        kAuto,
+        kRecvClick,
+        kMark
+    } kind;
+    Arm arm = Arm::kNone;   // kArm
+    int x = 0, y = 0;       // kClick
+    std::string text;       // kFeed path, kType value, kMark name
+    int pct = 0;            // kFeed
+    bool is_sync = false;   // kType
+};
 
-int main(int argc, char** argv) {
+// Everything the flag parser fills in [see parse_args]. The defaults are
+// the plain run: no inspection, no state, no actions, the §8 window size.
+struct ParsedArgs {
     bool devices_only = false;
     bool metrics_only = false;
-    int nudges = 0;
-    int click_rows = 0;
-    // --arm and --click share ONE ordered list, and that is the whole point
-    // of it: a gesture is a SEQUENCE — arm, click, click — and two separate
-    // lists could only express "all the arming, then all the clicking",
-    // which is not any gesture an operator makes. Session 28 learned the
-    // general form of this the hard way (a check spanning two processes
-    // cannot observe a transition); this is the same lesson applied before
-    // the fact rather than after it.
-    // Session 31 puts the offline capture into the SAME list, for the same
-    // reason and one step further: §8.2's rules are transitions, so what has
-    // to be expressible is "feed, edit, feed, mark, apply, mark, click,
-    // mark" — an interleaving no set of separate lists can say.
-    struct Action {
-        enum Kind {
-            kArm,
-            kClick,
-            kFeed,
-            kStopCapture,
-            kType,
-            kApply,
-            kAuto,
-            kRecvClick,
-            kMark
-        } kind;
-        Arm arm = Arm::kNone;   // kArm
-        int x = 0, y = 0;       // kClick
-        std::string text;       // kFeed path, kType value, kMark name
-        int pct = 0;            // kFeed
-        bool is_sync = false;   // kType
-    };
-    std::vector<Action> actions;
-    std::string image_folder_arg;
-    LiveState then_state = LiveState::kIdle;
-    bool then_state_given = false;
     int win_w = kWinW;
     int win_h = kWinH;
     int resize_w = 0;
     int resize_h = 0;
     bool correction_only = false;
     bool sync_step_only = false;
+    int nudges = 0;
+    int click_rows = 0;
+    std::string image_folder_arg;
+    std::vector<Action> actions;
+    LiveState then_state = LiveState::kIdle;
+    bool then_state_given = false;
     int follow_batches = 0;
     int follow_rows = 0;
     LiveState state = LiveState::kIdle;
@@ -3222,12 +3290,81 @@ int main(int argc, char** argv) {
     int zoom_index = 0;
     int ioc_index = 0;
     int rate_index = 0;
+};
 
+// The flags that decide what the run IS — an inspection, a window at a
+// size — and how the shell behind it is set up. Returns false when
+// argv[*i] is none of them; a recognized flag with a missing or malformed
+// value sets *bad instead, which is the same usage error it always was.
+bool parse_inspection_flag(int argc, char** argv, int* i, ParsedArgs* a,
+                           bool* bad) {
+    const char* arg = argv[*i];
+    if (!std::strcmp(arg, "--devices")) {
+        a->devices_only = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--metrics")) {
+        a->metrics_only = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--size")) {
+        if (*i + 1 < argc &&
+            std::sscanf(argv[++(*i)], "%dx%d", &a->win_w, &a->win_h) == 2 &&
+            a->win_w >= kMinW && a->win_h >= kMinH)
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--resize")) {
+        if (*i + 1 < argc &&
+            std::sscanf(argv[++(*i)], "%dx%d", &a->resize_w,
+                        &a->resize_h) == 2 &&
+            a->resize_w >= kMinW && a->resize_h >= kMinH)
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--correction")) {
+        a->correction_only = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--sync-step")) {
+        a->sync_step_only = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--nudge")) {
+        if (*i + 1 < argc && std::sscanf(argv[++(*i)], "%d", &a->nudges) == 1)
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--click-rows")) {
+        if (*i + 1 < argc &&
+            std::sscanf(argv[++(*i)], "%d", &a->click_rows) == 1)
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--image-folder")) {
+        if (*i + 1 < argc) {
+            a->image_folder_arg = argv[++(*i)];
+            return true;
+        }
+        *bad = true;
+        return true;
+    }
+    return false;
+}
+
+// The flags that put the shell in a state or a geometry. Same contract as
+// parse_inspection_flag.
+bool parse_preset_flag(int argc, char** argv, int* i, ParsedArgs* a,
+                       bool* bad) {
     const auto index_of = [](const char* text, const char* const* names,
                              int count, int* out) {
-        for (int i = 0; i < count; i++)
-            if (!std::strcmp(text, names[i])) {
-                *out = i;
+        for (int j = 0; j < count; j++)
+            if (!std::strcmp(text, names[j])) {
+                *out = j;
                 return true;
             }
         return false;
@@ -3235,223 +3372,241 @@ int main(int argc, char** argv) {
     static const char* const kZoomArgs[] = {"fit", "25", "50", "100", "200"};
     static const char* const kIocArgs[] = {"auto", "576", "288"};
     static const char* const kRateArgs[] = {"auto", "60", "90", "120"};
+    const char* arg = argv[*i];
+    if (!std::strcmp(arg, "--then-state")) {
+        if (*i + 1 < argc && parse_state(argv[++(*i)], &a->then_state)) {
+            a->then_state_given = true;
+            return true;
+        }
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--follow")) {
+        if (*i + 1 < argc &&
+            std::sscanf(argv[++(*i)], "%dx%d", &a->follow_batches,
+                        &a->follow_rows) == 2 &&
+            a->follow_batches > 0 && a->follow_rows > 0)
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--state")) {
+        if (*i + 1 < argc && parse_state(argv[++(*i)], &a->state)) {
+            a->state_given = true;
+            return true;
+        }
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--zoom")) {
+        if (*i + 1 < argc &&
+            index_of(argv[++(*i)], kZoomArgs, 5, &a->zoom_index))
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--ioc")) {
+        if (*i + 1 < argc &&
+            index_of(argv[++(*i)], kIocArgs, 3, &a->ioc_index))
+            return true;
+        *bad = true;
+        return true;
+    }
+    if (!std::strcmp(arg, "--rate")) {
+        if (*i + 1 < argc &&
+            index_of(argv[++(*i)], kRateArgs, 4, &a->rate_index))
+            return true;
+        *bad = true;
+        return true;
+    }
+    return false;
+}
 
-    bool bad = false;
-    for (int i = 1; i < argc && !bad; i++) {
-        if (!std::strcmp(argv[i], "--devices"))
-            devices_only = true;
-        else if (!std::strcmp(argv[i], "--metrics"))
-            metrics_only = true;
-        else if (!std::strcmp(argv[i], "--size") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%dx%d", &win_w, &win_h) == 2 &&
-                 win_w >= kMinW && win_h >= kMinH)
-            ;
-        else if (!std::strcmp(argv[i], "--resize") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%dx%d", &resize_w, &resize_h) == 2 &&
-                 resize_w >= kMinW && resize_h >= kMinH)
-            ;
-        else if (!std::strcmp(argv[i], "--correction"))
-            correction_only = true;
-        else if (!std::strcmp(argv[i], "--sync-step"))
-            sync_step_only = true;
-        else if (!std::strcmp(argv[i], "--nudge") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%d", &nudges) == 1)
-            ;
-        else if (!std::strcmp(argv[i], "--arm") && i + 1 < argc) {
-            Action a;
-            a.kind = Action::kArm;
-            const char* w = argv[++i];
-            if (!std::strcmp(w, "phase")) a.arm = Arm::kPhase;
-            else if (!std::strcmp(w, "sync")) a.arm = Arm::kSync;
-            else if (!std::strcmp(w, "none")) a.arm = Arm::kNone;
-            else bad = true;
-            // "none" presses whichever button is currently down, which is
-            // what an operator disarming actually does; `set_arm` toggles,
-            // so it is expressed by re-pressing rather than by a third verb.
-            if (!bad) actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--click") && i + 1 < argc) {
-            Action a;
-            a.kind = Action::kClick;
-            // X,Y in image-pane coordinates. Repeatable, because
-            // the gesture under test is a SEQUENCE of clicks.
-            if (std::sscanf(argv[++i], "%d,%d", &a.x, &a.y) == 2)
-                actions.push_back(a);
-            else if (std::sscanf(argv[i], "%d", &a.x) == 1)
-                actions.push_back(a);
-            else
-                bad = true;
-        }
-        else if (!std::strcmp(argv[i], "--click-rows") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%d", &click_rows) == 1)
-            ;
-        else if (!std::strcmp(argv[i], "--image-folder") && i + 1 < argc)
-            image_folder_arg = argv[++i];
-        else if (!std::strcmp(argv[i], "--feed") && i + 1 < argc) {
-            Action a;
-            a.kind = Action::kFeed;
-            // PATH,PCT — the comma last, so a path may contain anything but
-            // a trailing ",<digits>".
-            const std::string spec = argv[++i];
-            const std::size_t comma = spec.find_last_of(',');
-            if (comma == std::string::npos ||
-                std::sscanf(spec.c_str() + comma + 1, "%d", &a.pct) != 1 ||
-                a.pct <= 0 || a.pct > 100) {
-                bad = true;
-            } else {
-                a.text = spec.substr(0, comma);
-                actions.push_back(a);
-            }
-        }
-        else if (!std::strcmp(argv[i], "--stop-capture")) {
-            Action a;
-            a.kind = Action::kStopCapture;
-            actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--type") && i + 2 < argc) {
-            Action a;
-            a.kind = Action::kType;
-            const char* which = argv[++i];
-            if (!std::strcmp(which, "phase")) a.is_sync = false;
-            else if (!std::strcmp(which, "sync")) a.is_sync = true;
-            else bad = true;
-            a.text = argv[++i];
-            if (!bad) actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--apply")) {
-            Action a;
-            a.kind = Action::kApply;
-            actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--auto")) {
-            Action a;
-            a.kind = Action::kAuto;
-            actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--recv-click")) {
-            Action a;
-            a.kind = Action::kRecvClick;
-            actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--mark") && i + 1 < argc) {
-            Action a;
-            a.kind = Action::kMark;
-            a.text = argv[++i];
-            actions.push_back(a);
-        }
-        else if (!std::strcmp(argv[i], "--then-state") && i + 1 < argc &&
-                 parse_state(argv[++i], &then_state))
-            then_state_given = true;
-        else if (!std::strcmp(argv[i], "--follow") && i + 1 < argc &&
-                 std::sscanf(argv[++i], "%dx%d", &follow_batches,
-                             &follow_rows) == 2 &&
-                 follow_batches > 0 && follow_rows > 0)
-            ;
-        else if (!std::strcmp(argv[i], "--state") && i + 1 < argc &&
-                 parse_state(argv[++i], &state))
-            state_given = true;
-        else if (!std::strcmp(argv[i], "--zoom") && i + 1 < argc &&
-                 index_of(argv[++i], kZoomArgs, 5, &zoom_index))
-            ;
-        else if (!std::strcmp(argv[i], "--ioc") && i + 1 < argc &&
-                 index_of(argv[++i], kIocArgs, 3, &ioc_index))
-            ;
-        else if (!std::strcmp(argv[i], "--rate") && i + 1 < argc &&
-                 index_of(argv[++i], kRateArgs, 4, &rate_index))
-            ;
+// The flags that append to the action list. Same contract again; `push` is
+// the one line all nine of these used to write out by hand. The argument
+// after the flag comes from `value`, or the flag is not this group's at
+// all — a missing argument falls through to the same usage error a
+// malformed one gets.
+bool parse_action_flag(int argc, char** argv, int* i, ParsedArgs* a,
+                       bool* bad) {
+    const auto push = [a](Action::Kind kind) -> Action& {
+        Action action;
+        action.kind = kind;
+        a->actions.push_back(action);
+        return a->actions.back();
+    };
+    const auto value = [argc, argv, i](const char* name) -> const char* {
+        if (std::strcmp(argv[*i], name) || *i + 1 >= argc) return nullptr;
+        return argv[++(*i)];
+    };
+    if (const char* w = value("--arm")) {
+        Action& act = push(Action::kArm);
+        if (!std::strcmp(w, "phase")) act.arm = Arm::kPhase;
+        else if (!std::strcmp(w, "sync")) act.arm = Arm::kSync;
+        else if (!std::strcmp(w, "none")) act.arm = Arm::kNone;
+        else *bad = true;
+        // "none" presses whichever button is currently down, which is
+        // what an operator disarming actually does; `set_arm` toggles,
+        // so it is expressed by re-pressing rather than by a third verb.
+        return true;
+    }
+    if (const char* xy = value("--click")) {
+        Action& act = push(Action::kClick);
+        // X,Y in image-pane coordinates. Repeatable, because
+        // the gesture under test is a SEQUENCE of clicks.
+        if (std::sscanf(xy, "%d,%d", &act.x, &act.y) != 2 &&
+            std::sscanf(xy, "%d", &act.x) != 1)
+            *bad = true;
+        return true;
+    }
+    if (const char* f = value("--feed")) {
+        Action& act = push(Action::kFeed);
+        // PATH,PCT — the comma last, so a path may contain anything but
+        // a trailing ",<digits>".
+        const std::string spec = f;
+        const std::size_t comma = spec.find_last_of(',');
+        if (comma == std::string::npos ||
+            std::sscanf(spec.c_str() + comma + 1, "%d", &act.pct) != 1 ||
+            act.pct <= 0 || act.pct > 100)
+            *bad = true;
         else
+            act.text = spec.substr(0, comma);
+        return true;
+    }
+    if (!std::strcmp(argv[*i], "--stop-capture")) {
+        push(Action::kStopCapture);
+        return true;
+    }
+    if (const char* which = value("--type")) {
+        if (*i + 1 >= argc) {   // --type takes TWO: phase|sync, then V
+            *bad = true;
+            return true;
+        }
+        Action& act = push(Action::kType);
+        if (!std::strcmp(which, "phase")) act.is_sync = false;
+        else if (!std::strcmp(which, "sync")) act.is_sync = true;
+        else *bad = true;
+        act.text = argv[++(*i)];
+        return true;
+    }
+    if (!std::strcmp(argv[*i], "--apply")) {
+        push(Action::kApply);
+        return true;
+    }
+    if (!std::strcmp(argv[*i], "--auto")) {
+        push(Action::kAuto);
+        return true;
+    }
+    if (!std::strcmp(argv[*i], "--recv-click")) {
+        push(Action::kRecvClick);
+        return true;
+    }
+    if (const char* name = value("--mark")) {
+        push(Action::kMark).text = name;
+        return true;
+    }
+    return false;
+}
+
+void print_usage() {
+    std::fprintf(stderr,
+                 "usage: nova-gui [--devices] [--metrics] [--size WxH] "
+                 "[--resize WxH]\n"
+                 "                [--state NAME] [--zoom fit|25|50|100|200]"
+                 "\n                [--ioc auto|576|288] "
+                 "[--rate auto|60|90|120]\n"
+                 "                [--follow BATCHESxROWS] "
+                 "[--correction] [--sync-step]\n"
+                 "                [--nudge N] [--click X,Y ...] [--click-rows N]\n"
+                 "                [--arm phase|sync|none ...] "
+                 "[--then-state NAME]\n"
+                 "                [--image-folder DIR] [--feed WAV,PCT "
+                 "...] [--stop-capture]\n"
+                 "                [--type phase|sync V] [--apply] "
+                 "[--auto] [--recv-click]\n"
+                 "                [--mark NAME]\n"
+                 "  window minimum %dx%d; states: idle ready start-tone "
+                 "phasing\n  drawing stop-tone decoding saved\n",
+                 kMinW, kMinH);
+}
+
+// The flags, left to right, stopping at the first one nothing recognizes
+// or whose value is bad — the usage error it has always been.
+bool parse_args(int argc, char** argv, ParsedArgs* a) {
+    bool bad = false;
+    for (int i = 1; i < argc && !bad; i++)
+        if (!parse_inspection_flag(argc, argv, &i, a, &bad) &&
+            !parse_preset_flag(argc, argv, &i, a, &bad) &&
+            !parse_action_flag(argc, argv, &i, a, &bad))
             bad = true;
-    }
     if (bad) {
-        std::fprintf(stderr,
-                     "usage: nova-gui [--devices] [--metrics] [--size WxH] "
-                     "[--resize WxH]\n"
-                     "                [--state NAME] [--zoom fit|25|50|100|200]"
-                     "\n                [--ioc auto|576|288] "
-                     "[--rate auto|60|90|120]\n"
-                     "                [--follow BATCHESxROWS] "
-                     "[--correction] [--sync-step]\n"
-                     "                [--nudge N] [--click X,Y ...] [--click-rows N]\n"
-                     "                [--arm phase|sync|none ...] "
-                     "[--then-state NAME]\n"
-                     "                [--image-folder DIR] [--feed WAV,PCT "
-                     "...] [--stop-capture]\n"
-                     "                [--type phase|sync V] [--apply] "
-                     "[--auto] [--recv-click]\n"
-                     "                [--mark NAME]\n"
-                     "  window minimum %dx%d; states: idle ready start-tone "
-                     "phasing\n  drawing stop-tone decoding saved\n",
-                     kMinW, kMinH);
-        return 2;
+        print_usage();
+        return false;
     }
-    // **A capture WRITES, and the folder it writes to is remembered from the
-    // operator's own settings.** Every other inspection flag is read-only —
-    // that is why they can be run on anyone's machine without asking — and
-    // --feed is the first one that is not. Refusing without an explicit
-    // folder keeps that property true by construction rather than by the
-    // test scripts remembering to pass one.
-    bool any_feed = false;
-    for (const Action& a : actions)
-        if (a.kind == Action::kFeed) any_feed = true;
-    if (any_feed && image_folder_arg.empty()) {
-        std::fprintf(stderr,
-                     "nova-gui: --feed needs --image-folder DIR; a capture "
-                     "saves images and must never write to the remembered "
-                     "folder\n");
-        return 2;
-    }
+    return true;
+}
 
-    if (devices_only) return print_devices();
-    // Before the Shell is built: it is a pure function, and asking about it
-    // must not need a window any more than it needs a sound card.
-    if (correction_only) return print_correction();
-    if (sync_step_only) return print_sync_step();
-
-    Shell shell;
-    shell.build(win_w, win_h, argv[0]);
+// Everything the parsed flags ask the shell to BE before the first action
+// runs: built at the window size, dropdowns and state set, nudges pressed,
+// and a picture on the pane if a click is coming.
+void configure_shell(Shell& shell, const ParsedArgs& args,
+                     const char* argv0) {
+    shell.build(args.win_w, args.win_h, argv0);
     // Before anything can feed: `build` has just read the remembered folder
     // out of prefs, and this is what replaces it.
-    if (!image_folder_arg.empty()) shell.image_folder = image_folder_arg;
-    shell.ioc->value(ioc_index);
-    shell.rate->value(rate_index);
-    shell.zoom->value(zoom_index);
-    shell.state = state;
+    if (!args.image_folder_arg.empty())
+        shell.image_folder = args.image_folder_arg;
+    shell.ioc->value(args.ioc_index);
+    shell.rate->value(args.rate_index);
+    shell.zoom->value(args.zoom_index);
+    shell.state = args.state;
     // --state means "as nova-live will drive it": the transport rules are
     // only inspectable once something is behind them, and on a plain run
     // nothing is [see the file header].
-    shell.capture = state_given;
+    shell.capture = args.state_given;
     shell.layout_view();
     shell.apply_state();
     // A window built at a size and a window dragged to it went through two
     // different code paths until this file stopped using resizable(); the
     // flag stays so that the equivalence keeps being checkable.
-    if (resize_w > 0) shell.win->resize(0, 0, resize_w, resize_h);
+    if (args.resize_w > 0)
+        shell.win->resize(0, 0, args.resize_w, args.resize_h);
     // --nudge: press the +1 stepper N times, then report. FLTK does not
     // fire an input's callback for a programmatic value(), so "a nudge is
     // an edit" is a claim about code that had to be written by hand and
     // can therefore be wrong by omission — the box would move and Apply
     // would stay grey. This is the seam that makes it checkable.
-    for (int i = 0; i < nudges; i++) shell.nudge_sync(1.0);
+    for (int i = 0; i < args.nudges; i++) shell.nudge_sync(1.0);
     // --click X: set PHASE from a click X px into the pane's interior,
     // through the shell's real handler [see click_phase]. --click-rows
     // gives the pane a picture first, because a click on an empty pane
     // is a different case and both are worth being able to ask for.
-    if (click_rows > 0) {
+    if (args.click_rows > 0) {
         nova::Image img;
         img.width = shell.image_cols();
-        img.height = click_rows;
+        img.height = args.click_rows;
         img.px.assign(static_cast<std::size_t>(img.width) * img.height,
                       128);
         shell.show_image(img);
     }
-    // Each action goes through the shell's real handler, in order, so the
-    // sequence under test is the sequence an operator makes. Arming goes
-    // through `set_arm` — the buttons' own callback body — rather than
-    // assigning `arm`, or the toggle-and-clear lifecycle would be untested
-    // exactly where it is easiest to get wrong.
+}
+
+// What the click actions left behind, for --metrics to report after the
+// sequence has run; rc is the feed failure that ends the run.
+struct ActionOutcome {
     const char* click_action = "none";
     int click_named = -1;
     double click_ppm = 0.0;
+    int rc = 0;
+};
+
+// Each action goes through the shell's real handler, in order, so the
+// sequence under test is the sequence an operator makes. Arming goes
+// through `set_arm` — the buttons' own callback body — rather than
+// assigning `arm`, or the toggle-and-clear lifecycle would be untested
+// exactly where it is easiest to get wrong.
+ActionOutcome run_actions(Shell& shell, const std::vector<Action>& actions) {
+    ActionOutcome out;
     for (const Action& a : actions) {
         if (a.kind == Action::kArm) {
             shell.set_arm(a.arm);
@@ -3461,7 +3616,8 @@ int main(int argc, char** argv) {
             if (!shell.feed_wav(a.text, a.pct)) {
                 std::fprintf(stderr, "nova-gui: cannot feed %s\n",
                              a.text.c_str());
-                return 3;
+                out.rc = 3;
+                return out;
             }
             continue;
         }
@@ -3510,40 +3666,84 @@ int main(int argc, char** argv) {
         }
         const Shell::ClickResult r = shell.click_image(a.x, a.y);
         switch (r.action) {
-            case Shell::ClickAction::kNone: click_action = "none"; break;
-            case Shell::ClickAction::kPhase: click_action = "phase"; break;
-            case Shell::ClickAction::kAnchor: click_action = "anchor"; break;
-            case Shell::ClickAction::kSync: click_action = "sync"; break;
+            case Shell::ClickAction::kNone: out.click_action = "none"; break;
+            case Shell::ClickAction::kPhase:
+                out.click_action = "phase";
+                break;
+            case Shell::ClickAction::kAnchor:
+                out.click_action = "anchor";
+                break;
+            case Shell::ClickAction::kSync: out.click_action = "sync"; break;
         }
-        click_named = r.column;
-        click_ppm = r.ppm;
+        out.click_named = r.column;
+        out.click_ppm = r.ppm;
     }
+    return out;
+}
+
+// **A capture WRITES, and the folder it writes to is remembered from the
+// operator's own settings.** Every other inspection flag is read-only —
+// that is why they can be run on anyone's machine without asking — and
+// --feed is the first one that is not. Refusing without an explicit
+// folder keeps that property true by construction rather than by the
+// test scripts remembering to pass one.
+bool feed_without_folder(const ParsedArgs& args, bool any_feed) {
+    if (!any_feed || !args.image_folder_arg.empty()) return false;
+    std::fprintf(stderr,
+                 "nova-gui: --feed needs --image-folder DIR; a capture "
+                 "saves images and must never write to the remembered "
+                 "folder\n");
+    return true;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    ParsedArgs args;
+    if (!parse_args(argc, argv, &args)) return 2;
+    bool any_feed = false;
+    for (const Action& a : args.actions)
+        if (a.kind == Action::kFeed) any_feed = true;
+    if (feed_without_folder(args, any_feed)) return 2;
+
+    if (args.devices_only) return print_devices();
+    // Before the Shell is built: it is a pure function, and asking about it
+    // must not need a window any more than it needs a sound card.
+    if (args.correction_only) return print_correction();
+    if (args.sync_step_only) return print_sync_step();
+
+    Shell shell;
+    configure_shell(shell, args, argv[0]);
+    const ActionOutcome outcome = run_actions(shell, args.actions);
+    if (outcome.rc != 0) return outcome.rc;
     // --then-state: drive the shell into a SECOND state after the clicks,
     // which is the only way this seam can express a TRANSITION. Rules that
     // fire when the surface changes under a half-finished edit [§8.5 item
     // 4's edit-end] are otherwise unreachable without a window: --state
     // builds the shell already in a state, so nothing ever changes.
-    if (then_state_given) {
-        shell.state = then_state;
+    if (args.then_state_given) {
+        shell.state = args.then_state;
         shell.apply_state();
     }
-    if (metrics_only) {
+    if (args.metrics_only) {
         // Before the shutdown below, never after: taking the engine down
         // clears `pane_held` and leaves the indicator naming a buffer that
         // no longer exists, so a capture's final metrics have to be read
         // while the capture is still standing.
         const int rc = print_metrics(shell);
-        if (!actions.empty()) {
-            std::printf("  click_action         \"%s\"\n", click_action);
-            std::printf("  click_named          \"%d\"\n", click_named);
+        if (!args.actions.empty()) {
+            std::printf("  click_action         \"%s\"\n",
+                        outcome.click_action);
+            std::printf("  click_named          \"%d\"\n",
+                        outcome.click_named);
             std::printf("  click_ppm            \"%s\"\n",
-                        sync_text(click_ppm).c_str());
+                        sync_text(outcome.click_ppm).c_str());
         }
         shell.stop_live();
         return rc;
     }
-    if (follow_batches > 0)
-        return print_follow(shell, follow_batches, follow_rows);
+    if (args.follow_batches > 0)
+        return print_follow(shell, args.follow_batches, args.follow_rows);
     // An offline capture is an inspection like all the others: it never
     // reaches the window, and it brings its engine down the same way
     // closing the window does — through the flush that decodes and saves a
