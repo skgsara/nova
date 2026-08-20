@@ -124,6 +124,7 @@ private:
 // demodulated as soon as it arrives, given `overlap` samples of history.
 class StreamDemod {
 public:
+    // 1900 Hz: the WEFAX audio subcarrier centre frequency [WMO §5.5.1].
     explicit StreamDemod(int fs, double center = 1900.0,
                          double deviation = 400.0,
                          double iq_lowpass_hz = 650.0,

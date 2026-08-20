@@ -658,21 +658,185 @@ std::string LiveEngine::save_image(const DecodeResult& r, bool overwrite) {
     return path;
 }
 
+// --- collect_batch's stages -------------------------------------------------
+// collect_batch is four nearly-sequential concerns — read the batch result,
+// decide whether to park it, save the image, hand it to the pane. They are
+// file-local statics, as `append_rows_locked` is, so the member state
+// arrives as parameters. Thread 2 throughout.
+
+// Thread 3's one-slot result inbox [§8.3 item 4]. False when nothing has
+// reported; on a failed decode the result slot is left untouched and `err`
+// carries the kind instead.
+static bool take_batch_result(std::mutex& mu, bool& ready, bool& ok_flag,
+                              DecodeResult& result, DecodeErrorKind& error,
+                              bool* ok, DecodeResult* res,
+                              DecodeErrorKind* err) {
+    std::lock_guard<std::mutex> g(mu);
+    if (!ready) return false;
+    *ok = ok_flag;
+    if (*ok) *res = std::move(result);
+    else *err = error;
+    ready = false;
+    return true;
+}
+
+// A decode that produced no image puts no image on the pane, so §3's
+// displayed snapshot does not change hands — the operator is still looking
+// at the previous chart and may still correct it. The failed transmission's
+// stream has nothing to be the stream OF, and is released.
+static EngineMessage batch_failed_message(
+    std::mutex& retain_mu,
+    std::shared_ptr<const std::vector<float>>& pending_snap,
+    DecodeErrorKind err) {
+    {
+        std::lock_guard<std::mutex> g(retain_mu);
+        pending_snap.reset();
+    }
+    EngineMessage m;
+    m.kind = EngineMsg::kBatchFailed;
+    m.error = err;
+    return m;
+}
+
+// A RE-DECODE is excluded and must be: it is the operator's own Apply,
+// whose entire purpose is to replace the displayed picture. Parking it
+// would hide the result of the button they just pressed behind an
+// indicator offering to show them their own correction.
+static bool batch_should_park(bool was_redecode, std::mutex& img_mu,
+                              const Image& background,
+                              const std::atomic<bool>& pane_held,
+                              const StreamPreview* display_src,
+                              const Image& display) {
+    if (was_redecode) return false;
+    std::lock_guard<std::mutex> g(img_mu);
+    // The same two-term test `append_display_rows` uses, and for the
+    // same reason: a buffer that exists keeps the pane held until the
+    // operator promotes it [§8.2, Sara, session 30]. A transmission
+    // whose rows were diverted must not hand its finished picture to
+    // the pane merely because the edit ended while it was decoding.
+    const bool buffering = background.width > 0 && background.height > 0;
+    return (pane_held.load(std::memory_order_acquire) || buffering) &&
+           display_src == nullptr && display.width > 0 &&
+           display.height > 0;
+}
+
+// §3's retained snapshot changes hands, and it does so BEFORE the image
+// it belongs to reaches the pane. The order is the load-bearing part,
+// exactly as it is for write-then-SAVED above: thread 4 may look
+// between these two blocks. In THIS order it sees the new stream with
+// the old picture still on the pane, which reads as "provisional" and
+// offers nothing — harmless. In the other order it would see the new
+// picture on the pane backed by the PREVIOUS transmission's stream, and
+// a correction taken in that instant would re-decode the wrong
+// transmission (or, on the first decode of a session, no stream at all,
+// which is the one state §3 reserves for a snapshot genuinely
+// released).
+//
+// The outgoing image's stream is released HERE and nowhere else: an
+// operator correcting the chart that just arrived keeps its raw stream
+// for as long as it is the one on screen, however long they take, and
+// the next transmission merely ARRIVING does not take it away — that
+// arrival is a `pending_` snapshot until its own picture replaces this
+// one.
+// §8.2, ROADMAP M4 item 6: a transmission that FINISHES behind an edit
+// does not take the pane either, and this is the case with teeth in it.
+// The paragraph above is the invariant — the outgoing stream is released
+// when the incoming picture replaces it — so a decode that completes
+// mid-edit would release the very stream the operator's Apply re-decodes
+// from, and the correction surface would die under their hands with no
+// visible cause. Deferring the whole handover is what prevents it: image
+// and snapshot are parked TOGETHER and promoted TOGETHER, so
+// `retained_video()` describes the picture actually on the pane at every
+// instant, which is the invariant the correction surface is built on.
+static void park_finished_batch(
+    std::mutex& retain_mu,
+    std::shared_ptr<const std::vector<float>>& pending_snap,
+    long long pending_start, DecodeOptions& pending_options,
+    std::shared_ptr<const std::vector<float>>& parked_snap,
+    long long& parked_start, DecodeOptions& parked_options,
+    std::mutex& img_mu, Image& background,
+    const StreamPreview*& background_src, bool* background_complete,
+    const Image& img) {
+    {
+        std::lock_guard<std::mutex> g(retain_mu);
+        parked_snap = std::move(pending_snap);
+        parked_start = pending_start;
+        parked_options = std::move(pending_options);
+        pending_snap.reset();
+    }
+    {
+        std::lock_guard<std::mutex> g(img_mu);
+        background = img;
+        // A finished decode is grown by no preview: promotion must not
+        // append the next transmission's rows onto this chart.
+        background_src = nullptr;
+        *background_complete = true;
+    }
+}
+
+static void display_finished_batch(
+    std::mutex& retain_mu,
+    std::shared_ptr<const std::vector<float>>& pending_snap,
+    long long pending_start, DecodeOptions& pending_options,
+    std::shared_ptr<const std::vector<float>>& displayed_snap,
+    long long& displayed_start, DecodeOptions& displayed_options,
+    std::mutex& img_mu, Image& display, const StreamPreview*& display_src,
+    const Image& img) {
+    {
+        std::lock_guard<std::mutex> g(retain_mu);
+        displayed_snap = std::move(pending_snap);
+        displayed_start = pending_start;
+        displayed_options = std::move(pending_options);
+        pending_snap.reset();
+    }
+    // The saved image takes the pane from the provisional one. This is
+    // the announced swap of §8.2 — the two pictures differ, and the one
+    // on screen after a decode is the one on disk.
+    {
+        std::lock_guard<std::mutex> g(img_mu);
+        display = img;
+        display_src = nullptr;
+    }
+}
+
+// The decode's own message first, then the save's: the shell reads them in
+// the order they happened.
+static std::vector<EngineMessage> batch_result_messages(
+    const DecodeResult& res, const std::string& saved_path,
+    const std::string& save_error) {
+    std::vector<EngineMessage> out;
+    EngineMessage done;
+    done.kind = EngineMsg::kBatchDone;
+    done.result = std::make_shared<const DecodeResult>(res);
+    out.push_back(std::move(done));
+    if (!save_error.empty()) {
+        EngineMessage m;
+        m.kind = EngineMsg::kSaveFailed;
+        m.detail = save_error;
+        out.push_back(std::move(m));
+    } else if (!saved_path.empty()) {
+        EngineMessage m;
+        m.kind = EngineMsg::kSaved;
+        m.path = saved_path;
+        out.push_back(std::move(m));
+    }
+    return out;
+}
+
+// collect_batch's `redecoding_` guard; see the comment where it is
+// declared in that function.
+struct LowerWhenSaved {
+    std::atomic<bool>* flag;
+    ~LowerWhenSaved() { flag->store(false, std::memory_order_release); }
+};
+
 void LiveEngine::collect_batch() {
-    bool ready = false, ok = false;
+    bool ok = false;
     DecodeResult res;
     DecodeErrorKind err = DecodeErrorKind::kEmptyInput;
-    {
-        std::lock_guard<std::mutex> g(batch_mu_);
-        if (batch_ready_) {
-            ready = true;
-            ok = batch_ok_;
-            if (ok) res = std::move(batch_result_);
-            else err = batch_error_;
-            batch_ready_ = false;
-        }
-    }
-    if (!ready) return;
+    if (!take_batch_result(batch_mu_, batch_ready_, batch_ok_, batch_result_,
+                           batch_error_, &ok, &res, &err))
+        return;
 
     // Whose decode was that — a transmission's own, or the operator asking
     // for the same one again [§8.5 items 2-4]?
@@ -688,25 +852,10 @@ void LiveEngine::collect_batch() {
     const bool was_redecode = batch_is_redecode_;
     batch_is_redecode_ = false;
     // Lowered on every exit below, and only after the save.
-    const struct LowerWhenSaved {
-        std::atomic<bool>* flag;
-        ~LowerWhenSaved() { flag->store(false, std::memory_order_release); }
-    } lower_when_saved{&redecoding_};
+    const LowerWhenSaved lower_when_saved{&redecoding_};
 
     if (!ok) {
-        // A decode that produced no image puts no image on the pane, so
-        // §3's displayed snapshot does not change hands — the operator is
-        // still looking at the previous chart and may still correct it.
-        // The failed transmission's stream has nothing to be the stream
-        // OF, and is released.
-        {
-            std::lock_guard<std::mutex> g(retain_mu_);
-            pending_snap_.reset();
-        }
-        EngineMessage m;
-        m.kind = EngineMsg::kBatchFailed;
-        m.error = err;
-        post(std::move(m));
+        post(batch_failed_message(retain_mu_, pending_snap_, err));
         emit(session_.batch_failed(err));
         return;
     }
@@ -720,26 +869,8 @@ void LiveEngine::collect_batch() {
     // parked with it rather than handed over [see promote_background]. The
     // picture is still saved either way — §8.2's "nothing is lost by
     // waiting" is about the pane, never about the disk.
-    //
-    // A RE-DECODE is excluded and must be: it is the operator's own Apply,
-    // whose entire purpose is to replace the displayed picture. Parking it
-    // would hide the result of the button they just pressed behind an
-    // indicator offering to show them their own correction.
-    bool park = false;
-    if (!was_redecode) {
-        std::lock_guard<std::mutex> g(img_mu_);
-        // The same two-term test `append_display_rows` uses, and for the
-        // same reason: a buffer that exists keeps the pane held until the
-        // operator promotes it [§8.2, Sara, session 30]. A transmission
-        // whose rows were diverted must not hand its finished picture to
-        // the pane merely because the edit ended while it was decoding.
-        const bool buffering =
-            background_.width > 0 && background_.height > 0;
-        park = (pane_held_.load(std::memory_order_acquire) || buffering) &&
-               display_src_ == nullptr && display_.width > 0 &&
-               display_.height > 0;
-    }
-
+    const bool park = batch_should_park(was_redecode, img_mu_, background_,
+                                        pane_held_, display_src_, display_);
     std::string saved_path;
     std::string save_error;
     if (!opt_.image_folder.empty()) {
@@ -755,87 +886,22 @@ void LiveEngine::collect_batch() {
         }
     }
 
-    // §3's retained snapshot changes hands, and it does so BEFORE the image
-    // it belongs to reaches the pane. The order is the load-bearing part,
-    // exactly as it is for write-then-SAVED above: thread 4 may look
-    // between these two blocks. In THIS order it sees the new stream with
-    // the old picture still on the pane, which reads as "provisional" and
-    // offers nothing — harmless. In the other order it would see the new
-    // picture on the pane backed by the PREVIOUS transmission's stream, and
-    // a correction taken in that instant would re-decode the wrong
-    // transmission (or, on the first decode of a session, no stream at all,
-    // which is the one state §3 reserves for a snapshot genuinely
-    // released).
-    //
-    // The outgoing image's stream is released HERE and nowhere else: an
-    // operator correcting the chart that just arrived keeps its raw stream
-    // for as long as it is the one on screen, however long they take, and
-    // the next transmission merely ARRIVING does not take it away — that
-    // arrival is a `pending_` snapshot until its own picture replaces this
-    // one.
-    // §8.2, ROADMAP M4 item 6: a transmission that FINISHES behind an edit
-    // does not take the pane either, and this is the case with teeth in it.
-    // The paragraph above is the invariant — the outgoing stream is released
-    // when the incoming picture replaces it — so a decode that completes
-    // mid-edit would release the very stream the operator's Apply re-decodes
-    // from, and the correction surface would die under their hands with no
-    // visible cause. Deferring the whole handover is what prevents it: image
-    // and snapshot are parked TOGETHER and promoted TOGETHER, so
-    // `retained_video()` describes the picture actually on the pane at every
-    // instant, which is the invariant the correction surface is built on.
-    //
     // `park` was decided above the save, because the saved path is parked
     // with the picture rather than handed over.
-    if (park) {
-        {
-            std::lock_guard<std::mutex> g(retain_mu_);
-            parked_snap_ = std::move(pending_snap_);
-            parked_start_ = pending_start_;
-            parked_options_ = std::move(pending_options_);
-            pending_snap_.reset();
-        }
-        {
-            std::lock_guard<std::mutex> g(img_mu_);
-            background_ = res.img;
-            // A finished decode is grown by no preview: promotion must not
-            // append the next transmission's rows onto this chart.
-            background_src_ = nullptr;
-            background_complete_ = true;
-        }
-    } else {
-        {
-            std::lock_guard<std::mutex> g(retain_mu_);
-            displayed_snap_ = std::move(pending_snap_);
-            displayed_start_ = pending_start_;
-            displayed_options_ = std::move(pending_options_);
-            pending_snap_.reset();
-        }
-        // The saved image takes the pane from the provisional one. This is
-        // the announced swap of §8.2 — the two pictures differ, and the one
-        // on screen after a decode is the one on disk.
-        {
-            std::lock_guard<std::mutex> g(img_mu_);
-            display_ = res.img;
-            display_src_ = nullptr;
-        }
-    }
+    if (park)
+        park_finished_batch(retain_mu_, pending_snap_, pending_start_,
+                            pending_options_, parked_snap_, parked_start_,
+                            parked_options_, img_mu_, background_,
+                            background_src_, &background_complete_, res.img);
+    else
+        display_finished_batch(retain_mu_, pending_snap_, pending_start_,
+                               pending_options_, displayed_snap_,
+                               displayed_start_, displayed_options_, img_mu_,
+                               display_, display_src_, res.img);
 
-    EngineMessage done;
-    done.kind = EngineMsg::kBatchDone;
-    done.result = std::make_shared<const DecodeResult>(res);
-    post(std::move(done));
-
-    if (!save_error.empty()) {
-        EngineMessage m;
-        m.kind = EngineMsg::kSaveFailed;
-        m.detail = save_error;
+    for (EngineMessage& m :
+         batch_result_messages(res, saved_path, save_error))
         post(std::move(m));
-    } else if (!saved_path.empty()) {
-        EngineMessage m;
-        m.kind = EngineMsg::kSaved;
-        m.path = saved_path;
-        post(std::move(m));
-    }
 
     emit(session_.batch_done(res));
     // Every transmission starts from measured-or-blank [§8.5 item 6]:

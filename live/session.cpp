@@ -30,6 +30,105 @@ namespace {
 // function of the signal, never of when the scan happened to run.
 const double kWatchRates[] = {120.0, 90.0, 60.0};
 
+// The first qualifying run at each nominal rate. The batch window rule
+// ("the last opening inside a known transmission") needs the stop tone
+// and cannot be known live, so the window is left unset and the FIRST
+// run wins, as it does unwindowed in the batch path.
+PhasingResult scan_watch_rates(const std::vector<float>& slice, int fs,
+                               const PhasingOptions& phasing,
+                               const DecodeHooks& hooks, double* best_rate) {
+    PhasingOptions pho = phasing;
+    pho.t_lo = 0.0;
+    pho.t_hi = 0.0;
+    PhasingResult best;
+    *best_rate = 120.0;
+    for (double rate : kWatchRates) {
+        const double period = fs * 60.0 / rate;
+        const PhasingResult r = detect_phasing(slice, fs, period, pho, hooks);
+        if (!r.found) continue;
+        // Deterministic preference: more agreeing lines, then the cleaner
+        // run. Two rates qualifying on one signal is not expected — the
+        // wedge sits at a different line phase at each wrong rate — but
+        // the rule has to be written down, not left to fall out.
+        if (best.found && r.lines < best.lines) continue;
+        if (best.found && r.lines == best.lines && r.score <= best.score)
+            continue;
+        best = r;
+        *best_rate = rate;
+    }
+    return best;
+}
+
+// The tone-event dispatch of `push`. The actions are the session's own
+// private steps, so they arrive as member-function pointers and the
+// decisions below move here unchanged.
+void dispatch_tone_events(LiveSession* s,
+                          const std::vector<ToneEvent>& events,
+                          SessionState state, int fs, SessionOutput& out,
+                          bool* pending_start, ToneEvent* pending_tone,
+                          void (LiveSession::*end_tx)(long long, bool,
+                                                      SessionOutput&),
+                          void (LiveSession::*begin)(const ToneEvent&,
+                                                     SessionOutput&)) {
+    for (const ToneEvent& e : events) {
+        if (e.kind == ToneKind::kStop) {
+            // A stop tone ends the picture only when one is being drawn.
+            // In every other state it is a recording that joined a
+            // transmission mid-tone, and it decides nothing.
+            if (state == SessionState::kDrawingPreview) {
+                (s->*end_tx)(
+                    static_cast<long long>(std::llround(e.t_start * fs)),
+                    /*via_tone=*/true, out);
+            }
+        } else {
+            if (state == SessionState::kReady ||
+                state == SessionState::kSaved) {
+                (s->*begin)(e, out);
+            } else if (state == SessionState::kDecoding) {
+                // The GUI is serialized [docs/05 §8.4]: the next
+                // transmission's tone is remembered, not acted on, until
+                // the batch decode has reported.
+                *pending_start = true;
+                *pending_tone = e;
+            }
+            // In START TONE / PHASING / DRAWING a start tone is a second
+            // opening inside a transmission this session is already
+            // committed to. "One recording, one transmission, take the
+            // first" is the batch rule [ROADMAP registered gaps] and the
+            // live path keeps it — see the header for the FAXSignal case.
+        }
+    }
+}
+
+// When the start tone's run closes, its last hot frame is the tone's
+// end — the reference the phasing give-up waits from.
+void track_tone_end(SessionState state, const StreamToneDetector& tones,
+                    ToneKind tone_kind, bool* tone_end_known,
+                    double* tone_end_sec) {
+    if (*tone_end_known ||
+        (state != SessionState::kStartTone &&
+         state != SessionState::kPhasing))
+        return;
+    const double e = tones.run_last_hot_sec(tone_kind);
+    if (e >= 0.0 && !tones.run_open(tone_kind)) {
+        *tone_end_known = true;
+        *tone_end_sec = e;
+    }
+}
+
+// The opening cap [D-PERF-003]. Every other bound is measured from
+// the tone's end or from drawing, and on a start tone that never ends
+// neither exists — the session would sit here with the retained store
+// growing without bound.
+bool opening_cap_exceeded(SessionState state, long long total_in,
+                          long long opening_start, double max_opening_sec,
+                          int fs) {
+    return (state == SessionState::kStartTone ||
+            state == SessionState::kPhasing) &&
+           total_in - opening_start >
+               static_cast<long long>(std::llround(max_opening_sec * fs));
+}
+
 }  // namespace
 
 LiveSession::LiveSession(int fs, const SessionOptions& opt)
@@ -149,34 +248,9 @@ SessionOutput LiveSession::push(const float* video, std::size_t n) {
     // The tone detector is fed in every capturing state: monitoring never
     // stops, which is what the next transmission's start tone relies on.
     const std::vector<ToneEvent> events = tones_.push(video, n);
-    for (const ToneEvent& e : events) {
-        if (e.kind == ToneKind::kStop) {
-            // A stop tone ends the picture only when one is being drawn.
-            // In every other state it is a recording that joined a
-            // transmission mid-tone, and it decides nothing.
-            if (state_ == SessionState::kDrawingPreview) {
-                end_transmission(
-                    static_cast<long long>(std::llround(e.t_start * fs_)),
-                    /*via_tone=*/true, out);
-            }
-        } else {
-            if (state_ == SessionState::kReady ||
-                state_ == SessionState::kSaved) {
-                begin_opening(e, out);
-            } else if (state_ == SessionState::kDecoding) {
-                // The GUI is serialized [docs/05 §8.4]: the next
-                // transmission's tone is remembered, not acted on, until
-                // the batch decode has reported.
-                pending_start_ = true;
-                pending_tone_ = e;
-            }
-            // In START TONE / PHASING / DRAWING a start tone is a second
-            // opening inside a transmission this session is already
-            // committed to. "One recording, one transmission, take the
-            // first" is the batch rule [ROADMAP registered gaps] and the
-            // live path keeps it — see the header for the FAXSignal case.
-        }
-    }
+    dispatch_tone_events(this, events, state_, fs_, out, &pending_start_,
+                         &pending_tone_, &LiveSession::end_transmission,
+                         &LiveSession::begin_opening);
 
     // The phasing watcher, on its absolute one-second grid.
     while (next_watch_at_ <= total_in_ &&
@@ -186,28 +260,14 @@ SessionOutput LiveSession::push(const float* video, std::size_t n) {
         next_watch_at_ += fs_;
     }
 
-    // When the start tone's run closes, its last hot frame is the tone's
-    // end — the reference the phasing give-up waits from.
-    if (!tone_end_known_ &&
-        (state_ == SessionState::kStartTone ||
-         state_ == SessionState::kPhasing)) {
-        const double e = tones_.run_last_hot_sec(tone_kind_);
-        if (e >= 0.0 && !tones_.run_open(tone_kind_)) {
-            tone_end_known_ = true;
-            tone_end_sec_ = e;
-        }
-    }
+    track_tone_end(state_, tones_, tone_kind_, &tone_end_known_,
+                   &tone_end_sec_);
 
-    // The opening cap [D-PERF-003]. Every other bound is measured from
-    // the tone's end or from drawing, and on a start tone that never ends
-    // neither exists — the session would sit here with the retained store
-    // growing without bound. Abandon the opening and return to
+    // On expiry the opening is abandoned and the session returns to
     // monitoring; trim_preroll() below bounds the store again, and the
     // next real start tone is heard from READY as usual.
-    if ((state_ == SessionState::kStartTone ||
-         state_ == SessionState::kPhasing) &&
-        total_in_ - opening_start_ >
-            static_cast<long long>(std::llround(opt_.max_opening_sec * fs_))) {
+    if (opening_cap_exceeded(state_, total_in_, opening_start_,
+                             opt_.max_opening_sec, fs_)) {
         in_transmission_ = false;
         tone_end_known_ = false;
         enter(SessionState::kReady, out);
@@ -427,30 +487,9 @@ void LiveSession::watch_step(SessionOutput& out) {
                                    retained_.end());
     const double slice_sec = static_cast<double>(slice.size()) / fs_;
 
-    // The first qualifying run at each nominal rate. The batch window rule
-    // ("the last opening inside a known transmission") needs the stop tone
-    // and cannot be known live, so the window is left unset and the FIRST
-    // run wins, as it does unwindowed in the batch path.
-    PhasingOptions pho = opt_.phasing;
-    pho.t_lo = 0.0;
-    pho.t_hi = 0.0;
-    PhasingResult best;
     double best_rate = 120.0;
-    for (double rate : kWatchRates) {
-        const double period = fs_ * 60.0 / rate;
-        const PhasingResult r =
-            detect_phasing(slice, fs_, period, pho, opt_.hooks);
-        if (!r.found) continue;
-        // Deterministic preference: more agreeing lines, then the cleaner
-        // run. Two rates qualifying on one signal is not expected — the
-        // wedge sits at a different line phase at each wrong rate — but
-        // the rule has to be written down, not left to fall out.
-        if (best.found && r.lines < best.lines) continue;
-        if (best.found && r.lines == best.lines && r.score <= best.score)
-            continue;
-        best = r;
-        best_rate = rate;
-    }
+    const PhasingResult best =
+        scan_watch_rates(slice, fs_, opt_.phasing, opt_.hooks, &best_rate);
 
     if (!best.found) {
         // The phasing-less case: the tone has ended, nothing has qualified

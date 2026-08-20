@@ -60,41 +60,56 @@ void StreamPreview::set_clock_ppm(double ppm) {
          "preview: SYNC %+.1f ppm -> period %.3f samples", ppm, period_);
 }
 
-// --- acquisition: the one backward look, taken before anything is drawn ---
-bool StreamPreview::try_acquire(int lines) {
-    const int plen = static_cast<int>(period_);
-    if (plen < 8 || lines < kMinAcqLines) return false;
-    const long long need =
-        static_cast<long long>(std::ceil(lines * period_)) + plen + 2;
-    if (total_in_ < need) return false;
+namespace {
 
-    // The same across-line consistency profiles the batch path builds
-    // [core/fax.cpp `stage_dead_sector`]: the dead sector is the one part
-    // of the line that looks the same on EVERY line [WMO §5.1.3.3], and
-    // picture content does not — a chart border is dark on many lines,
-    // never on all of them. Over `acq_lines` lines rather than 120, for
-    // the reason in the header: the profile is stacked on the SEEDED
-    // period, and a long stack smears the pulse by the rate error.
-    //
-    // No phasing skip here. The batch path steps over ~30 s of phasing
-    // first because the onset gate lands on it; this renderer is handed
-    // the picture by the live state machine [docs/05 §4], so the lines it
-    // is looking at are already image lines.
-    std::vector<double> dark_frac(plen, 0.0), white_frac(plen, 0.0);
+// The same across-line consistency profiles the batch path builds
+// [core/fax.cpp `stage_dead_sector`]: the dead sector is the one part
+// of the line that looks the same on EVERY line [WMO §5.1.3.3], and
+// picture content does not — a chart border is dark on many lines,
+// never on all of them. Over `acq_lines` lines rather than 120, for
+// the reason in the header: the profile is stacked on the SEEDED
+// period, and a long stack smears the pulse by the rate error.
+//
+// No phasing skip here. The batch path steps over ~30 s of phasing
+// first because the onset gate lands on it; this renderer is handed
+// the picture by the live state machine [docs/05 §4], so the lines it
+// is looking at are already image lines.
+void build_consistency_profiles(const std::vector<float>& buf, int lines,
+                                double period, int plen,
+                                const DecodeHooks& hooks,
+                                std::vector<double>* dark_frac,
+                                std::vector<double>* white_frac) {
+    dark_frac->assign(plen, 0.0);
+    white_frac->assign(plen, 0.0);
     for (int l = 0; l < lines; l++) {
-        throw_if_cancelled(opt_.hooks, "preview-acquire");
-        const double base = l * period_;
+        throw_if_cancelled(hooks, "preview-acquire");
+        const double base = l * period;
         for (int i = 0; i < plen; i++) {
-            const float x = fax_lerp_at(buf_, base + i);
-            if (x < kFaxDarkLevel) dark_frac[i] += 1.0;
-            if (x > kFaxWhiteLevel) white_frac[i] += 1.0;
+            const float x = fax_lerp_at(buf, base + i);
+            if (x < kFaxDarkLevel) (*dark_frac)[i] += 1.0;
+            if (x > kFaxWhiteLevel) (*white_frac)[i] += 1.0;
         }
     }
     for (int i = 0; i < plen; i++) {
-        dark_frac[i] /= lines;
-        white_frac[i] /= lines;
+        (*dark_frac)[i] /= lines;
+        (*white_frac)[i] /= lines;
     }
+}
 
+// Both anchors score a SHAPE, not a level, for the reason session 4
+// measured: a full-disk satellite image carries black space at both
+// line margins, dark on 100% of lines over hundreds of samples, so
+// "darkest window" lands anywhere inside that band. What identifies
+// the pulse is that black is followed immediately by white
+// [WMO §5.1.3.3]; what identifies a white-only dead sector is the
+// RISING EDGE into consistent whiteness [WMO §5.2.3.4 puts the
+// phasing reference at exactly that edge]. Also reports the two window
+// means the caller turns into the dead-sector consistency.
+void score_dead_sector(const std::vector<double>& dark_frac,
+                       const std::vector<double>& white_frac, int plen,
+                       double* pulse_shape, int* pulse_at,
+                       double* pulse_cons, double* white_shape,
+                       int* white_at, double* white_cons) {
     // Wrapped window mean; the dead sector straddles the line boundary,
     // so every window here wraps.
     auto win_mean = [&](const std::vector<double>& f, int at, int win) {
@@ -104,36 +119,79 @@ bool StreamPreview::try_acquire(int lines) {
     };
     const int pulse_w = std::max(2, static_cast<int>(kFaxPulseFrac * plen));
     const int dead_w = std::max(2, static_cast<int>(kFaxDeadFrac * plen));
-
-    // Both anchors score a SHAPE, not a level, for the reason session 4
-    // measured: a full-disk satellite image carries black space at both
-    // line margins, dark on 100% of lines over hundreds of samples, so
-    // "darkest window" lands anywhere inside that band. What identifies
-    // the pulse is that black is followed immediately by white
-    // [WMO §5.1.3.3]; what identifies a white-only dead sector is the
-    // RISING EDGE into consistent whiteness [WMO §5.2.3.4 puts the
-    // phasing reference at exactly that edge].
-    double pulse_shape = -1.0, white_shape = -1.0;
-    int pulse_at = 0, white_at = 0;
+    *pulse_shape = -1.0;
+    *white_shape = -1.0;
+    *pulse_at = 0;
+    *white_at = 0;
     for (int i = 0; i < plen; i++) {
         const double s = std::min(win_mean(dark_frac, i, pulse_w),
                                   win_mean(white_frac, i + pulse_w, pulse_w));
-        if (s > pulse_shape) {
-            pulse_shape = s;
-            pulse_at = i;
+        if (s > *pulse_shape) {
+            *pulse_shape = s;
+            *pulse_at = i;
         }
         const double e = win_mean(white_frac, i, dead_w) -
                          win_mean(white_frac, i - dead_w, dead_w);
-        if (e > white_shape) {
-            white_shape = e;
-            white_at = i;
+        if (e > *white_shape) {
+            *white_shape = e;
+            *white_at = i;
         }
     }
+    *pulse_cons = win_mean(dark_frac, *pulse_at, pulse_w);
+    *white_cons = win_mean(white_frac, *white_at, dead_w);
+}
+
+// Re-acquisition, exactly as `stage_track` does it: after a run of
+// misses, sweep half a line at a coarse step instead of the ±narrow
+// window. Without it a dropout that moves the sync outside the
+// narrow window is permanent — the tracker coasts to the end of the
+// transmission, and every row after the dropout is torn. Measured
+// on `himawari-kiwisdr-dropout-120s` before this was added: 140
+// locked rows of 238, against 232 of 240 for the batch path.
+double search_row_sync(const std::vector<float>& buf, double next_start,
+                       double base, double span, double pulse, bool reacq,
+                       double* score) {
+    return fax_best_sync(buf, next_start - span - base,
+                         next_start + span - base, pulse, score,
+                         reacq ? kFaxReacqStep : 1.0) +
+           base;
+}
+
+void render_row_pixels(const std::vector<float>& buf, double base,
+                       double start, double period, int width,
+                       std::vector<uint8_t>* row, Image* img) {
+    for (int j = 0; j < width; j++) {
+        const double pos = start + period * j / width - base;
+        (*row)[j] = static_cast<uint8_t>(
+            std::lround(fax_lerp_at(buf, pos) * 255.0f));
+    }
+    img->px.insert(img->px.end(), row->begin(), row->end());
+    img->height++;
+}
+
+}  // namespace
+
+// --- acquisition: the one backward look, taken before anything is drawn ---
+bool StreamPreview::try_acquire(int lines) {
+    const int plen = static_cast<int>(period_);
+    if (plen < 8 || lines < kMinAcqLines) return false;
+    const long long need =
+        static_cast<long long>(std::ceil(lines * period_)) + plen + 2;
+    if (total_in_ < need) return false;
+
+    std::vector<double> dark_frac, white_frac;
+    build_consistency_profiles(buf_, lines, period_, plen, opt_.hooks,
+                               &dark_frac, &white_frac);
+
+    double pulse_shape = 0.0, white_shape = 0.0;
+    double pulse_cons = 0.0, white_cons = 0.0;
+    int pulse_at = 0, white_at = 0;
+    score_dead_sector(dark_frac, white_frac, plen, &pulse_shape, &pulse_at,
+                      &pulse_cons, &white_shape, &white_at, &white_cons);
 
     has_pulse_ = pulse_shape >= kFaxPulseConsistency;
     dead_ = has_pulse_ ? DeadSector::kBlackPulse : DeadSector::kWhiteOnly;
-    dead_cons_ = has_pulse_ ? win_mean(dark_frac, pulse_at, pulse_w)
-                            : win_mean(white_frac, white_at, dead_w);
+    dead_cons_ = has_pulse_ ? pulse_cons : white_cons;
     next_start_ = has_pulse_ ? pulse_at : white_at;
     // A white-only station has no per-line phase in its image lines, so
     // the rising edge found above is the picture's own white margin as
@@ -200,18 +258,9 @@ void StreamPreview::draw_row(std::vector<PreviewRow>& out, bool final_row) {
     // not, so it is drawn on the clock rather than searched for. One row
     // at the very bottom of the page.
     if (opt_.autolock && has_pulse_ && !final_row) {
-        // Re-acquisition, exactly as `stage_track` does it: after a run of
-        // misses, sweep half a line at a coarse step instead of the ±narrow
-        // window. Without it a dropout that moves the sync outside the
-        // narrow window is permanent — the tracker coasts to the end of the
-        // transmission, and every row after the dropout is torn. Measured
-        // on `himawari-kiwisdr-dropout-120s` before this was added: 140
-        // locked rows of 238, against 232 of 240 for the batch path.
-        const double span = search_span();
         const double cand =
-            fax_best_sync(buf_, next_start_ - span - base,
-                          next_start_ + span - base, pulse, &score,
-                          reacq ? kFaxReacqStep : 1.0) + base;
+            search_row_sync(buf_, next_start_, base, search_span(), pulse,
+                            reacq, &score);
         if (score >= kFaxPulseLock) {
             start = cand;
             locked = true;
@@ -219,13 +268,7 @@ void StreamPreview::draw_row(std::vector<PreviewRow>& out, bool final_row) {
         }
     }
 
-    for (int j = 0; j < width_; j++) {
-        const double pos = start + p * j / width_ - base;
-        row_[j] = static_cast<uint8_t>(
-            std::lround(fax_lerp_at(buf_, pos) * 255.0f));
-    }
-    img_.px.insert(img_.px.end(), row_.begin(), row_.end());
-    img_.height++;
+    render_row_pixels(buf_, base, start, p, width_, &row_, &img_);
 
     PreviewRow r;
     r.index = row_index_;

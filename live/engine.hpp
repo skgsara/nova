@@ -120,6 +120,7 @@ struct EngineMessage {
 struct EngineOptions {
     SessionOptions session;
     int internal_rate = 8000;      // cli/nova-decode.cpp: kInternalRate
+    // 1900 Hz: the WEFAX audio subcarrier centre frequency [WMO §5.5.1].
     double demod_center = 1900.0;
     double demod_deviation = 400.0;
 
