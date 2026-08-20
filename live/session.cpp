@@ -198,6 +198,21 @@ SessionOutput LiveSession::push(const float* video, std::size_t n) {
         }
     }
 
+    // The opening cap [D-PERF-003]. Every other bound is measured from
+    // the tone's end or from drawing, and on a start tone that never ends
+    // neither exists — the session would sit here with the retained store
+    // growing without bound. Abandon the opening and return to
+    // monitoring; trim_preroll() below bounds the store again, and the
+    // next real start tone is heard from READY as usual.
+    if ((state_ == SessionState::kStartTone ||
+         state_ == SessionState::kPhasing) &&
+        total_in_ - opening_start_ >
+            static_cast<long long>(std::llround(opt_.max_opening_sec * fs_))) {
+        in_transmission_ = false;
+        tone_end_known_ = false;
+        enter(SessionState::kReady, out);
+    }
+
     // The stop tone has ended when its run closes [§4: STOP TONE leaves
     // on "tone ends"]. The decode request went out when the tone was
     // found — thread 3 does not wait for this.
@@ -398,6 +413,7 @@ void LiveSession::begin_opening(const ToneEvent& e, SessionOutput& out) {
             static_cast<std::ptrdiff_t>(floor - retained_base_));
     retained_base_ = floor;
 
+    opening_start_ = floor;
     watch_from_ = floor;
     next_watch_at_ = floor + fs_;
     enter(SessionState::kStartTone, out);

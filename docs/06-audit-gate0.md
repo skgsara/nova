@@ -1,9 +1,10 @@
 # 06 — Audit protocol, Gate 0
 
 Prepared 2026-08-16 against tree revision `893bdd9` (session 31, clean).
-**Status: COMPLETE. Gate 0 is fully filled and all five passes have run.**
-Reports are in `audit/`. The remaining step is cross-verification by a
-third model — see `08-cross-verification-handover.md`.
+**Status: COMPLETE. Gate 0 is fully filled, all five passes have run,
+cross-verification is done (2026-08-19, zero citation failures), and the
+human sign-off gate is complete (2026-08-19 — see
+`audit/HUMAN-SIGNOFF.md`).** Reports are in `audit/`.
 
 Nothing in this file is an audit finding; Gate 0 preparation is not a
 pass. It is kept as the record of what the auditors were given as
@@ -58,7 +59,7 @@ WMO document itself, never from `docs/01`.
 | ISO_9876_EDITION | **2015 (Edition 3)** | `ISO_9876_2015(en).pdf` held outside the repo; `docs/01` and `docs/02` cite 2015 throughout. |
 | AUDIO_INPUT_RATE | **8000 Hz, mono, 16-bit** | Read from the fixture WAV headers (offset 22 = 1 channel, offset 24 = 8000). All 19 fixtures share this shape. This is the *fixture* rate; the live capture rate through RtAudio is a separate number and is not pinned anywhere. |
 | FIXTURE_SET | **`nova/fixtures/`, 19 trimmed WAV excerpts** | Committed in-tree. Distinct from the 20-recording ground-truth library in the parent directory, which is gitignored. Both numbers appear in the docs — an auditor must not conflate them. |
-| RECEIVER_MANUALS | **16 manuals; revisions NOT recorded** | `../Weather Fax Receiver Manuals/`: Furuno FAX-30, FAX-207, FAX-208A, FAX-210, FAX-214, FAX-408; JRC JAX-91, JAX-9B; Nagra FAX-DM; OMC 62610H/FAX-410; OME 62600L1/FAX-30; Samyung SFAX-500, SFX-100; Sony CRF-V21; Steamrock SR-97; Taiyo TF-711. **Incomplete** — the protocol asks for model *and revision*. |
+| RECEIVER_MANUALS | **16 manuals; revisions recorded 2026-08-19** | `../Weather Fax Receiver Manuals/`: Furuno FAX-30 (OME-62600-K1: 1st ed. Sep 2002, rev. K1 Aug 2022), FAX-207 (OME-62580-F1: 1st ed. Mar 1994, rev. F1 Jan 2003), FAX-208A (OME-62430-T: 1st ed. Oct 1986, rev. T Jul 1994), FAX-210 (OME-62490-M1: 1st ed. Nov 1991, rev. M1 Aug 2004), FAX-214 (OME-62460-X: 1st ed. Apr 1988, rev. X Jan 2002), FAX-408 (OME-62620-B: 1st ed. Sep 2006, rev. B Jun 2009); JRC JAX-91 (code 7ZPNA4002, Sep 2006, Edition 1), JAX-9B (code 7ZPNA4036D, no date line printed); Nagra FAX-DM (Feb 1982, Kudelski SA); OMC 62610H/FAX-410 (pub. OMC-62610-H, no date line printed); OME 62600L1/FAX-30 (1st ed. Sep 2002, rev. L1 Oct 2025); Samyung SFAX-500 (no edition mark found), SFX-100 (1st ed. 2008-04-23); Sony CRF-V21 (©1988 Sony); Steamrock SR-97 (no edition mark found); Taiyo TF-711 (No. MPP0446, May 2003, version 1.3). Read off the title/imprint pages with pdftotext, and pdftoppm + visual read for the four scanned-only PDFs. |
 
 ---
 
@@ -77,14 +78,17 @@ Pentium III floor would not have described Nova — it would have imposed
 a new requirement, and Pass D would have measured against a floor
 nothing was written for.
 
-**Proposed values, for Sara to confirm:**
+**Values confirmed by Sara, 2026-08-19, at the human sign-off gate
+(recorded in `audit/HUMAN-SIGNOFF.md`), grounded in a fresh measurement
+on JSC4 (61-min chart: 41.6 s wall, 553 MB peak RSS, ~1.1% of one core
+at live rate):**
 
-| Parameter | Proposed | Note |
+| Parameter | Value | Note |
 |---|---|---|
-| TARGET_FLOOR_ARCH | 64-bit little-endian: x86-64 (baseline, no AVX) and AArch64 | No sub-baseline extensions are relied on today because none are requested. Pass D still verifies the compiler does not *emit* above-baseline instructions. |
-| TARGET_FLOOR_CPU | **NEEDS SARA** — a named part on each of the two | Only needed as a name, since no benchmark is being run. |
-| TARGET_FLOOR_RAM | **NEEDS SARA** | Still worth a real number: it is the bound A.3's malformed-input testing measures against, and that matters regardless of CPU age. Peak is driven by full-chart buffering at IOC 576 — measurable today. |
-| REALTIME_BUDGET | **NEEDS SARA** | Under this decision it is no longer the thing that justifies breaking KISS, but a live decoder still has a real-time requirement. Suggested form: a percentage of one core at 120 LPM, IOC 576, measured on the machine Nova actually runs on. |
+| TARGET_FLOOR_ARCH | 64-bit little-endian: x86-64 (baseline, no AVX) and AArch64 | No sub-baseline extensions are relied on today because none are requested. The x86-64 side is cross-compile-inspected only — D-GAP-003 stands until it runs on real x86-64. |
+| TARGET_FLOOR_CPU | Intel Core 2 Duo (x86-64) / Apple M1 (AArch64) | Names only; no benchmark is run. |
+| TARGET_FLOOR_RAM | **2 GB** | 3.6× headroom over the worst measured peak (553 MB, JSC4, 2026-08-19). This is the bound A.3's malformed-input testing measures against. |
+| REALTIME_BUDGET | **≤ 25% of one core** at 120 LPM, IOC 576, on the machine Nova runs on | Measured reality ~1.1%; the ceiling exists to fail a real regression, not to justify breaking KISS. |
 | BENCH_METHOD | **Not required** | Moot under this decision. Pass D reports no PERF figures and says so in its "what this pass did not cover" statement. |
 
 **Pending remediation, independent of the values above:** `README.md`
@@ -272,9 +276,10 @@ Sonnet 5.
 
 ### RECEIVER_MANUALS revisions
 
-### RECEIVER_MANUALS revisions
-
-Sixteen title pages to read.
+**Closed 2026-08-19** — all sixteen title/imprint pages read; the
+revisions are recorded in the §1 row above. (This task also appeared
+twice in this file by a copy error; collapsed to one entry when
+closed.)
 
 ---
 

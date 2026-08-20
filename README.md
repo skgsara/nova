@@ -35,13 +35,15 @@ against the actual upstream sources (see the audit below) — but no
 process available here can rule out unconscious reproduction at a level
 below what comparison detects.
 
-**The audit.** Nova is being audited against a written protocol, by
-agents that did not author it and under a different model, with a human
-sign-off gate that the audit explicitly does not replace:
+**The audit.** Nova has been audited against a written protocol, by
+agents that did not author it and under different models, with
+cross-verification of every load-bearing citation by a model from a
+different vendor, and a completed human sign-off gate that the audit
+explicitly did not replace:
 
 - the protocol — [`docs/07-audit-protocol.md`](docs/07-audit-protocol.md)
 - its parameters — [`docs/06-audit-gate0.md`](docs/06-audit-gate0.md)
-- the pass reports — [`docs/audit/`](docs/audit/)
+- the pass reports, cross-verification, and sign-off — [`docs/audit/`](docs/audit/)
 
 The audit is a filter, not an assurance. Findings that are still open
 are recorded in the reports as they stand, including the ones that
@@ -348,13 +350,13 @@ pins the guards and generates its own inputs, so it runs from any
 checkout. Five mutations against it were each killed by the intended
 check.
 
-**What is still open:** a sustained tone on the live path can grow
-`LiveSession`'s retained buffer without an applicable bound — none of
-`preroll_sec`, `phasing_wait_sec` or `max_picture_sec` covers a
-transmission that is open with a tone run that never closes. This is
-confirmed by code reading and **has not been reproduced**; it is recorded
-as reasoned rather than measured [D-PERF-003 / E-RISK-002]. It affects
-unattended live capture, not file decoding.
+**Fixed after the audit's passes ran:** the sustained-tone case on the
+live path (D-PERF-003 / E-RISK-002) — a start tone that never ends, which
+none of `preroll_sec`, `phasing_wait_sec` or `max_picture_sec` bounded —
+is now bounded by an opening cap (`max_opening_sec`, 300 s): the session
+abandons the opening and returns to listening, and the retained store
+falls back to its pre-roll bound [session 33; pinned by `live_session`
+T14].
 
 **What is not claimed:** Nova has had no coverage-guided fuzzing, no
 third-party security review, and no CI. The corrupted-input testing it has

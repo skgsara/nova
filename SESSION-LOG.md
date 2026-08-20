@@ -7,6 +7,95 @@ anything as our develop history").
 
 ---
 
+## 2026-08-19 — Session 33 (cont): the human sign-off gate, and D-PERF-003
+## decided and fixed at the gate
+
+Agent: Kimi (Moonshot AI) assisting Sara's review. Code changed:
+`live/session.hpp` / `live/session.cpp` (`max_opening_sec`, the opening
+cap), `tests/test_live_session.cpp` (T14). Files changed:
+`docs/audit/HUMAN-SIGNOFF.md` (new, the gate record), `docs/06` (Gate 0's
+last NEEDS SARA values filled; receiver-manual revisions recorded; status
+brought level), `docs/05` (the opening cap beside the page cap),
+`README.md` (D-PERF-003 paragraph updated; audit section to past tense),
+`CHANGELOG.md`. Suite still 38, all green after the code change.
+
+**All six gate items signed.** Gate 0 values (including, freshly grounded
+in a JSC4 measurement — 553 MB peak and ~1.1% of one core on the 61-minute
+chart — TARGET_FLOOR_RAM = 2 GB and REALTIME_BUDGET = ≤25% of one core);
+all 33 load-bearing findings; the 19-entry gap register (seven entries
+resolved or moot since writing, two of them by this session's own work);
+all of Pass B including its "cannot certify AI provenance" caveat; the
+nine README claims; the cross-verification report.
+
+**D-PERF-003 was decided, not just reviewed.** Sara chose "abandon": a
+start tone that never ends now meets `max_opening_sec` (300 s — three
+times FAXSignal's two-opening ~100 s, so it can only fire on a
+pathological signal), the session returns to READY, and the retained
+store falls back to the pre-roll bound. The audit's last open critical is
+closed. Prior art checked per the standing rule: none applies — this is
+session-lifetime policy, not DSP, and the shape follows the project's own
+existing page cap rather than anything in the corpus. The screamer is T14
+(a 120 s tone, a 30 s cap, READY→START TONE→READY, store ≤ the pre-roll).
+
+**The lesson for the next agent: a finding labelled "reasoned, not
+measured" can be closed by decision.** Three code readings asserted
+D-PERF-003 and two dynamic attempts failed to reproduce it, and the right
+move turned out to be neither a fourth reading nor a third measurement but
+the question the finding was actually asking: what SHOULD a receiver do
+on a stuck carrier? Once that was answered, the fix was twenty lines.
+
+**Next step: the release decision itself.** The audit, cross-verification
+and sign-off are all complete; what remains is Sara's call on the
+standing blockers — no CI (E-GAP-002), no version or tags (E-GAP-001),
+Pass C's 20 maintainability findings deferred by choice, and session 31's
+two by-hand GUI runs still outstanding — and then publication, if she
+judges it ready. Nothing in the tree currently forces any of those; they
+are judgement calls, not work items.
+
+---
+
+## 2026-08-19 — Session 33: cross-verification run, by the third model
+
+Agent: Kimi (Moonshot AI), via Kimi Code CLI — neither Opus 5 (author)
+nor Sonnet 5 (all five passes), and a different vendor, which
+`docs/08` §1 called the stronger option. Files changed:
+`docs/audit/CROSS-VERIFICATION-REPORT.md` (new), `docs/08` (status and
+verifier row). No code touched; no tests run — nothing to test.
+
+**The audit's last step is done.** All 10 clause-citing load-bearing
+findings verified against direct `pdftotext -layout` extractions of
+WMO-No. 386 (2023) and ISO 9876:2015: every cited clause exists and
+every paraphrase is honest. **A-CLAIM-007 — the register's highest
+priority — verifies cleanly**: §5.5.1 is the sub-carrier FM clause about
+1900 Hz, §5.5.2 is direct FSK of the RF carrier about f₀ with no
+reference to 1900 Hz, and the extraction shows why the miscite was easy
+(both clauses carry ±400 Hz for HF, in different domains). The 24
+no-clause load-bearing findings recorded UNVERIFIABLE by design. Random
+10% sample of the remaining 66 findings (seed 920616308, 7 drawn:
+B-RISK-003/004/005/010, C-MAINT-002, D-GAP-003/005) — all seven cite
+files or register gaps, no clauses, so UNVERIFIABLE as drawn; the draw
+was not re-run to force a clause. **Citation failure rate: zero; the
+full re-verification trigger is not met.**
+
+One discrepancy reported, not resolved: `docs/08`'s prose says the
+register holds "all 27 load-bearing findings"; its tables list 34
+entries (33 unique IDs). All 34 were processed. The verifier also
+self-reported an isolation fact: the repo's own AGENTS.md-mandated
+startup (START-HERE, top session-log entry) was read before assignment;
+verdicts rest on the PDF extractions, and the disclosure is in the
+report.
+
+**Next step: the human sign-off gate** — protocol §"Human sign-off
+gate", and `docs/08` §8 lists what it covers: every Gate 0 value, every
+load-bearing finding, the entire gap register, all of Pass B, every
+README conformance claim, and the cross-verification report itself. The
+other release blockers are unchanged from session 32: D-PERF-003's fix
+is Sara's design decision, no CI, no version or tags, Pass C's 20
+findings deferred by choice, and session 31's two by-hand GUI runs still
+outstanding.
+
+---
+
 ## 2026-08-16 — Session 32 (closing): Passes A and E, and a finding I could
 ## not make fail
 

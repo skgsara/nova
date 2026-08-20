@@ -485,6 +485,17 @@ minutes — past the library's longest transmission, so it can only fire on
 a missed stop tone), and its path is the operator stop's: freeze, decode,
 DECODING, no invented STOP TONE.
 
+Its sibling is the opening cap (`max_opening_sec`, default 300 s), added
+session 33 for D-PERF-003 [decided by Sara 2026-08-19]: a start tone that
+NEVER ends meets none of the other bounds — `phasing_wait_sec` is measured
+from the tone's end, the page cap from drawing's start — so the session
+would sit in START TONE with the retained store growing without bound. On
+expiry the opening is abandoned and the session returns to READY; 300 s is
+three times the longest real opening in the library (FAXSignal's two
+openings before one picture), so it can only fire on a pathological
+signal. The preview's stop-tone ends the picture only while drawing, and a
+stuck carrier never draws.
+
 ---
 
 ## 5. The streaming tone detector

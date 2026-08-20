@@ -1,7 +1,10 @@
 # 08 — Cross-verification handover
 
-**Status: NOT STARTED. This is the last step of the audit and it has not
-been run.**
+**Status: RUN — 2026-08-19, by Kimi (Moonshot AI). Report:
+`docs/audit/CROSS-VERIFICATION-REPORT.md`. Result: 10 VERIFIED,
+0 CITATION FAILS, 31 UNVERIFIABLE (no clause cited); failure rate zero,
+no re-verification triggered. One discrepancy noted: this file's prose
+said "27 load-bearing findings"; the register tables list 34 entries.**
 
 The protocol's cross-verification exists because *"the worst failure mode
 of this audit is a hallucinated citation."* This file is the packet to
@@ -19,7 +22,7 @@ auditors**. Recorded so the constraint is checkable:
 |---|---|
 | Author of the code (disqualified from auditing entirely) | Claude Opus 5 |
 | Passes A, B, C, D, E | Claude Sonnet 5 |
-| **Cross-verifier — must be neither of the above** | **unassigned** |
+| **Cross-verifier — must be neither of the above** | **Kimi (Moonshot AI), 2026-08-19** |
 
 Within this toolchain that leaves Fable 5 or Haiku 4.5. A model from a
 different vendor would be stronger, because the failure being hunted —

@@ -9,11 +9,31 @@ narrative lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased
 
+### 2026-08-19 — cross-verified, sign-off gate complete
+
+Cross-verification run by a third model from a different vendor (Kimi,
+Moonshot AI): all 10 clause-citing load-bearing findings verified against
+WMO-No. 386 (2023) and ISO 9876:2015, zero citation failures
+(`docs/audit/CROSS-VERIFICATION-REPORT.md`). The human sign-off gate is
+complete: every Gate 0 value, all 33 load-bearing findings, the entire
+gap register, all of Pass B, every README conformance claim, and the
+cross-verification report, signed by Sara (`docs/audit/HUMAN-SIGNOFF.md`).
+
+**Fixed — unbounded live-session memory (D-PERF-003, the audit's last
+open critical):**
+- `SessionOptions::max_opening_sec` (300 s). A start tone that never ends
+  met none of the existing bounds, so the session sat in START TONE with
+  the retained store growing without limit. The opening is now abandoned
+  and the session returns to listening. Pinned by `live_session` T14.
+- Gate 0's last open values filled: TARGET_FLOOR_RAM = 2 GB and
+  REALTIME_BUDGET = ≤25% of one core (measured against JSC4's 61-minute
+  chart: 553 MB peak, ~1.1% of one core); the 16 receiver-manual
+  revisions recorded.
+
 ### 2026-08-16 — audited against `docs/07-audit-protocol.md`
 
 All five passes run by an agent that did not author the code, under a
-different model. Reports in `docs/audit/`. Cross-verification by a third
-model is **still outstanding** — see `docs/08-cross-verification-handover.md`.
+different model. Reports in `docs/audit/`.
 
 **Fixed — untrusted input (all three found by audit Pass D):**
 - `read_wav` clamped the declared data-chunk size to the bytes that exist.

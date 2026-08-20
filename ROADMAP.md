@@ -1148,11 +1148,14 @@ a page-read instead of a grep.
   similarity spot-check recorded (SOP L10 adapted: attribution check
   is the deliverable, since reuse is declared).
 
-## Audit (2026-08-16, session 32)  [5 of 5 passes DONE; cross-verification PENDING]
+## Audit (2026-08-16, session 32)  [COMPLETE — passes, cross-verification 2026-08-19, human sign-off 2026-08-19]
 
 Audited against `docs/07-audit-protocol.md` by an agent that did not
 author the code, under a different model (Sonnet 5). Gate 0 in `docs/06`,
-reports in `docs/audit/`, handover for the final step in `docs/08`.
+reports in `docs/audit/`. Cross-verified by a third model from a different
+vendor (Kimi, Moonshot AI) — zero citation failures
+(`docs/audit/CROSS-VERIFICATION-REPORT.md`) — and the human sign-off gate
+is complete (`docs/audit/HUMAN-SIGNOFF.md`).
 
 **Closed by remediation, same session:**
 1. ~~19 off-air recordings tracked with no redistribution basis, one from
@@ -1178,16 +1181,17 @@ reports in `docs/audit/`, handover for the final step in `docs/08`.
    an unimplemented m4a/ffmpeg input claim, and no security posture~~
    **Done** [Pass B, Pass E].
 
+**Closed at the sign-off gate, session 33:**
+8. ~~**`D-PERF-003` — unbounded live-session retention on a sustained
+   tone.**~~ **Done** [decided by Sara 2026-08-19: abandon at 300 s].
+   `SessionOptions::max_opening_sec`; the session leaves START
+   TONE/PHASING for READY and the retained store falls back to the
+   pre-roll bound. Pinned by `live_session` T14; documented in docs/05.
+11. ~~**Cross-verification not run.**~~ **Done** 2026-08-19 by Kimi
+   (Moonshot AI), a third model from a different vendor: 10 VERIFIED,
+   0 CITATION FAILS, failure rate zero.
+
 **Open, and these are the release blockers:**
-8. **`D-PERF-003` — unbounded live-session retention on a sustained tone.**
-   Confirmed by three independent code readings and **never reproduced**;
-   two dynamic attempts failed, the second because process RSS on
-   `nova-preview` grows identically for silence and for a stuck tone, so
-   the instrument could not see it either way. None of `preroll_sec`,
-   `phasing_wait_sec` or `max_picture_sec` covers the window. **The fix is
-   a design decision, not a bug fix**: when a start tone never ends, Nova
-   must either abandon the transmission and return to monitoring, or force
-   drawing to begin. That is Sara's call.
 9. **No CI of any kind.** The protocol requires the fixture regression to
    run in CI with failure blocking release. Complicated by the recordings
    being private: CI can run the 8 synthetic suites, and the other 30 need
@@ -1195,12 +1199,11 @@ reports in `docs/audit/`, handover for the final step in `docs/08`.
 10. **No version, no tags, no release notes.** `CMakeLists.txt` still
     carries `VERSION 0.0.0`, deliberately — a version number is a release
     decision. `CHANGELOG.md` now exists and records the unreleased state.
-11. **Cross-verification not run.** Needs a THIRD model, different from
-    Opus 5 (author) and Sonnet 5 (all five passes). Packet ready in
-    `docs/08`.
 12. **Pass C's 20 maintainability findings, unaddressed by choice.** None
     load-bearing. `stage_assembly` at 416 lines is both the longest
     function and the only nesting-depth violation in the tree.
+13. **Session 31's two by-hand GUI runs are still outstanding** — four of
+    four on-air sessions have found a defect a green suite could not see.
 
 **Not fixed because they are not defects:** the 240 lpm omission (WMO
 §5.1.5 lists four rates, ISO §4.2.4 requires three of a receiver — now

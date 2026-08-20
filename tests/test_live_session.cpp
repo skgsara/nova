@@ -43,6 +43,10 @@
 //     the tone's end, never enters PHASING, and still ends cleanly at the
 //     stop tone (synthetic — no library recording has a start tone and no
 //     phasing);
+//   - **the opening cap [D-PERF-003]**: a start tone that NEVER ends is a
+//     stuck carrier, not a transmission — the opening is abandoned at
+//     max_opening_sec, the session returns to READY, and the retained
+//     store is bounded by the pre-roll again (synthetic);
 //   - **one recording, one transmission, take the first** — the second
 //     opening of faxsignal-two-openings is ignored while drawing, and a
 //     second TRANSMISSION after SAVED starts a new session cycle
@@ -849,6 +853,59 @@ void test_start_rearms_from_saved() {
 
 }  // namespace
 
+// --------------------------------------------------------------------------
+// T14: the opening cap [D-PERF-003, decision by Sara 2026-08-19]. A start
+// tone that NEVER ends is a stuck carrier, not a transmission: the session
+// abandons the opening at max_opening_sec and goes back to listening, with
+// the retained store bounded again. Every other bound is measured from the
+// tone's end or from drawing, and neither exists here.
+// --------------------------------------------------------------------------
+void test_opening_cap() {
+    std::printf("\n== T14 a start tone that never ends is abandoned\n");
+    nova::GenOptions g;
+    g.start_sec = 120.0;   // the tone outlasts the cap several times over
+    g.phasing = false;     // and nothing ever follows it
+    g.stop_tone = false;
+    const nova::Image content = nova::gen_test_pattern(600, 30);
+    const std::vector<float> video =
+        nova::fm_demod(nova::gen_fax_signal(content, 30, g), 8000);
+    std::printf("    %.1f s of signal, all of it start tone\n",
+                video.size() / 8000.0);
+
+    nova::SessionOptions sopt;
+    sopt.max_opening_sec = 30.0;  // shorten the cap; the rule is pinned,
+                                  // not the 300 s of wall time
+    nova::LiveSession s(8000, sopt);
+    std::vector<nova::SessionState> seq;
+    auto collect = [&](const nova::SessionOutput& out) {
+        for (nova::SessionState st : out.entered) seq.push_back(st);
+    };
+    collect(s.start_capture());
+    bool abandoned = false;
+    for (std::size_t i = 0; i < video.size(); i += 1000) {
+        collect(s.push(video.data() + i,
+                       std::min<std::size_t>(1000, video.size() - i)));
+        if (!abandoned && s.state() == SS::kReady &&
+            std::find(seq.begin(), seq.end(), SS::kStartTone) !=
+                seq.end()) {
+            abandoned = true;
+            check(s.consumed_sec() <= 30.0 + 6.0,
+                  "abandoned soon after the cap");
+            check(s.retained_samples() <= 11 * 8000,
+                  "the retained store is bounded again (pre-roll, not the "
+                  "whole tone)");
+        }
+    }
+    collect(s.flush());
+    print_seq(seq);
+    check(abandoned, "the opening is abandoned back to READY");
+    check(seq == std::vector<nova::SessionState>(
+                     {SS::kReady, SS::kStartTone, SS::kReady}),
+          "READY -> START TONE -> READY, nothing else");
+    check(s.state() == SS::kReady,
+          "and the session is still listening for the next one");
+}
+
 int main(int argc, char** argv) {
     if (argc < 6) {
         std::fprintf(stderr,
@@ -869,6 +926,7 @@ int main(int argc, char** argv) {
     test_start_rearms_from_saved();
     test_page_cap(argv[5]);
     test_operator_values_reach_the_decode(argv[5]);
+    test_opening_cap();
 
     std::printf("\n%s (%d failure(s))\n", failures ? "FAILED" : "OK",
                 failures);

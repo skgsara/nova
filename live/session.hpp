@@ -128,6 +128,20 @@ struct SessionOptions {
     // (61 min), so the cap can only ever fire on a signal whose stop tone
     // was never heard.
     double max_picture_sec = 5400.0;
+    // Opening cap [D-PERF-003, decided by Sara 2026-08-19]: the guard for
+    // a start tone that NEVER ends. `phasing_wait_sec` is measured from
+    // the tone's end and `max_picture_sec` arms only when drawing begins,
+    // so neither bounds a transmission whose opening never closes — the
+    // retained store grew for as long as the tone held. On expiry the
+    // session abandons the opening and returns to READY, which both
+    // bounds the store (trim_preroll applies again) and keeps the next
+    // real transmission catchable. 300 s is three times the longest real
+    // opening in the library (FAXSignal's two openings before one
+    // picture, ~100 s); a real opening is 5–10 s of start tone
+    // [WMO §5.2.2.1] plus ~30 s of phasing [WMO §5.2.3.1]. Same
+    // philosophy as the page cap: a guard for a pathological signal, not
+    // a format limit.
+    double max_opening_sec = 300.0;
 
     DecodeHooks hooks;
 };
@@ -257,6 +271,7 @@ private:
     ToneKind tone_kind_ = ToneKind::kStartIOC576;
     bool tone_end_known_ = false;
     double tone_end_sec_ = 0.0;
+    long long opening_start_ = 0;   // the tone's true start, absolute
     long long watch_from_ = 0;      // watcher slice start, absolute
     long long next_watch_at_ = 0;   // absolute grid, fs_ apart
 
