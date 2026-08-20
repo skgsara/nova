@@ -90,6 +90,18 @@ combined work is GPLv3+.
                correlation kept per line rather than collapsed to a
                histogram mode. No code taken.
 
+Not derived from any of the above: M4.5's tuning strip
+(live/spectrum.cpp, session 36). Recorded here because two projects in
+the lineage — weatherfax_pi and the KiwiSDR FAX extension — do carry
+waterfall displays, so the absence of a lineage entry for Nova's could
+otherwise look like an omission rather than a fact. Its transform is a
+textbook iterative radix-2 Cooley-Tukey FFT with a Hann window, written
+for this project; its band mapping is linear arithmetic over a band Nova
+chose. Neither project's display code was read or adapted, and no
+waterfall appears anywhere in the sixteen-manual receiver survey the rest
+of Nova's UI is argued from (docs/04) — which is precisely why the strip's
+behaviour had to be argued from the signal instead.
+
 No GPLv2+ code is incorporated; where reuse is of GPLv2+-licensed
 algorithms, the re-implementation is GPLv3+. If you believe attribution
 is missing or incorrect, please open an issue — provenance accuracy is

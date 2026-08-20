@@ -935,6 +935,18 @@ status line uncritically, and it is worth carrying into M4.5: a
 frequency readout only becomes possible if Nova ever gains CAT control
 of a receiver, which is not on the roadmap.
 
+[Session 36, when M4.5 was built, and recorded here because the strip
+could be misread as having overturned this. It has not. **The tuning
+strip's axis is AUDIO frequency — 800-3000 Hz out of the sound card — and
+that is a different quantity from the receiver's dial frequency.** Nova
+can say "the black tone is arriving at 1560 Hz instead of 1500" because
+it can hear that; it still cannot say "you are on 13882.5 kHz", and it
+never will without CAT. The two are easy to conflate precisely because a
+waterfall in an SDR normally shows the second one. The panel still drops
+frequency, and the strip is not a frequency readout — it is a mistuning
+readout, which is the thing an audio-only decoder actually has evidence
+for.]
+
 ### 8.2 Which picture owns the pane while an edit is in progress
 
 **DECIDED 2026-08-13 (Sara, session 17): the edit holds the pane.**
@@ -1001,7 +1013,8 @@ Reasoning is what produced the design; it is not what produced the
 evidence.]
 
 **The spectrum/waterfall is not in M4** [DECIDED 2026-08-13, Sara,
-session 17]. It ships in M4.5. What stays in its place is a slim input
+session 17]. It ships in M4.5 — and did, in session 36, over 800-3000 Hz
+with the two WMO tones marked [ROADMAP M4.5]. What stays in its place is a slim input
 level meter, and the distinction is worth stating because it is not the
 same cut: without a level readout, an operator whose audio input is
 muted, clipping, or pointed at the wrong device has no diagnosis at all
@@ -1131,6 +1144,18 @@ in one `layout(W, H)` function — adding a region later is an edit, not a
 redesign. And the sidebar's empty lower area is **already spoken for**:
 it is where §8.2's compact receiving indicator (state, line count,
 thumbnail) goes when an edit holds the pane.
+
+[Session 36 built it, and both halves of this held. The strip went in the
+full-width position, above the meter, 72 px; the sidebar was never
+touched. And it was an edit rather than a redesign — four new constants,
+one line subtracting the height from `main_h`, one `resize` call, and the
+meter and status line moved down by a term. **The one thing that was NOT
+predicted here: the toggle.** A region computed from constants is easy to
+add, but it is also easy to make optional, and once the strip could be
+hidden the layout function had to produce two layouts rather than one —
+which is why `gui_layout` now checks the built-at == dragged-to invariant
+twice, once per layout. A claim about a layout function is a claim about
+every layout it can produce.]
 
 **6. No autosave toggle: every completed transmission is saved.** This
 follows the retention decision already taken [docs/04 answer 7 —

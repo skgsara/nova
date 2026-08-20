@@ -14,8 +14,8 @@
 
 namespace nova {
 
-// The version this build was configured with. "0.4.0" is milestone-based
-// in the project's own M0-M4 language: M4 (the live GUI shell) is the
+// The version this build was configured with. "0.4.5" is milestone-based
+// in the project's own M0-M4 language: M4.5 (the tuning aids) is the
 // milestone that is complete. It stays below 1.0 deliberately — see
 // README's Platforms and Security posture sections for what has not been
 // established, and `docs/audit/` for the register of what is still open.

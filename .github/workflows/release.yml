@@ -1,7 +1,7 @@
 # Release gate — what a version tag has to survive.
 #
 # Pass E requires that the fixture regression run and that failure block
-# release [E-GAP-002]. 30 of Nova's 39 suites need off-air recordings that
+# release [E-GAP-002]. 30 of Nova's 40 suites need off-air recordings that
 # this repository does not redistribute, so no hosted runner can execute
 # them. This workflow therefore gates a tag on two things:
 #
@@ -12,7 +12,7 @@
 # What that is worth, stated exactly: it cannot verify that the full suite
 # passed — it verifies that someone with the recordings ran it against
 # these exact bytes and that the tool refused to write the record unless
-# every one of the 39 suites passed with none skipped. The trust sits on
+# every one of the 40 suites passed with none skipped. The trust sits on
 # the operator and the script, not on this workflow. That is a weaker
 # claim than a hosted regression and a stronger one than a promise, and it
 # is the strongest available while the recordings stay private.

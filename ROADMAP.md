@@ -1224,7 +1224,7 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
 **Closed by remediation, session 35:**
 10. ~~**No version, no tags, no release notes.**~~ **Done** [E-GAP-001].
     `project(nova VERSION 0.4.0)` — milestone-based, M4 being the
-    milestone that is complete — reaches the code through one generated
+    milestone that is complete (0.4.5 since session 36 closed M4.5) — reaches the code through one generated
     header (`core/version.hpp.in`), and all five binaries answer
     `--version`. `version_flag` is the screamer: it compares what each
     binary PRINTS against what CMake was told, so a hand-written literal
@@ -1238,7 +1238,7 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
 
 **Open, and these are the release blockers:**
 9. **CI exists but has never run** [E-GAP-002, partial].
-   `.github/workflows/ci.yml` builds and runs the 9 fixture-independent
+   `.github/workflows/ci.yml` builds and runs the 10 fixture-independent
    suites on macOS arm64 and Linux x86-64; `.github/workflows/release.yml`
    gates a `v*` tag on those suites, on the tag matching the declared
    version, and on a full-suite record whose commit is the tagged commit.

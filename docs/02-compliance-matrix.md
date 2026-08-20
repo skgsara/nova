@@ -12,6 +12,16 @@ radio-receiver RF performance (sensitivity, selectivity, IF/image
 rejection); §4.4 IEC 60945 environmental; §6 marking; §7 crew
 information.
 
+**M4.5's tuning strip satisfies no clause here, and that is deliberate**
+(noted session 36 so a later reader does not go looking for the row).
+Tuning belongs to the radio receiver, which is §4.3 — out of scope above,
+because Nova does not have one. The strip is an operator aid Nova adds
+beyond the standard: it shows where the two WMO tones are arriving in the
+AUDIO band [WMO §5.2.1], which is evidence of MISTUNING, not a frequency
+readout and not a receiver function. Its screamers (`tuning_spectrum`,
+`gui_layout`'s strip block) are correctness tests, not compliance
+evidence, and should not be cited as the latter.
+
 | Clause | Requirement (paraphrase) | Software translation | Test | Status |
 |---|---|---|---|---|
 | §4.2.2 | Accept AF input −10…+10 dBm, shifts ±150 and/or ±400 Hz about 1900 Hz | Wide usable input-level range by an amplitude-normalized discriminator; both deviation modes supported and selectable | synthetic: both deviations decode and a clean LF signal reports a linear timebase (`roundtrip [6]`); amplitude sweep (`roundtrip [11]`); CLI `--dev 150|400` | synthetic ✓ |

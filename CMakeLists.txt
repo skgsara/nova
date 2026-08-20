@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
-# 0.4.0 is milestone-based, in the project's own M0-M4 language: M4, the
-# live FLTK/RtAudio shell, is the milestone that is complete. It is the
-# ONLY place the version is written [E-GAP-001]; core/version.hpp.in is
-# expanded from it and `version_flag` fails if any binary disagrees.
+# 0.4.5 is milestone-based, in the project's own M0-M4 language: M4.5,
+# the tuning aids, is the milestone that is complete (M4, the live
+# FLTK/RtAudio shell, was 0.4.0 in session 35). It is the ONLY place the
+# version is written [E-GAP-001]; core/version.hpp.in is expanded from it
+# and `version_flag` fails if any binary disagrees.
 project(nova VERSION 0.4.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -430,7 +431,7 @@ nova_fixture_test(NAME tones_fixture_nmc_stop COMMAND nova-test-tones-fixture
 # screen x is the column the ruler names there, at every zoom, scroll
 # offset and both IOC widths. Unguarded: it tests a pure nova-live
 # function, so it needs no window and no audio device and runs in every
-# build, including NOVA_BUILD_GUI=OFF. It is one of the 37 (+2 with the
+# build, including NOVA_BUILD_GUI=OFF. It is one of the 38 (+2 with the
 # GUI). (This line read "24, +1 with the GUI" until session 29 — two
 # counts out of date, and missed by session 28's sweep of exactly this
 # class of error, which corrected three others.)
@@ -645,7 +646,7 @@ if(NOVA_BUILD_GUI)
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
     # output identical to one dragged to it. The first test in the
-    # project to cover FLTK at all, and one of the two in "37 (+2 with the
+    # project to cover FLTK at all, and one of the two in "38 (+2 with the
     # GUI)".
     # It drives the built binary through a CMake script so it stays
     # portable; it exists only when nova-gui does.
@@ -661,7 +662,7 @@ if(NOVA_BUILD_GUI)
     # and the two-click slant. Driven through --state / --metrics /
     # --click / --nudge / --then-state, so it needs no window and no
     # audio device; guarded with nova-gui, the second of the two
-    # in "37 (+2 with the GUI)".
+    # in "38 (+2 with the GUI)".
     # NOVA_FIXTURE and NOVA_TMP arrived with session 31's offline capture:
     # §8.2's receiving indicator needs a transmission arriving behind an
     # edit, so this suite now feeds a real recording through the real

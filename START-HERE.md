@@ -33,9 +33,9 @@ in Hz rather than merely looking like a spectrum;
 `gui_layout` and `gui_shell` join when FLTK and RtAudio are installed.)
 
 **Since session 35 the tree carries a version and a CI workflow.** Every
-binary answers `--version` with `0.4.0` — milestone-based, M4 being the
-milestone that is complete — and `.github/workflows/ci.yml` builds and runs
-the 9 fixture-independent suites on macOS and Linux. **That workflow has
+binary answers `--version` with `0.4.5` — milestone-based, M4.5 (the tuning
+aids) being the milestone that is complete — and `.github/workflows/ci.yml`
+builds and runs the 10 fixture-independent suites on macOS and Linux. **That workflow has
 never executed**, because the repository still has no remote; it is written
 and its assertions were checked by hand against a fixture-less build, which
 is not the same as having been seen green. The 30 fixture-gated suites can

@@ -21,8 +21,9 @@ changed: `tests/gui_layout.cmake` (the strip block),
 `tests/test_live_engine.cpp` (`test_tuning_strip`),
 `.github/workflows/{ci,release}.yml` and `tools/record-fixture-regression.sh`
 (inventory counts), `README.md`, `START-HERE.md`, `ROADMAP.md`,
-`CHANGELOG.md`. Suite: 39 → **40** (38 without the GUI); 40/40 green,
-nothing skipped, zero warnings, 275.7 s.
+`CHANGELOG.md`, `NOTICE`, `docs/02-compliance-matrix.md`,
+`docs/05-m4-shell-design.md`, `core/version.hpp.in`. Suite: 39 → **40**
+(38 without the GUI); 40/40 green, nothing skipped, zero warnings, 268 s.
 
 **Sara's call at the top of the session: finish M4.5 — the last milestone
 before release — then wrap up for tests and release.** M4.5 is complete.
@@ -105,6 +106,48 @@ that vanishes against a strong signal, and a 40-row waterfall that turns
 out to be too short to show a fade are all defects no check here can have.
 Four of four on-air sessions have found a defect a green suite could not
 see, and this is the surface most exposed to that.
+
+**Documentation pass, at Sara's request to close the session.** Beyond
+the obvious count and version updates, three notes were added because the
+strip invites a wrong inference rather than because anything was stale:
+
+- `NOTICE` now records that the strip is derived from nothing in the
+  lineage. Two projects in it — weatherfax_pi and KiwiSDR FAX — DO carry
+  waterfalls, so the absence of a lineage entry for Nova's could read as
+  an omission rather than a fact. The FFT is textbook radix-2
+  Cooley-Tukey written here; neither project's display code was opened.
+- `docs/02` now says the strip satisfies **no** ISO clause, deliberately.
+  Tuning belongs to the radio receiver — §4.3, already out of scope
+  because Nova has not got one — and `tuning_spectrum` is a correctness
+  test, not compliance evidence. Without the note a later auditor would
+  reasonably go looking for the row.
+- `docs/05` §8.1 now guards the distinction the strip is most likely to
+  be misread on: **its axis is AUDIO frequency, not the receiver's dial
+  frequency.** The panel still drops frequency and always will without
+  CAT control. Nova can say "black is arriving at 1560 Hz instead of
+  1500"; it cannot say what megahertz you are on. A waterfall in an SDR
+  normally shows the second thing, which is exactly why it needed saying.
+
+`docs/05` §8.3 item 5 also got its outcome recorded, because it made a
+prediction worth grading: adding a region later would be "an edit, not a
+redesign". It was — four constants, one subtraction, one resize. What it
+did not predict is the toggle, and the toggle is what made the layout
+function produce TWO layouts instead of one, which is why `gui_layout`
+now checks the built-at == dragged-to invariant twice. A claim about a
+layout function is a claim about every layout it can produce.
+
+Untouched on purpose: everything in `docs/audit/`, whose reports are
+signed and dated records of what the auditors were given, and the earlier
+dated entries in `CHANGELOG.md` and this file. The dated-artifact rule
+does not bend for a count that has moved on.
+
+**The fixture-regression record was deliberately NOT re-run.** It
+describes `bc1c595` and is stale, exactly as session 35 predicted its own
+committed record would become. Re-running it now would produce an
+artifact that goes stale again the moment the three by-hand GUI runs
+produce a fix, and its whole value is being the commit that was actually
+tested. It belongs immediately before a tag, not at the end of a session
+with release blockers still open.
 
 **Next step: the by-hand GUI runs, now THREE things in one sitting.**
 Session 31's two — two transmissions through a real receiver with an edit

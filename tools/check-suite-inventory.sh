@@ -6,9 +6,9 @@
 #
 # Why this exists. CMakeLists.txt states the limit of the skip mechanism
 # plainly: "ctest counts a skipped test as passed in its headline, so
-# `ctest` still ends with 100% tests passed out of 39". On a CI runner,
-# which has no off-air recordings, 30 of the 39 suites skip — so a green
-# ctest exit code there means nine suites passed and thirty were absent.
+# `ctest` still ends with 100% tests passed out of 40". On a CI runner,
+# which has no off-air recordings, 30 of the 40 suites skip — so a green
+# ctest exit code there means ten suites passed and thirty were absent.
 # An automated gate that reads only the exit code would report a full
 # regression having run one quarter of it, which is this project's oldest
 # recurring failure: an instrument that reports success by default

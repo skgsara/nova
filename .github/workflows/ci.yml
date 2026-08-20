@@ -1,8 +1,8 @@
 # CI — build and run every suite that does not need an off-air recording.
 #
 # READ THIS BEFORE TRUSTING A GREEN TICK. On a public runner Nova has no
-# recordings: 30 of its 39 suites skip, and ctest still exits 0 and prints
-# "100% tests passed". A green run here means the 9 fixture-independent
+# recordings: 30 of its 40 suites skip, and ctest still exits 0 and prints
+# "100% tests passed". A green run here means the 10 fixture-independent
 # suites passed — the synthetic {IOC 288,576} x {60,90,120} matrix, the
 # tone detector, the untrusted-input guards, the ruler mapping, the PNG
 # round-trip, the audio ring, the hooks, the GUI layout and the version
