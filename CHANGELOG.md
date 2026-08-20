@@ -9,6 +9,29 @@ narrative lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased
 
+### 2026-08-20 — Pass C remediated: all 16 minor findings, all 3 gaps
+
+Maintainability only; zero behaviour change, no test changes, suite
+green (38/38; 36/36 with `-DNOVA_BUILD_GUI=OFF`) at every commit.
+
+- Every function in `core/`, `live/`, `cli/`, `gui/` now meets Gate 0's
+  MAX_FUNCTION_LINES = 80 and MAX_NESTING_DEPTH = 4 — including
+  `stage_assembly` (416 → 64) and the GUI's `main` (397 → 68) — verified
+  by a whole-tree scan, which also caught one straggler the refactor
+  itself missed (`print_result`).
+- `core/constants.hpp` holds `kPi` and `blackman()` (were duplicated
+  five and two times). `kInternalRate` deduplicated into
+  `cli/internal_rate.hpp`. The bare `1900.0` subcarrier literals now
+  cite `[WMO §5.5.1]`; the 63-tap FIR and `zero_crossings = 16` say what
+  they are.
+- `core/fax.cpp`'s header now signposts where the per-line sync lock
+  lives (C-MAINT-018, by signpost not file split — Sara's call).
+- Gaps closed: every session number cited in code resolves against
+  `SESSION-LOG.md` (C-GAP-002); the GUI-less build is verified and now
+  announces `nova-gui: SKIPPED - NOVA_BUILD_GUI=OFF` (C-GAP-003);
+  `gui/nova-gui.cpp` read end-to-end, nothing further found (C-GAP-004).
+- Full per-finding mapping appended to `docs/audit/PASS-C-REPORT.md`.
+
 ### 2026-08-19 — cross-verified, sign-off gate complete
 
 Cross-verification run by a third model from a different vendor (Kimi,

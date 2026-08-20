@@ -555,3 +555,84 @@ What this pass did NOT cover:
   - No file in the forbidden list (SESSION-LOG.md, ROADMAP.md, AGENTS.md, START-HERE.md,
     docs/06-audit-gate0.md, git history) was read at any point in this pass — isolation
     was maintained throughout.
+
+================================================================================
+REMEDIATION — appended 2026-08-20 (session 34), per the dated-artifact rule
+================================================================================
+
+All 16 minor findings remediated; all 3 gaps closed. Behaviour-preserving
+throughout: no logic changes, no test changes. Verification: full build
+-Wall -Wextra with zero warnings; ctest 38/38 (GUI config) and 36/36
+(-DNOVA_BUILD_GUI=OFF); a whole-tree function-length scan (core/, live/,
+cli/, gui/) reports zero functions over 80 lines and none deeper than 4.
+Commits on branch m4-gui-surfaces: 7238e41 (constants), e033d71 (group B),
+eda1f71 (group D), 181793f (group C), d3081f5 (group E), 0aeec53 (group A),
+plus two follow-ups noted below.
+
+C-MAINT-001  CONFORMS  stage_assembly 416 -> 64 (correct_line_starts,
+             line_correction, segment_residual_line, relock_dropout_runs,
+             relock_row, intra_line_break, place_adrift_row, draw_rows).
+C-MAINT-002  CONFORMS  Chain A: innermost if/else-if/else -> relock_row.
+             Chain B: the r.size()>=4 block -> segment_residual_line.
+C-MAINT-003  CONFORMS  refine_period 91->54, stage_onset 139->48,
+             stage_dead_sector 175->69, stage_phasing 106->33,
+             stage_track 102->71, stage_fit 149->65, stage_segment 93->38,
+             stage_timebase 125->56, stage_change_points 129->47.
+C-MAINT-004  CONFORMS  detect_phasing 297->55 (grow_run, trim_run_ends,
+             measure_nonlin, absolute_anchor, judge_run).
+C-MAINT-005  CONFORMS  detect_tones 93->23 (scan_tone).
+C-MAINT-006  CONFORMS  read_wav 109->80 (pcm_traits<Sample> +
+             decode_frames<Sample> collapse the five sample branches).
+C-MAINT-007  CONFORMS  gen_fax_signal 107->67 (gen_line).
+C-MAINT-008  CONFORMS  LiveEngine::collect_batch 186->80 (six file-local
+             helpers along the audit's four seams).
+C-MAINT-009  CONFORMS  try_acquire 103->50, draw_row 88->73.
+C-MAINT-010  CONFORMS  push 106->67 (had grown from the audited 91 when
+             D-PERF-003's opening cap landed), watch_step 88->67.
+C-MAINT-011  CONFORMS  mains 178/114/100 -> 23/73/57 (parse_args +
+             formatter in each). Follow-up: the extracted print_result in
+             nova-decode.cpp was itself still 138 lines and was missed by
+             the group (it checked the mains, not the helpers); the
+             whole-tree scan caught it and print_timebase was extracted
+             (print_result now 79).
+C-MAINT-012  CONFORMS  gui main 397->68 (parse_args, run_actions,
+             configure_shell, print_usage), create 253->9, apply_state
+             250->64, print_metrics 133->10, click_image 105->54,
+             layout 121->44. --metrics/--mark output verified
+             byte-identical; load-bearing orderings preserved and listed
+             in commit d3081f5.
+C-MAINT-013  CONFORMS  the nine Action blocks go through a push() lambda
+             inside parse_action_flag.
+C-MAINT-015  CONFORMS  1900.0 cited [WMO §5.5.1] at all six sites;
+             kInternalRate deduplicated into cli/internal_rate.hpp with
+             the fixture-rate rationale; the 63-tap FIR noted in
+             demod.cpp; zero_crossings=16 marked a tuned constant in
+             resample.hpp.
+C-MAINT-016  CONFORMS  core/constants.hpp holds kPi and blackman(); five
+             duplicate definitions and two duplicated formulas removed.
+C-MAINT-018  CONFORMS  signpost, per Sara's decision (not a file split):
+             core/fax.cpp's header comment now maps where the per-line
+             sync lock lives and disambiguates phasing.cpp.
+C-MAINT-014, C-MAINT-017, C-MAINT-019, C-BUILD-001: informational, no
+             action required; C-MAINT-017's session-citation coupling is
+             addressed by C-GAP-002's outcome below.
+
+C-GAP-002    CLOSED    Every session number cited in code (3-12, 16, 17,
+             20-23, 25-31) resolves against SESSION-LOG.md. Wrinkle
+             recorded: sessions 24 and 25 have no dated headings of their
+             own — their work is narrated inside the neighbouring entries
+             (session 25's live run inside Session 26's entry), so they
+             are findable by grep but not by heading scan.
+C-GAP-003    CLOSED    -DNOVA_BUILD_GUI=OFF configures, builds with zero
+             warnings, and passes 36/36 (the two GUI suites absent by
+             design). The path printed nothing at configure time — the
+             SKIPPED messages only covered missing deps — so a one-line
+             "nova-gui: SKIPPED - NOVA_BUILD_GUI=OFF" was added.
+C-GAP-004    CLOSED    gui/nova-gui.cpp read end-to-end during the group
+             E refactor: no further length, nesting, duplication or
+             comment issues beyond those remediated.
+
+One non-observable ordering note, disclosed by the group A worker:
+res.place_rms_px is now computed inside correct_line_starts instead of
+after the draw loop; nothing reads it in between except the final
+summary line, which is unchanged.

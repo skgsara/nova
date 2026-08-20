@@ -7,6 +7,58 @@ anything as our develop history").
 
 ---
 
+## 2026-08-20 — Session 34: Pass C remediated end to end, and the gate
+## measures every function, not the ones you meant
+
+Agent: Kimi (Moonshot AI), with five coder subagents (groups A-E).
+Code changed: all behaviour-preserving extraction/comment/dedupe —
+`core/fax.cpp` (the ten over-80 functions incl. `stage_assembly` 416 →
+64 and both depth-5 chains), `core/phasing.cpp`, `core/tones.cpp`,
+`core/wav.cpp`, `core/gen.cpp`, `live/engine.cpp`, `live/preview.cpp`,
+`live/session.cpp`, the three `cli/` mains + new `cli/internal_rate.hpp`,
+`gui/nova-gui.cpp` (six functions incl. `main` 397 → 68), new
+`core/constants.hpp`, one-line comments in `core/demod.{hpp,cpp}` /
+`core/resample.hpp` / `live/{engine,stream}.hpp`, and one
+`CMakeLists.txt` message. Files changed: `docs/audit/PASS-C-REPORT.md`
+(remediation appendix — every finding mapped, dated-artifact rule kept),
+`CHANGELOG.md`. Suite: 38/38 green at every commit, zero warnings;
+36/36 under `-DNOVA_BUILD_GUI=OFF`.
+
+**All 16 minor findings CONFORM; all 3 gaps CLOSED.** The per-finding
+numbers are in the report appendix; the shape of the work was five
+parallel groups, each with its own build dir, each gated on a full
+green suite before its commit. Two decisions were Sara's from the plan:
+full conformance (not worst-offenders-only), and C-MAINT-018 closed by
+a signpost comment in `core/fax.cpp`'s header, not a file split.
+
+**The lesson for the next agent: extracting code INTO a function does
+not make that function conform — the gate measures every function, and
+a scan that only re-checks the functions you set out to fix will miss
+the ones you created.** Group D brought the three CLI mains under 80 by
+extracting `print_result`, checked the mains, and stopped; the
+extracted formatter was itself 138 lines. A whole-tree scan at the end
+(one crude brace counter over every .cpp, run as the final gate rather
+than per-group) caught it — `print_timebase` came out and the tree now
+measures zero functions over 80 anywhere. Run the check over the whole
+tree, not over the diff.
+
+Also recorded, honestly: the quota cut mid-run left three groups
+half-landed (uncommitted work in `live/engine.cpp` and
+`gui/nova-gui.cpp`, nothing started in `core/fax.cpp`); all three
+resumed from context and completed cleanly. Group A disclosed one
+non-observable ordering change (`place_rms_px` computed inside
+`correct_line_starts`); it is in the appendix.
+
+**Next step: the release decision itself** — unchanged from session 33,
+now with Pass C no longer deferred-by-choice but done. Sara's call on
+the standing blockers: no CI (E-GAP-002), no version or tags
+(E-GAP-001), and session 31's two by-hand GUI runs still outstanding;
+then publication, if she judges it ready. The commits sit on
+`m4-gui-surfaces`; a merge to `main` and any push happen only when she
+asks.
+
+---
+
 ## 2026-08-19 — Session 33 (cont): the human sign-off gate, and D-PERF-003
 ## decided and fixed at the gate
 
