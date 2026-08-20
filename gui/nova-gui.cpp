@@ -138,7 +138,13 @@ constexpr int kWinH = 700;
 // (168 px), plus a gap. §8.3 predicted "roughly 880" for this; 678 + 168 + 4
 // is 850, and 880 keeps a 26 px gap between the two halves.
 constexpr int kMinW = 880;
-constexpr int kMinH = 420;
+// Raised from 420 in session 37. The sidebar's height is not negotiable —
+// its rows are fixed and the receiving indicator is the last of them — so
+// below this the correction block and the indicator were drawn OUTSIDE the
+// panel, over the tuning strip and the meter. That was true before the
+// status fields grew a row and is what `gui_layout`'s "the sidebar is
+// inside the panel" rule now refuses. Declared here, checked there.
+constexpr int kMinH = 540;
 constexpr int kMenuH = 25;        // §8.3: the File / Settings / Help bar
 constexpr int kControlRowH = 25;  // §8: "25 px control rows"
 constexpr int kRulerH = 18;
@@ -159,9 +165,29 @@ constexpr int kStripWaterfallH = kStripH - kStripTraceH - kStripAxisH;  // 40
 constexpr double kBlackHz = 1500.0;
 constexpr double kWhiteHz = 2300.0;
 constexpr int kStatusH = 22;
-constexpr int kPanelW = 200;
+// Widened from 200 in session 37, by the one thing that could decide it:
+// measurement. At 200 the value column was 126 px and the two longest
+// strings the panel can produce did not fit — "DRAWING - PREVIEW" needs
+// 132 px and the status fields' widest line needs 136 — so an operator read
+// a clipped state and a clipped quality line for four sessions [Sara,
+// session 37, from the first by-hand run of M4.5]. 220 gives the value
+// column 146 px. It costs the picture 20 px, which is the cheaper of the
+// two errors: a chart 20 px narrower is still a chart, and a state that
+// says "DRAWING - PREVIE" is a readout the operator cannot trust.
+//
+// The number is DECLARED here and the requirement is MEASURED by the
+// running program [see status_field_witness]; `gui_layout` compares the
+// two, so a longer state name or a wider format fails the suite instead of
+// reaching a window.
+constexpr int kPanelW = 220;
 constexpr int kPad = 4;
 constexpr int kPanelRowH = 20;
+// The sidebar's caption column, and the gap between a caption and the
+// control it names. Every row in the panel uses them — status fields,
+// Label, PHASE, SYNC — because captions that do not share a right edge read
+// as two panels [docs/05 §8].
+constexpr int kFieldCapW = 62;
+constexpr int kFieldGap = 4;
 constexpr int kFontSize = 12;  // §8: "12 px Helvetica"
 constexpr int kFrame = 2;      // §8: "two-pixel FL_UP_BOX / FL_DOWN_BOX"
 // The GUI queue's drain interval [docs/05 §2.3]: 50 ms, one repaint per
@@ -502,6 +528,116 @@ std::string sync_text(double ppm) {
     else
         std::snprintf(buf, sizeof buf, "%.1f", ppm);
     return buf;
+}
+
+// ---------------------------------------------------------------------------
+// The status panel's formatted values [docs/05 §8.1].
+//
+// One formatter per field, in one place, because the string an operator
+// reads and the string the width check measures have to be the same code.
+// That is session 20's ruler rule applied to the panel: a marker and the
+// thing it marks must not be two implementations.
+
+// IOC and rate report what Nova MEASURED, not what the dropdowns asked for
+// [Sara, session 37]. On AUTO the dropdown says "Auto", which is the
+// question; the panel's job is the answer, and until session 37 the Rate
+// row read "--" for the whole of a decoded chart while the PNG header knew
+// the number perfectly well. `forced` marks the case where the answer is
+// the operator's own, so the panel never hides which of the two it is.
+// Zero means not measured yet, and prints as "--" rather than as a
+// plausible default: an IOC of 576 shown before any tone has been heard
+// would be a guess wearing a measurement's clothes.
+std::string ioc_text(int ioc, bool forced) {
+    if (ioc <= 0) return "--";
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%d%s", ioc, forced ? " (forced)" : "");
+    return buf;
+}
+
+// One decimal, always. `sync_text` above drops a trailing ".0" because a
+// ppm nudge is whole by construction; a MEASURED line rate is not, and the
+// digit that would be dropped is the one worth seeing — 119.9 lpm against a
+// nominal 120 is the whole quantity SYNC exists to trim. The size of that
+// trim is the Clock row's business and is reported there in ppm.
+std::string rate_text(double lpm, bool forced) {
+    if (lpm <= 0.0) return "--";
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.1f%s", lpm, forced ? " (forced)" : "");
+    return buf;
+}
+
+// Session 26's seam count still said out loud, and session 37 gave it a row
+// it fits in: seams are skips in the delivered AUDIO, not decode quality,
+// and a stepping capture chain is something the operator can still act on
+// while the broadcast is running. Zero is information too.
+std::string lines_text(int locked, int lines, int seams) {
+    if (lines <= 0) return "--";
+    char buf[48];
+    std::snprintf(buf, sizeof buf, "%d/%d, %d seam%s", locked, lines, seams,
+                  seams == 1 ? "" : "s");
+    return buf;
+}
+
+std::string clock_text(double ppm, bool valid) {
+    if (!valid) return "--";
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%+.0f ppm", ppm);
+    return buf;
+}
+
+// The widest string each status field is expected to produce, built BY THE
+// FORMATTERS above wherever one exists. `--metrics` measures these with the
+// panel's own font and `gui_layout` checks them against the boxes, so a
+// format change that outgrows the column fails the suite.
+//
+// **What this cannot do, said plainly: it is a realistic worst case, not a
+// bound.** Two of the numbers below have no ceiling in the type system —
+// the line counts are the session's own picture cap (5400 s) at the fastest
+// rate WMO §5.1.5 lists (240 lpm), and the seam count is a judgement. A
+// recording that beat both would still clip. What the check does buy is
+// that nobody can WIDEN A FORMAT without hearing about it, which is the
+// failure that actually happened.
+constexpr int kFields = 7;
+enum StatusField {
+    kFMode = 0, kFIoc, kFRate, kFState, kFLines, kFClock, kFStarted
+};
+const char* const kFieldNames[kFields] = {"Mode",  "IOC",   "Rate", "State",
+                                          "Lines", "Clock", "Started"};
+// "--" rather than blank, because blank is a legal value for the operator
+// label and the two must not look alike [docs/05 §8.1].
+const char* const kFieldValues[kFields] = {"AUTO", "--", "--", "IDLE",
+                                           "--",   "--", "--"};
+const char* const kFieldTags[kFields] = {
+    "field_mode",  "field_ioc",   "field_rate", "field_state",
+    "field_lines", "field_clock", "field_started"};
+
+// Every state the session can be in, so the State row's witness is the
+// enum itself rather than a copy of it somebody has to remember to update.
+const LiveState kAllStates[] = {
+    LiveState::kIdle,     LiveState::kReady,    LiveState::kStartTone,
+    LiveState::kPhasing,  LiveState::kDrawingPreview,
+    LiveState::kStopTone, LiveState::kDecoding, LiveState::kSaved};
+
+std::vector<std::string> status_field_witnesses(int i) {
+    switch (i) {
+        case kFMode: return {"AUTO", "FORCED"};
+        // 576 is the wider of the two IOCs WMO §5.2.2 defines.
+        case kFIoc: return {ioc_text(576, true)};
+        // 240 lpm is the fastest rate WMO §5.1.5 lists.
+        case kFRate: return {rate_text(240.0, true)};
+        case kFState: {
+            std::vector<std::string> v;
+            for (const LiveState st : kAllStates)
+                v.push_back(nova::session_state_name(st));
+            return v;
+        }
+        // The session's own picture cap, 5400 s, at 240 lpm.
+        case kFLines: return {lines_text(21600, 21600, 999)};
+        case kFClock: return {clock_text(-9999.0, true)};
+        // Fixed width by construction: `%Y%m%dT%H%M%SZ` [live/engine.cpp].
+        case kFStarted: return {"20260820T155833Z"};
+    }
+    return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -1203,8 +1339,6 @@ private:
     int white_ = -1;
 };
 
-constexpr int kFields = 6;  // Mode, IOC, Rate, State, Quality, Started
-
 struct Shell {
     ShellWindow* win = nullptr;
     Fl_Menu_Bar* menu = nullptr;
@@ -1353,7 +1487,17 @@ struct Shell {
     std::map<std::string, Feed> feeds;
     // Fl_Widget::label stores the POINTER, not the text, so every
     // formatted label needs storage that outlives the call.
-    char quality_buf[64] = "--";
+    // What the panel is currently reporting about the transmission it is
+    // showing. Zero and empty mean "not measured", which the formatters
+    // print as "--" [see ioc_text]. Set from the engine's live
+    // measurements while a picture is arriving and from the decode's own
+    // verdict once it reports, and cleared when a new transmission begins
+    // — a panel still showing the last chart's geometry beside the new
+    // chart's state would be two transmissions in one readout.
+    int shown_ioc = 0;
+    double shown_lpm = 0.0;
+    bool shown_forced = false;
+    std::string started_utc;
     char lines_buf[32] = "line --";
     char status_buf[160] = "IDLE";
     // The clock the picture on the pane was DRAWN on — the same number the
@@ -1685,13 +1829,6 @@ struct Shell {
         title->labelfont(FL_HELVETICA_BOLD);
         title->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE);
 
-        static const char* kFieldNames[kFields] = {"Mode", "IOC",     "Rate",
-                                                   "State", "Quality", "Started"};
-        static const char* kFieldValues[kFields] = {"AUTO", "--",   "--",
-                                                    "IDLE", "--",   "--"};
-        static const char* kFieldTags[kFields] = {
-            "field_mode",  "field_ioc",     "field_rate",
-            "field_state", "field_quality", "field_started"};
         for (int i = 0; i < kFields; i++) {
             field_cap[i] = caption(kFieldNames[i]);
             field_val[i] = value(kFieldValues[i]);
@@ -1703,6 +1840,16 @@ struct Shell {
         cap_label = caption("Label");
         label_input = new Fl_Input(0, 0, 0, 0);
         label_input->textsize(kFontSize);
+        // The label is LIVE and STICKY [Sara, session 37]. Until then it
+        // was read once, when Start was pressed, and a run in AUTO presses
+        // Start once and then receives for hours — so every chart after the
+        // first was named with the first one's label and nothing the
+        // operator typed could change it. On every keystroke, so that at
+        // any instant the engine's label is what the box says; the engine
+        // uses it when it SAVES, which is what makes it apply to the
+        // transmission being received rather than to a moment.
+        label_input->callback(cb_label, this);
+        label_input->when(FL_WHEN_CHANGED);
         note("label_input", label_input);
 
         rule = new Fl_Box(0, 0, 0, 0);
@@ -1905,9 +2052,18 @@ struct Shell {
         meter->resize(0, main_y + main_h + strip_h, W, kMeterH);
         const int sy = main_y + main_h + strip_h + kMeterH;
         status_bg->resize(0, sy, W, kStatusH);
-        status_state->resize(kPad, sy, 240, kStatusH);
-        status_lines->resize(kPad + 250, sy, 120, kStatusH);
-        progress->resize(W - kPad - 160, sy + 3, 160, kStatusH - 6);
+        // The state field holds "SAVED - <filename>.png", so its content
+        // grows with the operator's label; at a fixed 240 px a twelve-
+        // character station name was already clipped [Sara, session 37,
+        // the same defect as the sidebar's one column over]. It takes
+        // whatever the row has left instead, which is the one honest
+        // answer for a field holding a name nobody here chose.
+        const int prog_x = W - kPad - 160;
+        const int lines_w = 120;
+        const int state_w = prog_x - lines_w - 2 * kPad - 10;
+        status_state->resize(kPad, sy, state_w, kStatusH);
+        status_lines->resize(kPad + state_w + 10, sy, lines_w, kStatusH);
+        progress->resize(prog_x, sy + 3, 160, kStatusH - 6);
     }
 
     // The sidebar, top to bottom in the panel's fixed width: the status
@@ -1920,13 +2076,15 @@ struct Shell {
         int py = main_y + kPad;
         title->resize(px + kPad, py, fw, kPanelRowH);
         py += kPanelRowH;
+        const int vx = px + kPad + kFieldCapW + kFieldGap;
+        const int vw = fw - kFieldCapW - kFieldGap;
         for (int i = 0; i < kFields; i++) {
-            field_cap[i]->resize(px + kPad, py, 62, kPanelRowH);
-            field_val[i]->resize(px + kPad + 66, py, fw - 66, kPanelRowH);
+            field_cap[i]->resize(px + kPad, py, kFieldCapW, kPanelRowH);
+            field_val[i]->resize(vx, py, vw, kPanelRowH);
             py += kPanelRowH;
         }
-        cap_label->resize(px + kPad, py, 62, kPanelRowH);
-        label_input->resize(px + kPad + 66, py + 1, fw - 66, kPanelRowH - 2);
+        cap_label->resize(px + kPad, py, kFieldCapW, kPanelRowH);
+        label_input->resize(vx, py + 1, vw, kPanelRowH - 2);
         py += kPanelRowH + kPad;
         rule->resize(px + kPad, py, fw, 2);
         py += 2 + kPad;
@@ -1955,13 +2113,13 @@ struct Shell {
         // Same three rows as before, so nothing below moves.
         const int arm_w = 48;
         const int arm_x = px + kPanelW - kPad - arm_w;
-        const int box_x = px + kPad + 66;
+        const int box_x = px + kPad + kFieldCapW + kFieldGap;
         const int box_w = 70;
-        cap_phase->resize(px + kPad, py, 62, kPanelRowH);
+        cap_phase->resize(px + kPad, py, kFieldCapW, kPanelRowH);
         phase_input->resize(box_x, py + 1, box_w, kPanelRowH - 2);
         phase_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
-        cap_sync->resize(px + kPad, py, 62, kPanelRowH);
+        cap_sync->resize(px + kPad, py, kFieldCapW, kPanelRowH);
         sync_input->resize(box_x, py + 1, box_w, kPanelRowH - 2);
         sync_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
         py += kPanelRowH;
@@ -2340,10 +2498,17 @@ struct Shell {
         // and lights up with no transition when it is [§8.3 item 1, §8.4
         // item 5].
         if (image_cols() > 0) ruler->activate(); else ruler->deactivate();
-        field_val[1]->label(image_cols() > 0 ? ioc->text() : "--");
-        field_val[2]->label(rate_explicit() ? rate->text() : "--");
-        field_val[0]->label(ioc_explicit() && rate_explicit() ? "FORCED"
-                                                             : "AUTO");
+        field_val[kFMode]->label(ioc_explicit() && rate_explicit() ? "FORCED"
+                                                                   : "AUTO");
+        // The MEASURED geometry, not the dropdowns' [Sara, session 37].
+        // Until then this row echoed the question back: on AUTO the IOC
+        // read "Auto" and the Rate read "--" for the whole of a decoded
+        // chart, while the PNG header beside it carried both numbers.
+        field_val[kFIoc]->copy_label(ioc_text(shown_ioc, shown_forced).c_str());
+        field_val[kFRate]->copy_label(
+            rate_text(shown_lpm, shown_forced).c_str());
+        field_val[kFStarted]->copy_label(
+            started_utc.empty() ? "--" : started_utc.c_str());
     }
 
     // --- the live half: bring it up, drive it, take it down -----------------
@@ -2366,6 +2531,12 @@ struct Shell {
         opt.spectrum = strip_opt;
         engine.reset(new nova::LiveEngine(static_cast<int>(audio_rate), opt));
         engine->run();
+        // A device change destroys the engine and builds a new one, and a
+        // new engine has no label. Without this, changing input device
+        // would silently un-name every chart that followed [see cb_label].
+        engine->set_label(label_input && label_input->value()
+                              ? label_input->value()
+                              : "");
 
         RtAudio::StreamParameters p;
         p.deviceId = d.id;
@@ -2566,6 +2737,17 @@ struct Shell {
                     if (m.ioc > 0)
                         measured_cols =
                             static_cast<int>(std::lround(m.ioc * kPi));
+                    // A NEW transmission [see EngineMessage::started_utc]:
+                    // the previous chart's geometry is not this one's, so
+                    // the two rows that report it go back to "--" and are
+                    // refilled by the tick below as this transmission
+                    // measures them.
+                    if (m.started_utc != started_utc) {
+                        started_utc = m.started_utc;
+                        shown_ioc = 0;
+                        shown_lpm = 0.0;
+                        shown_forced = false;
+                    }
                     break;
                 case nova::EngineMsg::kRowsDrawn:
                     rows_drawn = m.rows_total;
@@ -2610,8 +2792,31 @@ struct Shell {
         // A re-render starting or finishing changes no state and draws no
         // rows — the session stays in SAVED throughout — so it is its own
         // reason to re-apply the transport and the progress bar.
+        // The live geometry, pulled rather than posted [see
+        // LiveEngine::measured_ioc]: the rate MOVES while a picture is
+        // drawn — an operator SYNC trim changes it with no state change to
+        // hang a message on — so a message-driven readout would sit still
+        // through exactly the correction it exists to show. Zero means the
+        // transmission is over and the decode is the authority now, so it
+        // does not overwrite what `set_quality` left.
+        bool geom_changed = false;
+        if (const int gi = engine->measured_ioc(); gi > 0 && gi != shown_ioc) {
+            shown_ioc = gi;
+            geom_changed = true;
+        }
+        if (const double gl = engine->measured_lpm(); gl > 0.0 &&
+                                                      gl != shown_lpm) {
+            shown_lpm = gl;
+            geom_changed = true;
+        }
+        if (const bool gf = engine->measured_forced(); gf != shown_forced) {
+            shown_forced = gf;
+            geom_changed = true;
+        }
+
         const bool rr = engine && engine->redecoding();
-        if (state_changed || rows_changed || rr != was_rerendering) {
+        if (state_changed || rows_changed || geom_changed ||
+            rr != was_rerendering) {
             was_rerendering = rr;
             apply_state();
             update_status();
@@ -2642,10 +2847,17 @@ struct Shell {
         // caught) is exactly what the operator can still act on — switch
         // SDRs — while the broadcast is on. Zero is information too: it
         // is what cleared Nova's own capture on the clean JMH pair.
-        std::snprintf(quality_buf, sizeof quality_buf,
-                      "%d/%d, %+.0f ppm, %d seams", r.locked_lines, r.lines,
-                      r.clock_ppm, r.seams);
-        field_val[4]->label(quality_buf);
+        field_val[kFLines]->copy_label(
+            lines_text(r.locked_lines, r.lines, r.seams).c_str());
+        field_val[kFClock]->copy_label(clock_text(r.clock_ppm, true).c_str());
+        // The decode is the authority on the geometry from here: the
+        // renderer that measured the live numbers no longer exists. The
+        // rate is taken from the MEASURED line period rather than from the
+        // nominal `lpm` it selected, so this row and the live one it
+        // replaces are the same quantity and the readout settles instead
+        // of jumping.
+        shown_ioc = r.ioc;
+        shown_lpm = r.line_period_s > 0.0 ? 60.0 / r.line_period_s : 0.0;
         // ...and this is the clock a blank SYNC box means. A re-render
         // posts kBatchDone like any other decode, so after an Apply this
         // tracks the CORRECTED picture and the next nudge is relative to
@@ -2811,6 +3023,17 @@ struct Shell {
         s->state = LiveState::kIdle;
         s->start_live();
         s->apply_state();  // start_live's failure paths return before theirs
+    }
+
+    // §8.5 item 5's other half: Nova never renames, so a label typed after
+    // the automatic save reaches the PNG's text chunks on the next Apply
+    // and the file keeps the name it was given. That was already true in
+    // the engine; this is what finally delivers the typing to it.
+    static void cb_label(Fl_Widget*, void* p) {
+        Shell* s = static_cast<Shell*>(p);
+        if (!s->engine) return;
+        s->engine->set_label(s->label_input->value() ? s->label_input->value()
+                                                     : "");
     }
 
     static void cb_start(Fl_Widget*, void* p) {
@@ -3276,6 +3499,21 @@ void print_mark(const char* name, const Shell& s) {
                 s.engine && s.engine->pane_held() ? 1 : 0,
                 s.view ? s.view->image_rows() : 0, s.edit_dirty ? 1 : 0,
                 s.saves_seen, state_token(s.state));
+    // Session 37: the status panel, as the operator would read it, on its
+    // own line because these values contain spaces and the mark line's
+    // fields must not. Read straight off the WIDGETS — an inspection that
+    // recomputed them would pin the recomputation and leave the panel
+    // free to say something else, which is this file's standing lesson.
+    std::printf("panel %-12s", name);
+    for (int i = 0; i < kFields; i++) {
+        std::string tag = kFieldTags[i] + 6;  // past "field_"
+        const char* v = s.field_val[i]->label();
+        std::printf(" %s=\"%s\"", tag.c_str(), v ? v : "");
+    }
+    std::printf(" typed=\"%s\" saved=\"%s\"\n",
+                s.label_input && s.label_input->value()
+                    ? s.label_input->value() : "",
+                s.last_saved.c_str());
 }
 
 void print_metrics_regions(const Shell& s) {
@@ -3419,15 +3657,65 @@ void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
                 s.vscroll_visible() ? Fl::scrollbar_size() : 0);
     std::printf("  hscroll_px           \"%d\"\n",
                 s.hscroll_visible() ? Fl::scrollbar_size() : 0);
+    // The shell's OWN declared minimum [see kMinW/kMinH], so a check of
+    // what fits at the minimum can ask the program where the minimum is
+    // instead of carrying a copy of the number. Session 37: without this,
+    // `gui_layout`'s containment rule ran only at the sizes its own list
+    // named and could not see a minimum that was too small — which is
+    // exactly the defect that had been shipping.
+    std::printf("  min_w                \"%d\"\n", kMinW);
+    std::printf("  min_h                \"%d\"\n", kMinH);
     std::printf("  prefs_writable       \"%d\"\n", s.prefs.writable() ? 1 : 0);
     std::printf("  image_folder         \"%s\"\n",
                 s.image_folder.empty() ? "(unset)" : s.image_folder.c_str());
+}
+
+// The width check of session 37 [see status_field_witness / kPanelW].
+//
+// The panel's columns are DECLARED constants; what they have to hold is
+// MEASURED here, by the running program, with the panel's own font. Those
+// two numbers come from different places, which is what makes the
+// comparison in `gui_layout` worth making — the failure it exists to catch
+// is a value that has quietly outgrown its box, and a check that derived
+// the requirement from the same constant as the box could never see one.
+//
+// Reported rather than asserted here: `--metrics` states facts and the
+// test decides. `needs` is the widest witness in pixels, rounded UP, and
+// `widest` names the string that won so a failure says what to shorten.
+void print_metrics_fit(const Shell& s) {
+    fl_font(FL_HELVETICA, kFontSize);
+    std::printf("# status field text fit [session 37]\n");
+    std::printf("# %-20s %5s %5s  %s\n", "field", "box", "needs", "widest");
+    for (int i = 0; i < kFields; i++) {
+        std::string widest;
+        double need = 0.0;
+        for (const std::string& w : status_field_witnesses(i)) {
+            const double px = fl_width(w.c_str());
+            if (px > need) { need = px; widest = w; }
+        }
+        std::printf("  fit_%-16s %5d %5d  \"%s\"\n", kFieldNames[i],
+                    s.field_val[i]->w(),
+                    static_cast<int>(std::ceil(need)), widest.c_str());
+    }
+    // The caption column, by the same rule and in the same place: every
+    // row in the sidebar shares it [see kFieldCapW], so a caption that
+    // outgrows it is the identical defect one column to the left.
+    std::string widest;
+    double need = 0.0;
+    for (const char* c : {"Mode", "IOC", "Rate", "State", "Lines", "Clock",
+                          "Started", "Label", "PHASE", "SYNC"}) {
+        const double px = fl_width(c);
+        if (px > need) { need = px; widest = c; }
+    }
+    std::printf("  fit_%-16s %5d %5d  \"%s\"\n", "captions", kFieldCapW,
+                static_cast<int>(std::ceil(need)), widest.c_str());
 }
 
 int print_metrics(const Shell& s) {
     // Real FLTK geometry, so docs/05 §8 is checked against pixels rather
     // than against the HTML mockup that predicted them.
     print_metrics_regions(s);
+    print_metrics_fit(s);
     // The shell's state, so the §8.3/§8.4 behaviour rules are checkable
     // without a window. Values are quoted, and no line here carries four
     // integers, so the region table above stays unambiguous to parse.
@@ -3548,6 +3836,10 @@ int print_sync_step() {
 // reason and one step further: §8.2's rules are transitions, so what has
 // to be expressible is "feed, edit, feed, mark, apply, mark, click,
 // mark" — an interleaving no set of separate lists can say.
+// Which box a --type action drives. Was a bool until session 37 added the
+// Label box, which is a third answer and not a second one.
+enum class TypeBox { kPhase, kSync, kLabel };
+
 struct Action {
     enum Kind {
         kArm,
@@ -3560,11 +3852,12 @@ struct Action {
         kRecvClick,
         kMark
     } kind;
+
     Arm arm = Arm::kNone;   // kArm
     int x = 0, y = 0;       // kClick
     std::string text;       // kFeed path, kType value, kMark name
     int pct = 0;            // kFeed
-    bool is_sync = false;   // kType
+    TypeBox which = TypeBox::kPhase;  // kType
 };
 
 // Everything the flag parser fills in [see parse_args]. The defaults are
@@ -3802,8 +4095,9 @@ bool parse_action_flag(int argc, char** argv, int* i, ParsedArgs* a,
             return true;
         }
         Action& act = push(Action::kType);
-        if (!std::strcmp(which, "phase")) act.is_sync = false;
-        else if (!std::strcmp(which, "sync")) act.is_sync = true;
+        if (!std::strcmp(which, "phase")) act.which = TypeBox::kPhase;
+        else if (!std::strcmp(which, "sync")) act.which = TypeBox::kSync;
+        else if (!std::strcmp(which, "label")) act.which = TypeBox::kLabel;
         else *bad = true;
         act.text = argv[++(*i)];
         return true;
@@ -3952,7 +4246,19 @@ ActionOutcome run_actions(Shell& shell, const std::vector<Action>& actions) {
             // would move the number and leave `edit_dirty` false — the
             // same omission `nudge_sync` exists to make checkable, and a
             // §8.2 scenario built on it would never hold the pane at all.
-            Fl_Input* box = a.is_sync
+            // The Label box joined in session 37 for exactly that reason:
+            // its callback is the whole of what was missing, so a check
+            // that set the value directly would pass against the defect.
+            if (a.which == TypeBox::kLabel) {
+                shell.label_input->value(a.text.c_str());
+                // Through the WIDGET's own callback, not by naming the
+                // function: the defect this exists to catch was a box with
+                // no callback attached at all, and a driver that called
+                // the handler directly would pass against it.
+                shell.label_input->do_callback();
+                continue;
+            }
+            Fl_Input* box = a.which == TypeBox::kSync
                                 ? static_cast<Fl_Input*>(shell.sync_input)
                                 : static_cast<Fl_Input*>(shell.phase_input);
             box->value(a.text.c_str());

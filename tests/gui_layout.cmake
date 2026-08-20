@@ -24,8 +24,10 @@ include(${CMAKE_CURRENT_LIST_DIR}/gui_metrics.cmake)
 
 # The smallest window is the shell's own minimum, which the Zoom control
 # raised from 740 to 880 [docs/05 §8.3]: nova-gui rejects a smaller
-# --size, so this list moves whenever kMinW does.
-set(sizes "880x420" "980x700" "1200x800" "1400x900" "1920x1080")
+# --size, so this list moves whenever kMinW does. The height moved in
+# session 37, from 420 to 540, because rule 6 below found that the sidebar
+# did not FIT at 420 and had not for several sessions.
+set(sizes "880x540" "980x700" "1200x800" "1400x900" "1920x1080")
 
 # Correction 2, at every size. The ruler names image columns, so a tick
 # that does not sit over its column is the one failure it cannot have.
@@ -48,7 +50,7 @@ endforeach()
 
 # Correction 4: built-at == dragged-to, byte for byte, at the two ends of
 # the range.
-foreach(size "880x420" "1400x900")
+foreach(size "880x540" "1400x900")
   run_metrics(built --size ${size})
   run_metrics(dragged --size 980x700 --resize ${size})
   if(NOT built STREQUAL dragged)
@@ -161,7 +163,7 @@ endforeach()
 # Correction 4 again, with the strip hidden: the built-at == dragged-to
 # invariant is about the layout FUNCTION, so it has to hold in both of the
 # layouts that function can now produce.
-foreach(size "880x420" "1400x900")
+foreach(size "880x540" "1400x900")
   run_metrics(built --size ${size} --strip off)
   run_metrics(dragged --size 980x700 --resize ${size} --strip off)
   if(NOT built STREQUAL dragged)
@@ -170,6 +172,87 @@ foreach(size "880x420" "1400x900")
       "to ${size}\n--- built ---\n${built}\n--- dragged ---\n${dragged}")
   endif()
   message(STATUS "gui_layout PASS: strip off, built at ${size} == dragged")
+endforeach()
+
+# ---------------------------------------------------------------------------
+# Rule 5 [session 37]: every status value fits the box it is drawn in.
+#
+# Nova shipped four sessions with a status panel that clipped its own
+# readout — "DRAWING - PREVIEW" lost its last letters and the quality line
+# lost everything after the ppm — and no check could see it, because every
+# check compared geometry with geometry. This one compares a DECLARED
+# column width with a MEASURED text width [gui/nova-gui.cpp
+# status_field_witnesses]: the box comes from a constant, the requirement
+# comes from FLTK measuring the widest string that field can produce, and
+# the two have no common ancestor. Widening a format or adding a longer
+# state name fails here instead of reaching an operator.
+#
+# One check and one message PER FIELD, so a failure names the field that
+# does not fit rather than the first one the loop happened to reach
+# [session 31's attribution lesson, session 36's version of it].
+run_metrics(fit)
+foreach(field "Mode" "IOC" "Rate" "State" "Lines" "Clock" "Started" "captions")
+  fit_line(${field} "${fit}" box needs widest)
+  if(box LESS needs)
+    message(FATAL_ERROR
+      "gui_layout FAIL: the ${field} field is ${box} px wide and needs "
+      "${needs} px to draw \"${widest}\" — it would be clipped")
+  endif()
+  message(STATUS "gui_layout PASS: ${field} fits (${needs} of ${box} px, "
+    "widest \"${widest}\")")
+endforeach()
+
+# ---------------------------------------------------------------------------
+# Rule 6 [session 37]: the sidebar is INSIDE the status panel.
+#
+# It was not, and had not been since the correction block grew in session
+# 29: below about 530 px of window height the Apply row, the reason line
+# and the receiving indicator were laid out past the panel's bottom edge
+# and drawn over the tuning strip and the level meter. The shell's declared
+# minimum was 420, so this was reachable by dragging. Nothing caught it
+# because the sidebar's widgets were only ever checked against each other.
+#
+# The rule is stated about the PANEL, which is the thing that is supposed
+# to contain them, and it is checked at every size in the list — the
+# smallest is the one that matters, and it is the one no previous rule
+# looked at.
+# The size that matters most is the SMALLEST WINDOW THE SHELL ALLOWS, and
+# the shell is asked where that is rather than told: a list of sizes
+# written here can only ever check the sizes somebody thought of, and the
+# defect being fixed was precisely a minimum nobody had checked. Session
+# 37's first mutation pass proved the point — lowering kMinH back to 420
+# SURVIVED a containment rule that ran only at 880x540 and above, because
+# a rule exercised only where it cannot fail is not being tested
+# [session 29's third survivor shape].
+run_metrics(mins)
+shell_value(min_w "${mins}" gui_min_w)
+shell_value(min_h "${mins}" gui_min_h)
+message(STATUS "gui_layout: the shell declares a minimum of "
+  "${gui_min_w}x${gui_min_h}")
+
+set(sidebar
+  field_mode field_ioc field_rate field_state field_lines field_clock
+  field_started label_input cap_phase phase_input cap_sync sync_input
+  phase_arm sync_arm sync_step_m10 sync_step_p10 apply_button auto_button
+  correct_why recv_indicator)
+foreach(size IN LISTS sizes ITEMS "${gui_min_w}x${gui_min_h}")
+  run_metrics(out --size ${size})
+  region(status_panel "${out}" ax ay aw ah)
+  math(EXPR panel_r "${ax} + ${aw}")
+  math(EXPR panel_b "${ay} + ${ah}")
+  foreach(w IN LISTS sidebar)
+    region(${w} "${out}" wx wy ww wh)
+    math(EXPR wr "${wx} + ${ww}")
+    math(EXPR wb "${wy} + ${wh}")
+    if(wx LESS ax OR wy LESS ay OR wr GREATER panel_r OR wb GREATER panel_b)
+      message(FATAL_ERROR
+        "gui_layout FAIL at ${size}: ${w} is ${wx},${wy} ${ww}x${wh} "
+        "(to ${wr},${wb}) and the status panel is ${ax},${ay} ${aw}x${ah} "
+        "(to ${panel_r},${panel_b}) — the sidebar is drawn outside its panel")
+    endif()
+  endforeach()
+  message(STATUS "gui_layout PASS ${size}: all 20 sidebar widgets are "
+    "inside the status panel")
 endforeach()
 
 message(STATUS "gui_layout: all checks passed")

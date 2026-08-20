@@ -92,6 +92,17 @@ struct EngineMessage {
     // kStateChanged
     SessionState state = SessionState::kIdle;
     int ioc = 0;
+    // When the transmission this state belongs to BEGAN, as the same UTC
+    // stamp the filename is built from, or empty before the first one.
+    // It is on the state message and nowhere else because a transmission
+    // begins with a state change and can begin no other way — see
+    // `LiveEngine::emit`, which is the one place it is stamped.
+    //
+    // Distinct from the time in the FILENAME, which `save_image` takes at
+    // the moment it writes: on a ten-minute chart those two are ten
+    // minutes and a decode apart, and it is the first one that names the
+    // scheduled broadcast [docs/05 §8.1: "date and time of reception"].
+    std::string started_utc;
 
     // kRowsDrawn — the rows themselves, so the GUI can show the operator
     // marks §7 asks for, plus the totals the status line reads.
@@ -171,8 +182,13 @@ std::string image_filename(const std::string& utc_stamp,
 // say the operator SUPPLIED one; whether the decode used it is the
 // result's own `anchor_from_hint` / `clock_from_fallback`, and under §7.1
 // those two answers routinely differ for SYNC.
+// `started_utc` is when the TRANSMISSION began, which is not when the file
+// was written — the filename carries the second, and on a ten-minute chart
+// they are ten minutes and a decode apart. Empty writes no chunk, the same
+// rule the label follows: a missing time must not be recorded as a time.
 std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
-                               bool phase_operator, bool sync_operator);
+                               bool phase_operator, bool sync_operator,
+                               const std::string& started_utc);
 
 // The two retained raw streams of docs/05 §3, read by thread 4. The rule
 // is stated by ROLE rather than by recency: the transmission currently
@@ -296,6 +312,30 @@ public:
     // taught that lesson in session 20 [live/ruler.hpp].
     double spectrum_column_hz(int col) const;
     int spectrum_hz_column(double hz) const;
+
+    // --- thread 4: the geometry the status panel shows ----------------------
+    // What Nova has MEASURED, as opposed to what the operator asked for.
+    // Published by thread 2 on every block, in the same place and for the
+    // same reason as `receiving_samples_`: thread 2 owns the session and
+    // thread 4 may not ask it anything.
+    //
+    // Both are 0 for "not known yet", which is a state the panel has to be
+    // able to show — an IOC of 576 displayed before any tone has been heard
+    // would be Nova reporting a default as a measurement. `measured_lpm`
+    // returns to 0 when a transmission ends, because from then on the
+    // authority is the decode's own `DecodeResult::lpm` and not a renderer
+    // that no longer exists.
+    int measured_ioc() const {
+        return live_ioc_.load(std::memory_order_acquire);
+    }
+    double measured_lpm() const {
+        return live_lpm_.load(std::memory_order_acquire);
+    }
+    // Whether the transmission in progress was force-started, so the panel
+    // can mark the two numbers above as the operator's own.
+    bool measured_forced() const {
+        return live_forced_.load(std::memory_order_acquire);
+    }
 
     // --- thread 4: the post-decode correction [docs/05 §8.5 items 2-4] ------
     // Re-render the image on the pane from the raw stream retained behind
@@ -520,9 +560,25 @@ private:
     // Thread 2 publishes the size of the store the SESSION is still
     // growing; thread 4 may not touch the session to ask.
     std::atomic<std::size_t> receiving_samples_{0};
+    // ...and the same arrangement for the two numbers the status panel
+    // shows [see measured_ioc/measured_lpm]. 0 means not measured.
+    std::atomic<int> live_ioc_{0};
+    std::atomic<double> live_lpm_{0.0};
+    std::atomic<bool> live_forced_{false};
 
     // Thread 2 only, after the commands are drained.
     std::string label_;
+    // When the transmission in progress began [see EngineMessage].
+    // Stamped in `emit`, at the one transition that means a picture is on
+    // its way, and carried until the next one replaces it — so it still
+    // names the right transmission all the way through DECODING and SAVED,
+    // which is when the operator reads it.
+    std::string started_utc_;
+    // What `emit` last announced, so it can tell a transmission BEGINNING
+    // from the states inside one. Without it, entering DRAWING — PREVIEW
+    // would re-stamp the start on every auto transmission, which arrives
+    // there from PHASING a minute after it really began.
+    SessionState emitted_state_ = SessionState::kIdle;
     bool phase_operator_ = false;
     bool sync_operator_ = false;
     // The file the image on the pane was written to. A re-render

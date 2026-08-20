@@ -219,6 +219,22 @@ public:
     // IOC of the transmission in progress (from the start tone or the
     // operator); 0 when unknown.
     int ioc() const { return ioc_; }
+    // Whether the transmission in progress was FORCE-STARTED, so a panel
+    // reporting the geometry can say whose it is. Not the same question as
+    // "are both dropdowns explicit", which is what arms the Force Start
+    // button: this is about the transmission actually being received.
+    bool forced() const { return forced_; }
+    // The line rate the picture is CURRENTLY being drawn on, in lpm; 0
+    // when nothing is being drawn. Taken from the renderer's own period
+    // rather than from the seed it was handed, so it follows an operator
+    // SYNC trim exactly as the pixels do — a panel reading the seed would
+    // keep saying 120 while the picture was being drawn at 119.99, which
+    // is the whole quantity the operator is trimming.
+    double lpm() const {
+        if (!preview_) return 0.0;
+        const double p = preview_->period_samples();
+        return p > 0.0 ? 60.0 * static_cast<double>(fs_) / p : 0.0;
+    }
     // The preview, while one exists (DRAWING — PREVIEW onwards, until the
     // next transmission's opening replaces it).
     const StreamPreview* preview() const { return preview_.get(); }

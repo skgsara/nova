@@ -84,10 +84,15 @@ const char* dead_sector_name(DeadSector d) {
 }  // namespace
 
 std::vector<PngText> decode_qa(const DecodeResult& r, const std::string& label,
-                               bool phase_operator, bool sync_operator) {
+                               bool phase_operator, bool sync_operator,
+                               const std::string& started_utc) {
     std::vector<PngText> t;
     t.push_back(PngText{"Software", "Nova (WEFAX decoder)"});
     if (!label.empty()) t.push_back(PngText{"Title", label});
+    // When the transmission STARTED, which the filename cannot say: that
+    // is stamped when the file is written, after the chart and the decode.
+    // Absent rather than empty when unknown [see the declaration].
+    if (!started_utc.empty()) t.push_back(PngText{"Nova:Started", started_utc});
     t.push_back(PngText{"Nova:IOC", fmti(r.ioc)});
     t.push_back(PngText{"Nova:LPM", fmti(r.lpm)});
     t.push_back(PngText{"Nova:LinePeriod", fmt("%.6f s", r.line_period_s)});
@@ -596,6 +601,16 @@ void LiveEngine::do_promote_background() {
     post(std::move(m));
 }
 
+// A transmission BEGINS when the session leaves the states where it is
+// merely monitoring for the states where a picture is on its way. Written
+// as a property of the state rather than as a list of transitions so that
+// both entrances are covered without naming either: an automatic start
+// arrives via START TONE, a forced one goes straight to DRAWING.
+static bool in_transmission_state(SessionState s) {
+    return s == SessionState::kStartTone || s == SessionState::kPhasing ||
+           s == SessionState::kDrawingPreview;
+}
+
 void LiveEngine::emit(const SessionOutput& out) {
     if (!out.rows.empty()) {
         append_display_rows();
@@ -609,10 +624,14 @@ void LiveEngine::emit(const SessionOutput& out) {
         post(std::move(m));
     }
     for (const SessionState s : out.entered) {
+        if (in_transmission_state(s) && !in_transmission_state(emitted_state_))
+            started_utc_ = opt_.utc_now();
+        emitted_state_ = s;
         EngineMessage m;
         m.kind = EngineMsg::kStateChanged;
         m.state = s;
         m.ioc = session_.ioc();
+        m.started_utc = started_utc_;
         post(std::move(m));
     }
 }
@@ -685,7 +704,7 @@ std::string LiveEngine::save_image(const DecodeResult& r, bool overwrite) {
         path = dir.empty() ? name : dir + "/" + name;
     }
     write_png(path, r.img, decode_qa(r, label_, phase_operator_,
-                                     sync_operator_));
+                                     sync_operator_, started_utc_));
     return path;
 }
 
@@ -998,6 +1017,14 @@ void LiveEngine::thread2() {
         // one number the cost of the store can be read from crosses here.
         receiving_samples_.store(session_.retained_samples(),
                                  std::memory_order_release);
+        // ...and the two numbers the status panel shows, for the same
+        // reason and by the same route [see measured_ioc/measured_lpm].
+        // Published every block rather than on state changes because the
+        // rate MOVES while a picture is drawn — an operator SYNC trim
+        // changes it with no transition to hang a message on.
+        live_ioc_.store(session_.ioc(), std::memory_order_release);
+        live_lpm_.store(session_.lpm(), std::memory_order_release);
+        live_forced_.store(session_.forced(), std::memory_order_release);
 
         if (since_stats >= stats_every) {
             EngineMessage m;

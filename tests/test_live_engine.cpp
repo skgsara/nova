@@ -37,10 +37,12 @@
 
 #include <chrono>
 #include <cstdarg>
-#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1112,20 +1114,20 @@ void test_provenance() {
     r.lpm = 120;
 
     const std::vector<nova::PngText> measured =
-        nova::decode_qa(r, "", false, false);
+        nova::decode_qa(r, "", false, false, "");
     // Supplied AND used: the decode reports it took both from the operator.
     nova::DecodeResult used = r;
     used.anchor_from_hint = true;
     used.clock_from_fallback = true;
     const std::vector<nova::PngText> edited =
-        nova::decode_qa(used, "JMH", true, true);
+        nova::decode_qa(used, "JMH", true, true, "20260820T120000Z");
     // Supplied and OUTRANKED, which §7.1 makes the ordinary case for SYNC:
     // the operator typed a ppm, the fit had a baseline, and the pixels owe
     // it nothing. A header that called this "operator" would be claiming a
     // provenance the picture does not have — and it would be doing it on
     // every healthy recording, where nobody would notice.
     const std::vector<nova::PngText> outranked =
-        nova::decode_qa(r, "JMH", true, true);
+        nova::decode_qa(r, "JMH", true, true, "20260820T120000Z");
 
     const auto find = [](const std::vector<nova::PngText>& t,
                          const char* key) -> std::string {
@@ -1148,6 +1150,14 @@ void test_provenance() {
     check(find(measured, "Title") == "(absent)" &&
               find(edited, "Title") == "JMH",
           "a blank label writes no Title chunk; a label writes it whole");
+    // Session 37. The transmission's START time, which the filename cannot
+    // carry: that is stamped when the file is WRITTEN, a whole chart and a
+    // decode later. Absent rather than empty when it is not known, by the
+    // same rule the label follows — a missing time must not be recorded as
+    // a time.
+    check(find(measured, "Nova:Started") == "(absent)" &&
+              find(edited, "Nova:Started") == "20260820T120000Z",
+          "an unknown start time writes no chunk; a known one writes it");
     check(find(edited, "Nova:IOC") == "576" && find(edited, "Nova:LPM") == "120",
           "the geometry is in the header");
 }
@@ -1287,6 +1297,128 @@ void test_overrun_counted(const char* wav_path) {
     check(eng.ring_capacity() == 256, "the capacity is the one asked for");
 }
 
+// --- session 37: the stamp names the transmission's START -------------------
+// The panel's "Started" row and the PNG's Nova:Started chunk answer "when
+// did this chart begin". That is NOT when the file was written: a ten
+// minute transmission and a nine-stage decode separate the two, and the
+// filename already carries the second one.
+//
+// The instrument is the CLOCK. Every other test in this file injects a
+// fixed stamp, and under a fixed stamp "the start time" and "the save
+// time" are the same string no matter which moment either was taken at —
+// the check would pass against a wiring that read the clock at save time
+// and called it the start [session 30: two sides equal by construction].
+// So this clock returns a different value on every call, and the two
+// answers can only differ if they were taken at different moments.
+void test_started_stamp(const char* wav_path, const char* tmp_dir) {
+    const char* base = std::strrchr(wav_path, '/');
+    base = base ? base + 1 : wav_path;
+    std::printf("\n== the Started stamp names the transmission's start (%s)\n",
+                base);
+
+    nova::Wav w = nova::read_wav(wav_path);
+    const std::vector<float> audio =
+        nova::resample(w.samples, w.sample_rate, kInternalRate);
+
+    // Called only from thread 2 (emit, and save_image), so a plain counter
+    // is enough and a mutex would only hide an ordering bug.
+    int ticks = 0;
+    nova::EngineOptions opt;
+    opt.image_folder = tmp_dir;
+    opt.poll_ms = 1;
+    opt.utc_now = [&ticks] {
+        char b[32];
+        std::snprintf(b, sizeof b, "20260820T00%04dZ", ticks++);
+        return std::string(b);
+    };
+
+    nova::LiveEngine eng(kInternalRate, opt);
+    eng.run();
+    eng.start_capture();
+    std::thread feeder([&] {
+        std::size_t at = 0;
+        while (at < audio.size()) {
+            const std::size_t n = std::min<std::size_t>(4096,
+                                                        audio.size() - at);
+            const std::size_t took = eng.push_audio(audio.data() + at, n);
+            at += took;
+            if (took < n)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    feeder.join();
+    eng.shutdown();
+
+    std::vector<std::pair<nova::SessionState, std::string>> stamped;
+    std::string saved_path;
+    for (const nova::EngineMessage& m : eng.drain()) {
+        if (m.kind == nova::EngineMsg::kStateChanged)
+            stamped.emplace_back(m.state, m.started_utc);
+        else if (m.kind == nova::EngineMsg::kSaved)
+            saved_path = m.path;
+    }
+
+    // What the transmission was stamped with, and whether every state
+    // inside it agreed. A wiring that stamped at DRAWING instead of at the
+    // start tone would leave START TONE and PHASING carrying the empty
+    // string, which is what this distinguishes.
+    std::string start_stamp;
+    bool inside = false, all_agree = true, empty_inside = false;
+    for (const auto& e : stamped) {
+        const bool in_tx = e.first == nova::SessionState::kStartTone ||
+                           e.first == nova::SessionState::kPhasing ||
+                           e.first == nova::SessionState::kDrawingPreview ||
+                           e.first == nova::SessionState::kStopTone ||
+                           e.first == nova::SessionState::kDecoding ||
+                           e.first == nova::SessionState::kSaved;
+        if (!in_tx) continue;
+        inside = true;
+        if (e.second.empty()) empty_inside = true;
+        else if (start_stamp.empty()) start_stamp = e.second;
+        else if (e.second != start_stamp) all_agree = false;
+    }
+    for (const auto& e : stamped)
+        std::printf("    %-18s started=\"%s\"\n",
+                    nova::session_state_name(e.first), e.second.c_str());
+    std::printf("    saved as %s after %d clock reads\n",
+                saved_path.c_str(), ticks);
+
+    check(inside && !empty_inside,
+          "every state of the transmission carries a start stamp");
+    check(all_agree,
+          "the stamp does not change while the transmission is running");
+    // The point of the whole test, kept as its own check with its own
+    // message so a failure says which claim broke [session 36].
+    check(!start_stamp.empty() &&
+              saved_path.find(start_stamp) == std::string::npos,
+          "the file is named for when it was WRITTEN, not for the start");
+    check(ticks >= 2,
+          "the clock was read twice: once at the start, once at the save");
+    // ...and the stamp reaches the FILE, not only the status panel. Read
+    // out of the PNG's bytes rather than by calling `decode_qa` again: a
+    // check that asked the formatter would pin the formatter, and what is
+    // in doubt is whether `save_image` hands it the right string. tEXt is
+    // stored uncompressed as `keyword\0text` [live/png.cpp], so the
+    // keyword and its value are literally in the file.
+    std::string png;
+    {
+        std::ifstream f(saved_path, std::ios::binary);
+        png.assign(std::istreambuf_iterator<char>(f),
+                   std::istreambuf_iterator<char>());
+    }
+    std::string want = "Nova:Started";
+    want.push_back('\0');
+    want += start_stamp;
+    check(!png.empty() && png.find(want) != std::string::npos,
+          "the PNG's Nova:Started chunk carries the transmission's start");
+    // ...and the start is the EARLIER of the two, which is the direction
+    // the whole distinction rests on. The stamps are monotonic by
+    // construction here, so string order is call order.
+    check(!start_stamp.empty() && !saved_path.empty() &&
+              start_stamp < saved_path.substr(saved_path.rfind('/') + 1),
+          "the start stamp is earlier than the one in the filename");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1328,6 +1460,10 @@ int main(int argc, char** argv) {
     test_background_buffer(argv[2], tmp);
     test_provenance();
     test_filenames();
+    // The tone-driven fixture: the stamp is taken when a transmission
+    // BEGINS, and only a recording that begins one on its own exercises
+    // the path an operator will actually use.
+    test_started_stamp(argv[2], tmp);
     test_tuning_strip();
     test_overrun_counted(argv[argc - 1]);
 

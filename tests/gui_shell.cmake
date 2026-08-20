@@ -212,7 +212,7 @@ endforeach()
 # shell computes is the one the mapping was given.
 set(ticks
   "980x700|576|fit|100"   # the default window
-  "880x420|576|fit|200"   # the minimum window the Zoom control forces
+  "880x540|576|fit|200"   # the minimum window (kMinH rose in session 37)
   "980x700|576|200|20"    # the doc's unconditional example
   "980x700|288|fit|50")
 foreach(row IN LISTS ticks)
@@ -1567,5 +1567,160 @@ if(had_conf)
   file(RENAME "${saved}" "${conf}")
 endif()
 message(STATUS "gui_shell PASS: the preference file beside the program is read")
+
+# ---------------------------------------------------------------------------
+# §8.1's status panel, wired [session 37, from Sara's first by-hand run of
+# the M4.5 window].
+#
+# Four rows of that panel were reporting the QUESTION rather than the
+# answer, and one was reporting nothing at all:
+#
+#   - the Label was read once, when Start was pressed. A run in AUTO
+#     presses Start once and then receives for hours, so every chart after
+#     the first was named with the first one's label and no amount of
+#     typing could change it.
+#   - IOC echoed the dropdown, which on AUTO says "Auto"; Rate showed "--"
+#     for the whole of a decoded chart while the PNG header beside it
+#     carried the number.
+#   - Started was never assigned at all: six field boxes were built and
+#     five were filled.
+#
+# The capture below is ONE process, because every claim here is about a
+# transition — a label typed after the capture began, a geometry that fills
+# in as the transmission measures it — and a check spanning two processes
+# cannot observe a transition [session 28].
+#
+# One check and one message per RULE.
+set(cap_dir "${NOVA_TMP}-panel")
+file(REMOVE_RECURSE "${cap_dir}")
+file(MAKE_DIRECTORY "${cap_dir}")
+run_actions(pan
+  --image-folder ${cap_dir}
+  --mark idle
+  --type label AAA
+  --feed ${NOVA_FIXTURE},60 --mark drawing
+  --type label BBB
+  --feed ${NOVA_FIXTURE},40 --stop-capture --mark saved)
+
+# Rule 1: nothing measured, nothing claimed. Before any audio the three
+# measured rows say "--" and not a plausible default — an IOC of 576 shown
+# before a tone has been heard is a guess wearing a measurement's clothes.
+panel_expect("panel idle" "${pan}" idle ioc "--")
+panel_expect("panel idle" "${pan}" idle rate "--")
+panel_expect("panel idle" "${pan}" idle started "--")
+message(STATUS "gui_shell PASS panel: an idle shell claims no geometry")
+
+# Rule 2: while the picture is arriving, IOC and Rate are what Nova
+# MEASURED. The fixture is a 576 station at 120 lpm and the dropdowns are
+# both on Auto, so a panel echoing the dropdowns would read "Auto" here.
+panel_get(drawing ioc "${pan}" d_ioc)
+panel_get(drawing rate "${pan}" d_rate)
+panel_expect("panel measured" "${pan}" drawing mode "AUTO")
+if(NOT d_ioc STREQUAL "576")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: while drawing, IOC reads \"${d_ioc}\" and the "
+    "measured IOC of this fixture is 576 — the row is echoing the dropdown")
+endif()
+if(NOT d_rate MATCHES "^1[12][0-9]\\.[0-9]$")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: while drawing, Rate reads \"${d_rate}\"; this "
+    "fixture is a 120 lpm station and the row should carry the measured "
+    "rate, not the dropdown and not \"--\"")
+endif()
+message(STATUS "gui_shell PASS panel: drawing reports measured "
+  "IOC ${d_ioc} and rate ${d_rate}")
+
+# Rule 3: Started is stamped when the transmission BEGINS and does not
+# move. It is checked against the state it was captured beside: the same
+# stamp at DRAWING and at SAVED, minutes and a decode apart.
+panel_get(drawing started "${pan}" d_started)
+panel_get(saved started "${pan}" s_started)
+if(d_started STREQUAL "--" OR NOT d_started STREQUAL s_started)
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: Started reads \"${d_started}\" while drawing and "
+    "\"${s_started}\" once saved; it names one transmission and must not move")
+endif()
+message(STATUS "gui_shell PASS panel: Started is ${d_started} at both marks")
+
+# Rule 4: the Label is LIVE. AAA was typed before the capture and BBB
+# during it, and the file is named for what the box said when the chart was
+# SAVED. This is the whole defect: the old shell read the box once, at
+# Start, and would have written -AAA here.
+panel_get(saved saved "${pan}" s_file)
+if(NOT s_file MATCHES "-BBB\\.png$")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: the chart was saved as \"${s_file}\"; the Label "
+    "box said BBB when it was saved, so a label typed after the capture "
+    "began is not reaching the file")
+endif()
+message(STATUS "gui_shell PASS panel: a label typed mid-capture names the "
+  "file (${s_file})")
+
+# Rule 5: the decode's own verdict reaches the two rows that report it,
+# and it reaches them as text an operator can read rather than as "--".
+panel_get(saved lines "${pan}" s_lines)
+panel_get(saved clock "${pan}" s_clock)
+if(NOT s_lines MATCHES "^[0-9]+/[0-9]+, [0-9]+ seams?$")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: after the decode the Lines row reads "
+    "\"${s_lines}\", which is not a locked/total and a seam count")
+endif()
+if(NOT s_clock MATCHES "^[-+][0-9]+ ppm$")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: after the decode the Clock row reads "
+    "\"${s_clock}\", which is not a signed ppm")
+endif()
+message(STATUS "gui_shell PASS panel: the decode reports "
+  "\"${s_lines}\" and \"${s_clock}\"")
+
+# Rule 6: the panel describes ONE transmission at a time.
+#
+# A run in AUTO receives for hours, so almost every chart the panel shows
+# is preceded by another one. The second capture below replays the fixture,
+# which gives a second start tone and therefore a second transmission, and
+# it is stopped early — at PHASING, after the tone has named the IOC and
+# before the phasing interval has measured a rate. That moment is the whole
+# point: a panel that carried the previous chart's numbers forward would
+# report the FIRST transmission's rate beside the SECOND one's state, and
+# an operator would read a measurement that belonged to a chart already on
+# disk. It is also the only moment at which the fault is visible, which is
+# why the mark is placed there and not at the end.
+run_actions(two
+  --image-folder ${cap_dir}
+  --feed ${NOVA_FIXTURE},100 --stop-capture --mark first
+  --feed ${NOVA_FIXTURE},12 --mark second)
+panel_get(first started "${two}" t1_started)
+panel_get(second started "${two}" t2_started)
+panel_get(second state "${two}" t2_state)
+panel_get(second rate "${two}" t2_rate)
+panel_get(second ioc "${two}" t2_ioc)
+if(t1_started STREQUAL t2_started)
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: both transmissions report Started "
+    "\"${t1_started}\" — the stamp is taken once per session, not once "
+    "per transmission")
+endif()
+message(STATUS "gui_shell PASS panel: a second transmission is stamped "
+  "${t2_started}, not ${t1_started}")
+if(NOT t2_state STREQUAL "PHASING")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: the second capture reached ${t2_state}, not "
+    "PHASING — the check below needs the moment before a rate is measured")
+endif()
+if(NOT t2_rate STREQUAL "--")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: at the second transmission's PHASING the Rate "
+    "row reads \"${t2_rate}\"; nothing has measured a rate for THIS "
+    "transmission yet, so that number belongs to the chart already saved")
+endif()
+if(NOT t2_ioc STREQUAL "576")
+  message(FATAL_ERROR
+    "gui_shell FAIL panel: at the second transmission's PHASING the IOC "
+    "row reads \"${t2_ioc}\"; the start tone names the IOC [WMO §5.2.2], "
+    "so this one IS measured and must not be blanked with the rest")
+endif()
+message(STATUS "gui_shell PASS panel: a new transmission drops the old "
+  "chart's rate and keeps its own tone's IOC")
+file(REMOVE_RECURSE "${cap_dir}")
 
 message(STATUS "gui_shell: all checks passed")
