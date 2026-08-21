@@ -7,6 +7,131 @@ anything as our develop history").
 
 ---
 
+## 2026-08-20 — Session 38: the second dead gap in the block that was
+## relaid out to remove the first one
+
+Agent: Claude (Opus 5). Code changed: `gui/nova-gui.cpp` (`kArmW`,
+`kArmLabel`, `kCorrBoxW`, the two button labels and their label size, the
+correction block's layout, a `fit_arm` line in `--metrics`). Files
+changed: `tests/gui_shell.cmake` (two rules added to the arm block),
+`tests/gui_layout.cmake` (`arm` added to the text-fit rule), `README.md`,
+`START-HERE.md`, `ROADMAP.md`, `CHANGELOG.md`,
+`docs/05-m4-shell-design.md`. Suite: **40, unchanged** — no new target,
+three new rules inside two existing ones. 40/40 green, zero warnings,
+278 s. Version stays **0.4.5**: no milestone moved.
+
+**Sara ran the window a second time and reported on the two things
+session 37 sent her to look at.** Session 30's relayout of the correction
+block and M4.5's tuning strip: *"those two are good."* That closes two of
+the three items the by-hand gate was waiting on, and it is the first
+by-hand run since session 25 that did not find a defect in what it was
+sent to check. What it found instead was two cosmetic things beside them
+and one question about a feature that does not exist.
+
+**1. The boxes did not reach their buttons, and the gap was 28 px.**
+`box_w` was a hardcoded 70 while the arming button is pinned to the
+panel's right edge at `px + 168`, so the row went caption, 4 px, box,
+**28 px of nothing**, button. Every other row in the sidebar runs its
+value from `px + 70` to `px + 216`; these two stopped at `px + 140`. Now
+94 px, so box + gap + button is 146 — exactly the Label box above.
+
+**What makes this one worth writing down rather than just fixing:**
+session 30 relaid out this exact block to remove a dead gap, on exactly
+this reasoning. Its own comment in the source says *"it was the gap, not
+the steppers, that made the block look heavy."* It removed the gap on the
+caption row and left a second one two rows down, and it stood for eight
+sessions in front of the person who wrote that sentence. Reasoning about
+a layout does not see a layout.
+
+**2. `@circle` was never right and session 29 said so at the time.** The
+buttons carried FLTK's filled-dot symbol. Session 29's own log entry
+registered it: *"whether `@circle` reads as 'pick a point on the picture'
+or as a cryptic dot — the tooltips carry the words, and a text label would
+fit — this was my call and it is the weakest part of the session."* Nine
+sessions later somebody looked at it: a dot reads as a status LAMP, not
+as a control.
+
+Sara weighed `<`/`<-` and `SET` and asked for a recommendation. Both were
+declined and the reasons are in `kArmLabel`. An arrow sits one row above
+`-10 -1 +1 +10` and reads as a **decrement** — which is the misreading
+this block was relaid out twice to prevent, arriving from the other side.
+`SET` collides with **Apply**, which already means "commit this number",
+so the panel would have two buttons that both say make-it-so. **PICK**
+names the thing neither of them names: take this value OFF THE PICTURE.
+Drawn at `kFontSize` like every other word in the panel; the glyph was at
+`kFontSize - 3`.
+
+**Three rules, and the reason the box width is DECLARED and not derived.**
+The tempting implementation is `box_w = arm_x - box_x - kFieldGap`, which
+makes the defect structurally impossible. It also makes every check of it
+pass by construction — session 30's trap — because both sides of the
+comparison would then come from `kFieldGap`. So `kCorrBoxW` is a typed
+number that can disagree with the button's, and `gui_shell` compares the
+row's TWO GAPS: the space between the box and its button must not exceed
+the space between the caption and the box. No magic number in the rule;
+the row already declares what a gap in it looks like. Plus: the row ends
+where `label_input` ends (one value column, two independent arithmetic
+paths to the same edge), and — session 37's shape — declared `kArmW`
+against FLTK's own measurement of `kArmLabel`, reported as `fit_arm`, so
+a 48 px button with a word in it cannot quietly outgrow itself.
+
+**The mutation pass: baseline SURVIVED, three mutations, three kills, each
+attributed to its own message.** An unmutated run through the harness
+first (a comment-only edit) to prove it was not inverted. Then `kCorrBoxW`
+back to 70 → *"FAIL arm reach: phase_input ends at 900 and phase_arm
+starts at ..."*; `arm_x` moved one `kPad` left → *"FAIL arm column:
+phase_arm ends at 972 and label_input ends at ..."*; `kArmLabel` to
+`"PICK POINT"` → *"the arm field is 48 px wide and needs 69 px"*. Three
+rules, three different failure lines, no kill borrowed from a neighbour.
+
+**3. She also asked whether per-line correction segments were built. They
+are not — and her reason for wanting them retires the objection that
+shelved them.** The feature is registered in `ROADMAP.md` under
+"Registered, not scheduled": `Correction` is flat and Apply re-renders the
+whole picture, and the entry says it *cannot be verified*, because a clock
+that changes rate mid-chart on a white-only station is undetectable by
+construction and no library recording shows one.
+
+Her case is not a clock change. It is **an online SDR dropping audio** —
+KiwiSDR — on a station with no sync pulse, leaving the operator to
+re-align by hand once per drop. Lost samples splice the stream, so
+everything below the splice inherits ONE horizontal step and the slant is
+unchanged above and below it: the segments mostly need a PHASE each, not
+a ppm each. And that case is verifiable. The failure is in the library
+three times already — `himawari-jmh-warp-120s.wav` is a KiwiSDR
+time-skip measured at 1270 samples ≈ 164 ms ≈ 595 px, which
+`test_fixture.cpp` already calls "its screamer-in-waiting";
+`himawari-kiwisdr-dropout-120s.wav`; `himawari-kiwisdr-phasing-jump-120s.wav`.
+All three are pulse stations. The white-only variant is the one missing,
+and it is exactly constructible: splice N samples out of
+`gya-weak-white-120s` at a known offset, and the ground truth is the
+undamaged decode of the same recording. Sample loss is literally what the
+network does to the file, so this is not a plausible-looking synthetic.
+
+**One hazard in the shipped build fell out of that, and it is reasoned
+rather than measured — labelled as such in the roadmap.** On a chart with
+a dropout, a two-click SYNC spanning the drop reads the step as SLANT:
+`slant_ppm` attributes the whole column difference to rate over that many
+rows, so part of a one-time jump becomes a ppm error applied to the whole
+chart.
+
+**Sara's call: record it, do not build it.** The roadmap entry is amended
+with all of the above, including which half of the old objection still
+stands (the clock-step case) and which does not.
+
+**Next step: unchanged, and now down to one item — the by-hand run through
+a real RECEIVER.** Two of its three questions are answered and good: the
+correction block reads right, and the tuning strip works while tuning.
+What is left is the one that needs two transmissions and cannot be staged
+from a file — an edit open when the second arrives: does the RECEIVING
+indicator beat losing your picture, and does handing the pane over at a
+click read as control or as a lost page. Sara's plan is an MLite-880 in
+the park with an audio cable to the laptop. After that, unchanged from
+session 35: a remote, so the CI can stop being theoretical; then
+`tools/record-fixture-regression.sh`, commit the fresh record, and tag, in
+that order, because the release workflow checks it. The record in the tree
+still describes `bc1c595` and is stale.
+
 ## 2026-08-20 — Session 37: the panel was answering a different question,
 ## and only a person could tell
 

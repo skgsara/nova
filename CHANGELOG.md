@@ -10,6 +10,31 @@ lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased — 0.4.5
 
+### 2026-08-20 — the correction rows, looked at a second time
+
+Sara ran the window again (session 38) and asked about the block she had
+asked about in sessions 29 and 30. Cosmetic, both of them, and both in a
+part of the panel that has now been redesigned three times by someone
+looking at it.
+
+- **The PHASE and SYNC boxes reach their buttons.** The boxes were a fixed
+  70 px and the arming buttons are pinned to the panel's right edge, so
+  28 px of dead space sat between them — and the correction rows were the
+  only rows in the sidebar not sharing the value column the Label box
+  defines. The boxes are 94 px; box, gap and button now span exactly that
+  column.
+- **The arming buttons say `PICK`.** They carried `@circle`, a filled dot,
+  which session 29's own log had registered as the weakest thing in that
+  session. A dot reads as a status lamp, not as a control. `<` was
+  declined because an arrow one row above `-10 -1 +1 +10` reads as a
+  decrement, and `SET` because Apply already means "commit this number";
+  PICK names the gesture — take the value off the picture.
+- Three new rules pin all of it, each mutation-proven on its own message:
+  the box reaches its button (the row's two gaps compared, no magic
+  number), the row ends on the panel's value column, and the button is
+  wide enough for the word it carries (declared width against FLTK's own
+  measurement of the label). Suite unchanged at 40.
+
 ### 2026-08-20 — the status panel, wired
 
 Found by the first by-hand run of the M4.5 window (Sara, session 37). No

@@ -1751,6 +1751,38 @@ not: she had used the thing. `gui_shell` now pins adjacency AS adjacency
 absence of PHASE steppers as a count, so the asymmetry cannot be restored
 by accident. Both guards were mutation-proven.]**
 
+**[AMENDED session 38, Sara — the second by-hand look at the same block,
+and it found the gap the first one did not.** She used the window again
+and asked two things about these rows. **The boxes now REACH their arming
+buttons.** `box_w` was a hardcoded 70 px against a button pinned to the
+panel's right edge, so 28 px of dead space sat between them and the
+correction rows were the only rows in the sidebar not sharing the value
+column the Label box above defines; the box is 94 px now and box + gap +
+button spans exactly that column. Note what this is: session 30 removed a
+dead gap from these rows on exactly this reasoning ("that gap — not the
+steppers — was what made the block read as heavy") and left a second one
+in, two rows down, unnoticed for eight sessions by everyone including the
+person who wrote the sentence.
+
+**And the arming buttons say `PICK` instead of `@circle`.** Session 29
+registered its own glyph as "the weakest part of the session — a text
+label would fit", and Sara answered it: a filled dot reads as a status
+LAMP, not as a control. She weighed `<` and `SET`; both were declined for
+collisions, and the reasoning is in `kArmLabel` — an arrow one row above
+`-10 -1 +1 +10` reads as a decrement, which is the misreading THIS block
+was relaid out to prevent arriving from the other side, and `SET` competes
+with Apply, which already means "commit this number". PICK names the
+gesture nobody else names: take the value OFF THE PICTURE.
+
+Three rules were added and each was mutation-proven separately — the box
+reaches its button (stated as a comparison of the row's two gaps, so
+there is no magic number in it), the row ends on the panel's value
+column, and the button is wide enough for the word it carries (declared
+`kArmW` against FLTK's own measurement of `kArmLabel`, session 37's
+shape). The box width is DECLARED and not derived from the button on
+purpose: derived, the defect would be impossible and so would any check of
+it, which is session 30's pass-by-construction trap.]**
+
 **4. What counts as "an edit in progress"? Dirty controls, not a mode.**
 [DECIDED 2026-08-13, Sara.] An edit **begins** at the first change to
 PHASE or SYNC, or the first click on the image, and **ends** at Apply, at

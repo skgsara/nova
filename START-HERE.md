@@ -95,10 +95,10 @@ click a jump of the whole error. PHASE has no steppers on purpose — it is
 a seed refined within ±54 columns, so a smaller nudge would move nothing.
 Its instrument is the click.
 Since session 29 both picture gestures are ARMED, which is hamfax's shape:
-press the small button beside PHASE, then click the dead sector, and PHASE
-takes that column (same arithmetic as the ruler, so tick and click agree).
-Press the one beside SYNC, then click one feature twice, and Nova measures
-the slant between the clicks. A click with nothing armed does nothing at
+press the `PICK` button beside PHASE, then click the dead sector, and
+PHASE takes that column (same arithmetic as the ruler, so tick and click
+agree). Press the one beside SYNC, then click one feature twice, and Nova
+measures the slant between the clicks. A click with nothing armed does nothing at
 all — that is the point, so a stray click cannot move your numbers. Armed,
 the pointer is a crosshair and the reason line says what to click; the
 gesture disarms itself when it is done, so there is no mode to leave.

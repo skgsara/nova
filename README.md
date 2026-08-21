@@ -251,11 +251,19 @@ Sara's request, having by then used the window rather than only looked at
 it: flanking cost SYNC's caption its place beside its own box, and the
 resulting half-empty row was what actually made the block look heavy. The
 tie between the steppers and SYNC is now adjacency rather than enclosure,
-which is weaker, and `gui_shell` pins the weaker claim as such.
+which is weaker, and `gui_shell` pins the weaker claim as such. Session 38
+finished the row: the PHASE and SYNC boxes had stopped 28 px short of
+their arming buttons, which made these the only rows in the sidebar not
+sharing the value column the Label box defines. They reach them now, and
+three rules hold it there — the box reaches its button (the row's two
+gaps compared, so there is no number in the rule to drift), the row ends
+on the panel's value column, and the button is wide enough for the word
+it carries.
 
-**Both picture gestures are declared.** A small button beside PHASE arms
+**Both picture gestures are declared.** A `PICK` button beside PHASE arms
 "click the dead sector"; one beside SYNC arms "click the same feature
-twice". A click on the picture with nothing armed does nothing at all —
+twice". (The word arrived in session 38: until then the buttons carried a
+filled dot, which reads as a status lamp rather than as a control.) A click on the picture with nothing armed does nothing at all —
 which is the point, since the alternative is an accidental click silently
 moving the operator's data. Arming a gesture puts a crosshair on the
 picture and a sentence in the reason line, and the gesture disarms itself

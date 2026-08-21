@@ -1115,6 +1115,37 @@ a page-read instead of a grep.
   library recording shows one. It needs a SYNTHETIC white-only fixture
   with a step at a known line, built for the purpose, before there is any
   way to tell a correct implementation from a plausible one.
+  **[AMENDED session 38, Sara — she asked for this feature again and named
+  a DIFFERENT motivating case, and the case dissolves the paragraph above.
+  Still not scheduled; recorded so it is not re-derived.]** Her case is an
+  online SDR — KiwiSDR or similar — dropping audio mid-transmission on a
+  station with no sync pulse, leaving the operator to re-align by hand as
+  many times as the stream dropped. That is not a clock step. Lost samples
+  splice the stream, so everything below the splice inherits ONE horizontal
+  step and the slant above and below is unchanged: what the segments mostly
+  need to carry is a PHASE per segment, not a ppm per segment.
+  **And unlike a clock step, it is verifiable.** The failure is already in
+  the library three times over — `himawari-jmh-warp-120s.wav` is a KiwiSDR
+  stream time-skip at 410.5 s, measured at 1270 samples ≈ 164 ms ≈ 595 px
+  of step (`test_fixture.cpp` calls it "its screamer-in-waiting");
+  `himawari-kiwisdr-dropout-120s.wav` is the drop where eight lines carry
+  no lock; `himawari-kiwisdr-phasing-jump-120s.wav` has one inside the
+  phasing interval. All three are pulse stations, where the tracker has
+  something to re-acquire against. The white-only variant — the case that
+  needs the operator — is the one the library lacks, and it is exactly
+  constructible: splice N samples out of `gya-weak-white-120s` or
+  `vmw-white-sector-120s` at a known offset and the GROUND TRUTH is the
+  undamaged decode of the same recording. That is not a plausible-looking
+  synthetic; sample loss is literally what the network does to the file.
+  Build that fixture before the feature, and require the damaged decode to
+  SHOW the step first, or the comparison passes by construction.
+  **One hazard in the shipped build, reasoned from the arithmetic and not
+  measured:** on a chart with a dropout, a two-click SYNC spanning the drop
+  will read the step as SLANT — `slant_ppm` attributes the whole column
+  difference to rate over that many rows — so part of a one-time jump
+  becomes a ppm error applied to the entire chart. Segments are not only
+  convenience there; they are what stops the existing gesture from lying on
+  exactly these recordings.
 - **The pulse-station SYNC override.** On a station with per-line sync
   the batch fit outranks the operator's ppm, by design [§7.1]. No
   recording yet exists where the fit is wrong and the eye is right, so
