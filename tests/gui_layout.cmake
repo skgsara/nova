@@ -191,7 +191,8 @@ endforeach()
 # does not fit rather than the first one the loop happened to reach
 # [session 31's attribution lesson, session 36's version of it].
 run_metrics(fit)
-foreach(field "Mode" "IOC" "Rate" "State" "Lines" "Clock" "Started" "captions")
+foreach(field "Mode" "IOC" "Rate" "State" "Lines" "Clock" "Started" "captions"
+               "arm")
   fit_line(${field} "${fit}" box needs widest)
   if(box LESS needs)
     message(FATAL_ERROR

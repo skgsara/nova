@@ -188,6 +188,37 @@ constexpr int kPanelRowH = 20;
 // as two panels [docs/05 §8].
 constexpr int kFieldCapW = 62;
 constexpr int kFieldGap = 4;
+// The arming buttons — width, and the word on them [see Arm]. Both are
+// DECLARED here so the correction rows can be checked the way session 37
+// checked the status rows: `--metrics` reports what FLTK MEASURES this
+// label to need and `gui_layout` compares it with the button, so a longer
+// word fails the suite instead of reaching a window clipped.
+//
+// The word replaces session 29's `@circle`, which that session's own log
+// registered as "the weakest part of the session — a text label would
+// fit". Sara answered it in session 38 after using the window: a filled
+// dot reads as a status LAMP rather than as a control, and the two
+// alternatives she weighed both had a collision. An arrow (`<`) sits one
+// row above `-10 -1 +1 +10` and reads as a decrement — the same misreading
+// the session-30 relayout exists to prevent, arriving from the other side.
+// `SET` collides with Apply, which already means "commit this number".
+// PICK names the gesture instead: take this value OFF THE PICTURE, which
+// is the one thing neither of the other two says.
+constexpr int kArmW = 48;
+constexpr const char* kArmLabel = "PICK";
+// The PHASE/SYNC boxes, and a width that is DECLARED rather than derived
+// from where the arming button starts.
+//
+// Deriving it (`arm_x - box_x - kFieldGap`) would make the defect Sara
+// found structurally impossible — and would also make any check of it pass
+// by construction, which is session 30's trap. Two independently declared
+// numbers can disagree, so `gui_shell` can compare the gap this leaves
+// against the caption gap on the same row and actually fail when they
+// diverge. What it is measuring: at 70 px the box ended 28 px short of the
+// arming button, so the correction rows alone broke the value column every
+// other row in the panel shares. 94 + kFieldGap + kArmW is 146, which is
+// exactly the Label box above it.
+constexpr int kCorrBoxW = 94;
 constexpr int kFontSize = 12;  // §8: "12 px Helvetica"
 constexpr int kFrame = 2;      // §8: "two-pixel FL_UP_BOX / FL_DOWN_BOX"
 // The GUI queue's drain interval [docs/05 §2.3]: 50 ms, one repaint per
@@ -1894,19 +1925,21 @@ struct Shell {
         // The two arming buttons [see Arm]. FL_TOGGLE_BUTTON because armed
         // is a state the operator can see and leave, not an action: the
         // pushed box IS the third witness that the gesture is live, beside
-        // the reason line and the crosshair. The tooltip carries what the
-        // symbol cannot, because a circle is not self-explaining and this
-        // surface's rule is that it explains itself.
-        phase_arm = new Fl_Button(0, 0, 0, 0, "@circle");
+        // the reason line and the crosshair. The LABEL says which gesture
+        // it arms and the tooltip says what to click; session 29 had a
+        // symbol here and its own log registered that as the weakest thing
+        // in the session [see kArmLabel]. Every other word in this panel is
+        // drawn at kFontSize, so this one is too.
+        phase_arm = new Fl_Button(0, 0, 0, 0, kArmLabel);
         phase_arm->type(FL_TOGGLE_BUTTON);
-        phase_arm->labelsize(kFontSize - 3);
+        phase_arm->labelsize(kFontSize);
         phase_arm->tooltip("Click the dead sector on the picture to set PHASE");
         phase_arm->callback(cb_arm_phase, this);
         phase_arm->deactivate();
         note("phase_arm", phase_arm);
-        sync_arm = new Fl_Button(0, 0, 0, 0, "@circle");
+        sync_arm = new Fl_Button(0, 0, 0, 0, kArmLabel);
         sync_arm->type(FL_TOGGLE_BUTTON);
-        sync_arm->labelsize(kFontSize - 3);
+        sync_arm->labelsize(kFontSize);
         sync_arm->tooltip(
             "Click one feature twice, far apart, to measure the slant");
         sync_arm->callback(cb_arm_sync, this);
@@ -2110,11 +2143,19 @@ struct Shell {
         // asymmetry rather than a hole in the layout [see sync_step]: a nudge
         // smaller than the ±54-column window PHASE is refined within moves
         // nothing at all. Its instrument is the click.
+        //
+        // Session 38, after Sara used the window a second time: the two
+        // boxes now run to the arming button instead of stopping 28 px
+        // short of it [see kCorrBoxW]. The gap was the last of the dead
+        // space this block was relaid out to remove, and it was the one
+        // that made the correction rows the only rows in the panel not
+        // sharing its value column — box, gap, button now span exactly the
+        // Label box above them.
         // Same three rows as before, so nothing below moves.
-        const int arm_w = 48;
+        const int arm_w = kArmW;
         const int arm_x = px + kPanelW - kPad - arm_w;
         const int box_x = px + kPad + kFieldCapW + kFieldGap;
-        const int box_w = 70;
+        const int box_w = kCorrBoxW;
         cap_phase->resize(px + kPad, py, kFieldCapW, kPanelRowH);
         phase_input->resize(box_x, py + 1, box_w, kPanelRowH - 2);
         phase_arm->resize(arm_x, py + 1, arm_w, kPanelRowH - 2);
@@ -3709,6 +3750,13 @@ void print_metrics_fit(const Shell& s) {
     }
     std::printf("  fit_%-16s %5d %5d  \"%s\"\n", "captions", kFieldCapW,
                 static_cast<int>(std::ceil(need)), widest.c_str());
+    // The arming buttons, by the same rule [session 38, see kArmLabel].
+    // A 48 px button with a WORD on it is the status panel's clipping
+    // failure one control to the right, and the word arrived in the same
+    // session that widened the boxes beside it. Measured with the font set
+    // at the top of this function, like every other line in the block.
+    std::printf("  fit_%-16s %5d %5d  \"%s\"\n", "arm", kArmW,
+                static_cast<int>(std::ceil(fl_width(kArmLabel))), kArmLabel);
 }
 
 int print_metrics(const Shell& s) {

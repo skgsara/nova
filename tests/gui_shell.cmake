@@ -583,11 +583,20 @@ message(STATUS
 # caption, the box having been moved a row away by the flanking; session
 # 30 gives SYNC its box back on its own row, so the check can make the
 # same claim for both gestures instead of a weaker one for SYNC.
-foreach(pair "phase_arm;phase_input" "sync_arm;sync_input")
+#
+# Session 38 adds the other two rules of the row, both from Sara looking at
+# it: the box has to REACH the button, and the row has to end where every
+# other row in the panel ends. One message each, so a failure names which
+# of the three is wrong [session 36's attribution lesson].
+region(label_input "${out}" lix liy liw lih)
+math(EXPR label_r "${lix} + ${liw}")
+foreach(pair "phase_arm;phase_input;cap_phase" "sync_arm;sync_input;cap_sync")
   list(GET pair 0 btn)
   list(GET pair 1 anchor)
+  list(GET pair 2 cap)
   region(${btn} "${out}" bx by bw bh)
   region(${anchor} "${out}" ax ay aw ah)
+  region(${cap} "${out}" cx cy cw ch)
   # Rows OVERLAP rather than share a y: an Fl_Input is inset a pixel from
   # the caption box beside it, and pinning the inset would be pinning a
   # decoration. What has to be true is that they are the same ROW.
@@ -604,8 +613,37 @@ foreach(pair "phase_arm;phase_input" "sync_arm;sync_input")
       "gui_shell FAIL arm: ${btn} is ${bx}..${br} (${bw} px wide), outside "
       "the panel ${spx}..${panel_r} or too small to hit")
   endif()
+  # The box REACHES the button. Stated as a comparison of the row's two
+  # gaps rather than against a number, because the row already declares
+  # what a gap in it looks like: the space between a caption and the
+  # control it names. A box that stops short of the button leaves a third,
+  # wider gap that belongs to nothing — 28 px of it until session 38, which
+  # is what made these the only rows in the panel not reading as one value
+  # column. The two sides come from different constants [kCorrBoxW against
+  # kFieldGap and kArmW], so this can fail; derive the box width from the
+  # button and it could not [session 30].
+  math(EXPR cap_r "${cx} + ${cw}")
+  math(EXPR a_r "${ax} + ${aw}")
+  math(EXPR row_gap "${bx} - ${a_r}")
+  math(EXPR cap_gap "${ax} - ${cap_r}")
+  if(row_gap GREATER cap_gap)
+    message(FATAL_ERROR
+      "gui_shell FAIL arm reach: ${anchor} ends at ${a_r} and ${btn} starts "
+      "at ${bx}, a gap of ${row_gap} px, against ${cap_gap} px between "
+      "${cap} and ${anchor} on the same row — the box does not reach its "
+      "button and the dead space belongs to nothing")
+  endif()
+  # ...and the row ends where the Label box above it ends, which is what
+  # makes the sidebar one value column rather than two.
+  if(NOT br EQUAL label_r)
+    message(FATAL_ERROR
+      "gui_shell FAIL arm column: ${btn} ends at ${br} and label_input ends "
+      "at ${label_r}; the correction rows share the panel's value column")
+  endif()
 endforeach()
-message(STATUS "gui_shell PASS arm: each button on its own gesture's row")
+message(STATUS
+  "gui_shell PASS arm: each button on its own gesture's row, its box "
+  "reaching it, the row ending on the panel's value column")
 
 # --- where a SYNC nudge STARTS [sync_step] ---------------------------------
 # The trap this checks: a blank box means "as measured", and the measured
