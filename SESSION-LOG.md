@@ -7,8 +7,101 @@ anything as our develop history").
 
 ---
 
-## 2026-08-20 — Session 38: the second dead gap in the block that was
-## relaid out to remove the first one
+## 2026-08-27 — Session 39: the pre-release delta audit, and the bug the
+## remediation itself had shipped
+
+Agent: Kimi (Moonshot AI). Code changed: `live/session.cpp` (the
+dispatch re-reads state per event again), `live/engine.{hpp,cpp}` (the
+measured_lpm gate on DRAWING — PREVIEW, the zero crossing in `emit`,
+`process_block` out of `thread2`, two comments), `gui/nova-gui.cpp`
+(marker columns drawn at their centers, `strip_opt` on the offline
+capture path, `print_metrics_gesture` and `run_type_action` out of the
+two over-limit functions), `tests/test_live_session.cpp` (T15),
+`tests/test_live_engine.cpp` (the measured_lpm pin). Files changed:
+`README.md`, `fixtures/MANIFEST.md`, `CMakeLists.txt`,
+`.github/workflows/ci.yml`, `.github/workflows/release.yml`,
+`tools/record-fixture-regression.sh`, `docs/06-audit-gate0.md`,
+`docs/audit/HUMAN-SIGNOFF.md`, `ROADMAP.md`, `CHANGELOG.md`, and the new
+`docs/audit/PRE-RELEASE-DELTA-REPORT.md`. Suite: **40, unchanged** — two
+new tests inside existing suites, no new target. 40/40 green, zero
+warnings. Version stays **0.4.5**.
+
+**Why the session existed.** Sara asked for an audit of the codebase
+before the remote goes up and the release is tagged. The five-pass audit
+of 2026-08-16 and its sign-off of 2026-08-19 cover the tree AS OF that
+date; everything after — the remediation commits themselves (sessions
+32–34) and all of sessions 35–38 — no auditor had ever seen. So: a delta
+audit, run as three independent fresh-context read-only reviews
+(remediation verification; new-code review; a Pass E re-run on the
+current tree) plus a blob-by-blob privacy audit of all git history. The
+report is `docs/audit/PRE-RELEASE-DELTA-REPORT.md`: critical 0, major 1,
+minor 11, informational 6. Sara chose "fix the full batch", and all of
+it is fixed or recorded in this session.
+
+**The major finding was in the remediation itself (PR-001).** Session
+32's extraction of `LiveSession`'s tone-event dispatch passed the state
+BY VALUE; the pre-refactor loop had re-read `state_` on every event.
+Two start-kind runs qualifying in ONE push batch — possible by design,
+the kinds' runs overlap — were then both judged against the stale
+pre-batch state: `begin_opening` ran twice, and the second call erased
+the first tone from the retained store and took the second tone's IOC.
+Reachable, wrong, and invisible to every fixture we have. The comment on
+the extraction said "the decisions below move here unchanged," which was
+false. **The lesson for the next agent: a refactoring's claim of
+equivalence is itself a claim, and it needs the same falsifier as any
+other.** "Moved unchanged" moved with one fewer read of mutable state.
+The suite pinned behavior and stayed green because no test fed two
+start tones in one batch — the mutation survived every check until the
+audit read the diff against the original. T15 now feeds exactly that,
+and was mutation-proven both ways: it fails the pre-fix code on both
+discriminators (IOC, retained-store erasure) and passes the fix.
+
+**The rest, briefly.** PR-002: `measured_lpm`'s documented "returns to 0
+when a transmission ends" was false — the preview renderer lives until
+the next opening — and the panel guard built on the zero was dead code;
+the published rate is now gated on DRAWING — PREVIEW, with the zero
+crossing in `emit` so a transmission ending at `flush()` is covered, and
+a `live_engine` test watches it rise to 120 and fall to 0. PR-003: the
+tuning strip's markers sat a systematic half column (~4 Hz) left of the
+frequency they name — drawn at the column's left edge while
+`spectrum_column_hz` names its center; they are drawn at the center now.
+PR-006…011: the sessions 35–36 suite re-measurement had reached some
+files and not others — the same number now appears in README, MANIFEST,
+ci.yml and CMakeLists, and README's human-review disclosure now says
+what CHANGELOG already said about the un-reviewed M4.5 strip. PR-012:
+three functions had grown back over Gate 0's 80 lines in sessions 35–38;
+decomposed, and PR-013 records the counting convention (brace depth) in
+docs/06 — **PENDING Sara's sign-off in HUMAN-SIGNOFF.md**, Gate 0 being
+hers. PR-015/016: the recorder always builds from a clean tree, and the
+release gate now ties the record's registered-suite count to the tag's
+own inventory — a quietly dropped suite can no longer pass as a smaller
+complete run. PR-017: closed by doing it — a clean-clone build + ctest
+of HEAD, 100% of the runnable suites green, zero warnings.
+
+**The privacy audit is the other headline.** All 109 paths in the whole
+of git history are project files: no recordings, no PDFs, no `.m4a`, no
+analysis artifacts, no stashes. Session 32's history purge is intact.
+The tree is safe to push.
+
+**One honest caveat about this run of the suite.** It took 3473 s of
+wall time against the usual ~280 s, because the machine was under heavy
+load and the live tests pace themselves against real clocks. Green is
+green, but a timing-sensitive suite run under load is a data point to
+remember if a live test ever flakes.
+
+**Next step: the remote, then the record, then the tag — in that
+order.** The remote needs Sara's choice of where it lives (asked this
+session; unanswered at logging time). Once it exists: push, watch CI go
+green for the first time, then run `tools/record-fixture-regression.sh`
+(where the recordings are), commit the fresh record, and tag — the
+release gate checks the record against the tag. The record in the tree
+still describes `bc1c595` and is stale; the gate would correctly refuse
+a tag today. The one by-hand blocker is unchanged: the real-receiver
+run (MLite-880 in the park) — an edit open when the second transmission
+arrives, and the tuning strip looked at while actually tuning. Also for
+Sara: the docs/06 counting-convention note awaits her signature in
+`docs/audit/HUMAN-SIGNOFF.md`.
+
 
 Agent: Claude (Opus 5). Code changed: `gui/nova-gui.cpp` (`kArmW`,
 `kArmLabel`, `kCorrBoxW`, the two button labels and their label size, the

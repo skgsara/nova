@@ -1272,6 +1272,14 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
     **Done (session 34).** All 16 minor findings conform and all 3 gaps
     are closed; `stage_assembly` went 416 → 64 lines and the tree now
     measures zero functions over 80 anywhere.
+    **Re-verified 2026-08-27 (delta audit, PR-012):** sessions 35–38 had
+    grown three functions back over the limit (`thread2`,
+    `print_metrics_detail`, `run_actions`); all three are decomposed and
+    the tree measures zero over 80 again. The nesting convention the
+    threshold is measured with (brace depth) is now written into docs/06
+    [PR-013] — the audit found one chain that reads as depth 5 only under
+    the control-flow-statement convention, and it is accepted under the
+    recorded one.
 
 **Open, and these are the release blockers:**
 9. **CI exists but has never run** [E-GAP-002, partial].
@@ -1291,6 +1299,13 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
    Pass E's RESOLVES IF names that as acceptable, and it is the strongest
    available while the recordings are not published. What it does not do
    is prove Nova builds on Linux; that stays unknown until a run happens.
+   **Hardened 2026-08-27 (delta audit):** the recorder now always builds
+   from a clean tree [PR-016], and the gate ties the record's
+   registered-suite count to the tag's own inventory so a quietly dropped
+   suite cannot pass as a smaller complete run [PR-015]. The same audit
+   closed the "does the documented build reproduce" gap by clean-clone
+   build + ctest of HEAD [PR-017], and swept the stale suite counts out
+   of README, MANIFEST, ci.yml and CMakeLists [PR-006…009].
 13. **Session 31's by-hand GUI runs, PARTLY done — and it is now five of
     five.** Session 37: Sara ran the M4.5 window against a fed signal and
     found five defects in the status panel in one sitting, none of which

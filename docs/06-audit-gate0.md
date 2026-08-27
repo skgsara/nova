@@ -246,6 +246,17 @@ The two checks, restated in full so neither is lost:
 The protocol's own example values, chosen against the measured
 distribution rather than by default.
 
+**Counting convention** (recorded 2026-08-27, PR-013): both numbers are
+measured the way the scanner below measures them — nesting depth is
+BRACE depth relative to the function body; a braceless control-flow
+statement does not add a level. The alternative convention (counting
+control-flow statements, braces or not) reads one chain in
+`core/fax.cpp`'s `relock_dropout_runs` as depth 5 — while > if > if >
+for > a braceless `if (relock_row(...))` — where the brace count is 4.
+That chain is ACCEPTED under this convention: the braceless `if` adds
+no scope, and it is the convention the Pass C remediation's "none
+deeper than 4" was measured against.
+
 Distribution across 168 functions in `core/ live/ cli/ gui/`, measured
 2026-08-16 by brace-depth scan (heuristic — it keys on a signature
 pattern at column 0, so it will miss some definitions and may merge

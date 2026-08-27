@@ -17,17 +17,23 @@ this hash, decodes within these bounds* — is fully stated. It is
 reproducible by anyone holding the same file, and checkable against a
 recording of your own for everything except the exact numbers.
 
-**Consequence, stated plainly: 30 of Nova's 38 test suites cannot run from
-a clean public checkout.** Not 22 — the count people reach for is the
+**Consequence, stated plainly: 30 of Nova's 40 test suites cannot run from
+a clean public checkout** (29 of 38 on a machine that also lacks FLTK and
+RtAudio — `gui_layout` is the one GUI suite that needs no recording). Not
+22 — the count people reach for is the
 "real-fixture screamers", but the live-path, operator-override and GUI
 shell suites feed on recordings too. The build detects their absence,
 registers them anyway and reports them Skipped with the reason, so a
 checkout without recordings does not look like a smaller green project.
 
-The 8 that run anywhere are the synthetic matrices (the full {IOC 288, 576}
+The ones that run anywhere are the synthetic matrices (the full
+{IOC 288, 576}
 × {60, 90, 120 lpm} sweep, both deviations, the eight-tone gray scale,
-clock error to ±250 ppm, heavy noise, both phasing waveforms), the ruler
-mapping, the PNG round-trip, the audio ring, and the untrusted-input
+clock error to ±250 ppm, heavy noise, both phasing waveforms), the tone
+detector, the ruler
+mapping, the PNG round-trip, the audio ring, the hooks, the tuning
+spectrum, the version flag, the GUI layout (with FLTK and RtAudio
+present), and the untrusted-input
 guards — that last one generates its own malformed files precisely so that
 the security-relevant checks survive in a checkout with no audio at all.
 

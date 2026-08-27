@@ -10,6 +10,57 @@ lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased — 0.4.5
 
+### 2026-08-27 — the pre-release delta audit, and what it found
+
+Everything that landed after the signed-off audit of 2026-08-19 — the
+remediation commits themselves and sessions 35–38 — was audited before
+release by a fresh set of eyes (three independent read-only reviews plus
+a blob-by-blob privacy audit of all git history; report:
+`docs/audit/PRE-RELEASE-DELTA-REPORT.md`). One real bug, a systematic
+pixel offset, a dead contract, and a wave of stale prose. All fixed or
+recorded; version stays 0.4.5, no milestone moved.
+
+- **Two start tones in one batch no longer open the transmission twice
+  (PR-001).** The session-32 extraction of the tone-event dispatch
+  snapshotted the session state once per batch; the pre-refactor loop
+  re-read it per event. Two different-frequency start runs qualifying in
+  one 0.5 s block (possible by design) both passed the ready test, the
+  second opening erased the first tone from the retained store, and IOC
+  auto-selection took the wrong tone. The state is re-read per event
+  again, and `live_session` T15 pins it — mutation-proven: it fails on
+  the pre-fix code on both discriminators.
+- **`measured_lpm` honors its contract (PR-002).** It was documented as
+  returning to 0 when a transmission ends; the preview renderer lives
+  until the next opening, so it never did, and the status panel's
+  decode-is-the-authority guard was dead code. The published rate is now
+  gated on DRAWING — PREVIEW, with the zero crossing on the state
+  transition so a transmission ending at `flush()` is covered. Pinned by
+  a `live_engine` test that watches it rise to 120 and fall to 0.
+- **The tuning strip's markers name the column's center (PR-003).** The
+  1500/2300 Hz lines and labels were drawn at the column's left edge, a
+  systematic half column (~4 Hz) left of the frequency they name. The
+  waterfall's own centroid mapping now places them.
+- **The suite-count story is the same in every file (PR-006…011).** The
+  sessions 35–36 re-measurement (40/38 registered, 10/9 runnable without
+  recordings) had reached some files but not README's build section,
+  `fixtures/MANIFEST.md`, `ci.yml`'s comments, or `CMakeLists.txt`'s.
+  README's human-review disclosure now also says what CHANGELOG already
+  said: the M4.5 tuning strip has only been driven headlessly and is a
+  release blocker.
+- **The release machinery is hardened (PR-015/016).** The regression
+  recorder always builds from a clean tree (an incremental rebuild of a
+  stale build dir is not byte-assured), and the release gate now ties the
+  record's registered-suite count to the tag's own inventory, so a suite
+  that quietly stops existing cannot pass as a smaller complete run.
+- **Gate 0 housekeeping (PR-012/013).** Three functions that had grown
+  back over the 80-line limit in sessions 35–38 are decomposed
+  (`thread2`'s per-block chain, `print_metrics_detail`,
+  `run_actions`), and docs/06 now records the counting convention the
+  threshold was always measured with: nesting depth is brace depth.
+- **Privacy audit: clean.** All 109 paths in the whole of git history
+  are project files — no recordings, no PDFs, no analysis artifacts. The
+  tree is safe to push.
+
 ### 2026-08-20 — the correction rows, looked at a second time
 
 Sara ran the window again (session 38) and asked about the block she had

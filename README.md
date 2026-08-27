@@ -33,7 +33,10 @@ including the agent that wrote it. Nova's third-party lineage is
 idea-level and documented in `NOTICE`, and that claim has been checked
 against the actual upstream sources (see the audit below) — but no
 process available here can rule out unconscious reproduction at a level
-below what comparison detects.
+below what comparison detects. And the newest user-facing surface, the
+M4.5 tuning strip — whose entire job is to be looked at — has so far
+only been driven headlessly: no person has tuned a receiver by it yet.
+It is a release blocker, and it says so in `CHANGELOG.md`.
 
 **The audit.** Nova has been audited against a written protocol, by
 agents that did not author it and under different models, with
@@ -44,6 +47,8 @@ explicitly did not replace:
 - the protocol — [`docs/07-audit-protocol.md`](docs/07-audit-protocol.md)
 - its parameters — [`docs/06-audit-gate0.md`](docs/06-audit-gate0.md)
 - the pass reports, cross-verification, and sign-off — [`docs/audit/`](docs/audit/)
+- the pre-release delta audit of everything that changed after that
+  sign-off — [`docs/audit/PRE-RELEASE-DELTA-REPORT.md`](docs/audit/PRE-RELEASE-DELTA-REPORT.md)
 
 The audit is a filter, not an assurance. Findings that are still open
 are recorded in the reports as they stand, including the ones that
@@ -420,7 +425,9 @@ cmake --build build
 ctest --test-dir build
 ```
 
-**What you will see: 9 suites run, 30 report Skipped.** Nova's real-signal
+**What you will see: 10 suites run and 30 report Skipped with FLTK and
+RtAudio installed; 9 run and 29 skip without them** (the GUI-only
+`gui_layout` suite is the difference). Nova's real-signal
 tests need off-air recordings of weather-fax broadcasts, and this
 repository does not redistribute them — the copyright of a transmitted
 chart varies by issuing meteorological service, and one of the stations in
@@ -431,7 +438,7 @@ next to each test. So the claim being made — *this recording, this hash,
 decodes within these bounds* — is fully stated and checkable by anyone
 holding the same file.
 
-The 9 that run anywhere are not a token: they include the full
+The ones that run anywhere are not a token: they include the full
 {IOC 288, 576} × {60, 90, 120 lpm} synthetic matrix and the
 untrusted-input guards, which generate their own malformed files.
 
@@ -464,13 +471,17 @@ script rather than a verified platform.
 
 Because 30 suites cannot run without the recordings, a release tag is
 gated differently: whoever holds them runs
-`tools/record-fixture-regression.sh`, which runs the full suite and writes
+`tools/record-fixture-regression.sh`, which runs the full suite from a
+clean build tree and writes
 `docs/audit/FIXTURE-REGRESSION.md`, refusing to write anything if the tree
 is dirty, if the recordings are absent, or if a single suite fails or
 skips. `.github/workflows/release.yml` then refuses a `v*` tag unless the
 recorded commit is an ancestor of it with nothing but that record
 differing — that is, unless the code being released is the code that was
-tested. What this is worth, exactly: it does not prove the suite passed,
+tested — and unless the record's registered-suite count equals the tag's
+own, so a suite that quietly stops existing cannot pass as a smaller
+complete run. What this is worth, exactly: it does not prove the suite
+passed,
 it proves someone with the recordings ran it against these bytes and the
 tool would not have written the record otherwise.
 

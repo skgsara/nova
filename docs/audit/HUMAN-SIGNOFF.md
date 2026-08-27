@@ -177,3 +177,25 @@ take the list as current.
 
 The sentence below the original list applies unchanged, and applies to
 this note too.
+
+## Appended 2026-08-27 — the pre-release delta audit
+
+Everything that changed after this gate was signed (the remediation
+commits of sessions 32–34 and all of sessions 35–38) was audited before
+release: three independent fresh-context read-only reviews plus a
+blob-by-blob privacy audit of all git history, reported in
+`PRE-RELEASE-DELTA-REPORT.md`. One major finding (PR-001, a state-machine
+bug introduced by the remediation itself), eleven minor, six
+informational; privacy clean. All findings were remediated or recorded
+the same day; the report's register says which.
+
+One item here is Sara's to sign, as Gate 0 is hers:
+
+- **SIGNED** (2026-08-27) — the MAX_NESTING_DEPTH counting convention
+  added to
+  docs/06 §MAX_FUNCTION_LINES/MAX_NESTING_DEPTH [PR-013]: nesting depth
+  is BRACE depth relative to the function body; a braceless control-flow
+  statement adds no level. This is the convention the Pass C remediation
+  was measured against; the addition records it, it does not change it.
+  Under it the one contested chain (`relock_dropout_runs`, depth 5 by
+  control-flow count, 4 by brace count) is accepted.
