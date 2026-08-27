@@ -189,19 +189,26 @@ endforeach()
 #
 # One check and one message PER FIELD, so a failure names the field that
 # does not fit rather than the first one the loop happened to reach
-# [session 31's attribution lesson, session 36's version of it].
+# [session 31's attribution lesson, session 36's version of it]. All
+# failures are collected before the fatal: the platforms' fonts differ
+# (the Linux runner's Helvetica substitute measures ~8% wider than
+# macOS's), and aborting at the first field would hide how tight the
+# rest are — session 39 sized the panel from exactly one such list.
 run_metrics(fit)
+set(fit_failures "")
 foreach(field "Mode" "IOC" "Rate" "State" "Lines" "Clock" "Started" "captions"
                "arm")
   fit_line(${field} "${fit}" box needs widest)
   if(box LESS needs)
-    message(FATAL_ERROR
-      "gui_layout FAIL: the ${field} field is ${box} px wide and needs "
-      "${needs} px to draw \"${widest}\" — it would be clipped")
+    set(fit_failures "${fit_failures}\n  the ${field} field is ${box} px wide and needs ${needs} px to draw \"${widest}\"")
+  else()
+    message(STATUS "gui_layout PASS: ${field} fits (${needs} of ${box} px, "
+      "widest \"${widest}\")")
   endif()
-  message(STATUS "gui_layout PASS: ${field} fits (${needs} of ${box} px, "
-    "widest \"${widest}\")")
 endforeach()
+if(fit_failures)
+  message(FATAL_ERROR "gui_layout FAIL: text would be clipped:${fit_failures}")
+endif()
 
 # ---------------------------------------------------------------------------
 # Rule 6 [session 37]: the sidebar is INSIDE the status panel.
