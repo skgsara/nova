@@ -36,6 +36,7 @@
 #include "../live/session.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>

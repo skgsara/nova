@@ -49,7 +49,30 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfltk1.3-dev librtaudio-dev pkg-config xvfb
+          sudo apt-get install -y pkg-config xvfb curl \
+            libx11-dev libxext-dev libxft-dev libxinerama-dev \
+            libxcursor-dev libxfixes-dev libxrender-dev \
+            libjpeg-dev libpng-dev zlib1g-dev \
+            libasound2-dev libpulse-dev
+          # Ubuntu's libfltk1.3-dev and librtaudio-dev are the WRONG
+          # MAJORS: the shell is written against FLTK 1.4
+          # (Fl_RGB_Image::scale) and RtAudio 6 (RtAudioErrorType,
+          # getDeviceIds, DeviceInfo::ID). Build the exact versions the
+          # macOS row gets from Homebrew, so both rows exercise one API
+          # surface rather than two.
+          curl -sL https://github.com/fltk/fltk/archive/refs/tags/release-1.4.5.tar.gz | tar xz
+          cmake -B fltk-build -S fltk-release-1.4.5 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DFLTK_BUILD_TEST=OFF -DFLTK_BUILD_EXAMPLES=OFF -DFLTK_BUILD_GL=OFF
+          cmake --build fltk-build --parallel
+          sudo cmake --install fltk-build
+          curl -sL https://github.com/thestk/rtaudio/archive/refs/tags/6.0.1.tar.gz | tar xz
+          cmake -B rtaudio-build -S rtaudio-6.0.1 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DRTAUDIO_API_ALSA=ON -DRTAUDIO_API_PULSE=ON \
+            -DRTAUDIO_API_JACK=OFF -DRTAUDIO_API_OSS=OFF
+          cmake --build rtaudio-build --parallel
+          sudo cmake --install rtaudio-build
 
       - name: Install FLTK and RtAudio (macOS)
         if: runner.os == 'macOS'
