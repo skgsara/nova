@@ -450,8 +450,11 @@ Nova is **0.4.5** — milestone-based in the project's own M0–M4 language,
 M4.5 (the tuning aids) being the milestone that is complete; M4, the live
 shell, was 0.4.0. It stays below
 1.0 for the reasons in Platforms and Security posture above, not out of
-modesty. **There is no release tag yet**, because a tag is a release
-decision and that decision has not been made.
+modesty. **Tagged `v0.4.5` on 2026-08-27** — Sara's release decision —
+and the release gate passed on the tag: the fixture-independent suites
+on the runner, the full-suite record from the machine with the
+recordings tied to the tag's own inventory, and the tag matching the
+declared version.
 
 Every binary reports it:
 

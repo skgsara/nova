@@ -7,6 +7,42 @@ anything as our develop history").
 
 ---
 
+## 2026-08-27 — Session 39 (close): v0.4.5 is tagged, and the gate
+## passed on its first real tag
+
+Agent: Kimi (Moonshot AI). Files changed: `README.md` (the Version
+section), `ROADMAP.md` (item 14 closed), `CHANGELOG.md` (0.4.5 is a
+tagged release, not "Unreleased"), `docs/audit/FIXTURE-REGRESSION.md`
+(fresh record, 40/40, zero skipped, against df006b1), this file.
+Version: **0.4.5, tagged.**
+
+Sara made the release decision. `v0.4.5` was tagged on dd706f6 — the
+commit whose only difference from the regression record's commit is the
+record itself, the exact shape the gate is designed around — and the
+release gate passed all three jobs on its first real tag: the tag and
+the version agree, the out-of-band full-suite record checks out
+(ancestor, byte-identical but the record, complete run, and the
+PR-015 inventory tie), and the fixture-independent suites on the
+runner. The machinery sessions 35 and 39 built was never exercised
+until today; today every part of it ran and held.
+
+The post-tag documentation moved with it: README's Version section no
+longer says "no release tag yet", the CHANGELOG's 0.4.5 entries sit
+under a tagged header, ROADMAP item 14 is closed.
+
+**What is deliberately NOT done:** the repository is still private —
+making it public is the promotion decision, and it stays Sara's. And
+ROADMAP item 13 stands as the 1.0 blocker it was: the by-hand run
+through a real receiver (an edit open when the second transmission
+arrives; the tuning strip looked at while actually tuning).
+
+**Next step: the MLite-880 park run** — the two questions item 13
+carries. After it, in whatever order its findings dictate: anything it
+finds becomes a session like 37's; making the repository public is the
+act that follows a clean one.
+
+---
+
 ## 2026-08-27 — Session 39 (continued): the remote, six CI runs, and
 ## four defects no macOS build could see
 

@@ -1318,8 +1318,12 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
     short to show a fade — and none of those is a defect any headless
     check can have. Sara's plan as of 2026-08-20: an MLite-880 in the
     park, audio cable to the laptop.
-14. **No tag, because no release decision.** Everything a tag needs is in
-    place; making one is Sara's act, not an agent's.
+14. ~~**No tag, because no release decision.**~~ **Closed 2026-08-27:**
+    Sara made the decision, `v0.4.5` is tagged, and the release gate
+    passed on it on its first real tag — the version match, the
+    full-suite record tied to the tag's own inventory, and the
+    fixture-independent suites on the runner. The repository is private
+    until the promotion decision; making it public is the remaining act.
 
 **Not fixed because they are not defects:** the 240 lpm omission (WMO
 §5.1.5 lists four rates, ISO §4.2.4 requires three of a receiver — now

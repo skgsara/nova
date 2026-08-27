@@ -1,14 +1,14 @@
 # Changelog
 
-Nova has not been released: there is no tag, because making one is the
-release decision itself. Since session 35 it does carry a version —
-milestone-based in the project's own M0-M4 language, reported by every
-binary's `--version`.
+Nova's versions are milestone-based in the project's own M0-M4 language,
+reported by every binary's `--version`. The first tag is `v0.4.5`
+(2026-08-27); before it, the project carried the version without a
+release, because making the tag was the release decision itself.
 
 This file records what changed and when, newest first. The full narrative
 lives in `SESSION-LOG.md`; this is the short form.
 
-## Unreleased — 0.4.5
+## 0.4.5 — tagged 2026-08-27
 
 ### 2026-08-27 — CI runs for real, and four platform defects fall
 
