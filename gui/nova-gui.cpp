@@ -175,11 +175,18 @@ constexpr int kStatusH = 22;
 // two errors: a chart 20 px narrower is still a chart, and a state that
 // says "DRAWING - PREVIE" is a readout the operator cannot trust.
 //
+// Widened again to 232 in session 39, by the same instrument on a second
+// platform: the Linux CI runner's Helvetica substitute measures wider than
+// macOS's fonts, and the widest status line — "21600/21600, 999 seams",
+// the Lines witness — needs 158 px there against the 146 the column had.
+// 232 gives the column 162 px: 4 of slack on the Linux runner, more on the
+// Mac. Every other field fit on both platforms; only Lines was tight.
+//
 // The number is DECLARED here and the requirement is MEASURED by the
 // running program [see status_field_witness]; `gui_layout` compares the
 // two, so a longer state name or a wider format fails the suite instead of
 // reaching a window.
-constexpr int kPanelW = 220;
+constexpr int kPanelW = 232;
 constexpr int kPad = 4;
 constexpr int kPanelRowH = 20;
 // The sidebar's caption column, and the gap between a caption and the
@@ -216,9 +223,9 @@ constexpr const char* kArmLabel = "PICK";
 // against the caption gap on the same row and actually fail when they
 // diverge. What it is measuring: at 70 px the box ended 28 px short of the
 // arming button, so the correction rows alone broke the value column every
-// other row in the panel shares. 94 + kFieldGap + kArmW is 146, which is
+// other row in the panel shares. 110 + kFieldGap + kArmW is 162, which is
 // exactly the Label box above it.
-constexpr int kCorrBoxW = 94;
+constexpr int kCorrBoxW = 110;
 constexpr int kFontSize = 12;  // §8: "12 px Helvetica"
 constexpr int kFrame = 2;      // §8: "two-pixel FL_UP_BOX / FL_DOWN_BOX"
 // The GUI queue's drain interval [docs/05 §2.3]: 50 ms, one repaint per
