@@ -10,6 +10,39 @@ lives in `SESSION-LOG.md`; this is the short form.
 
 ## Unreleased — 0.4.5
 
+### 2026-08-27 — CI runs for real, and four platform defects fall
+
+The repository has a remote now (`github.com/skgsara`, private until the
+release decision), and the first-ever CI executions are green on all
+four rows — macOS arm64 and Linux x86-64, with and without the GUI. It
+took six runs; the failures were the point of having the rows:
+
+- **`<stdexcept>` and `<cmath>`** — `core/resample.cpp` and two test
+  files used `std::invalid_argument`, `std::runtime_error` and `std::sin`
+  on headers libc++ provides transitively and libstdc++ does not. Every
+  macOS build had been green; Linux refused to compile.
+- **The Linux GUI dependencies are built from source** — Ubuntu's
+  packages are FLTK 1.3 and RtAudio 5; the shell is written against
+  1.4 and 6. The job now builds the exact Homebrew versions (1.4.5 /
+  6.0.1, the former with `-fPIC` for Ubuntu's default PIE).
+- **FLTK links after the objects** — `LINK_FLAGS` goes before them on
+  the link line, and GNU ld resolves left to right; the archive was
+  discarded and every `Fl_*` symbol came back undefined. macOS's linker
+  is order-insensitive, which is why the bug was invisible. Apple keeps
+  the verbatim `-weak_framework` string; other platforms link through
+  `target_link_libraries`.
+- **The status panel fits two platforms' fonts** — the Linux runner's
+  Helvetica substitute measures the widest status line
+  ("21600/21600, 999 seams") at 158 px against the column's 146. The fit
+  rule now reports every tight field in one run instead of aborting at
+  the first, and the panel is 232 px (`kCorrBoxW` grows with it, holding
+  the session-38 value column). Only Lines was tight; everything else
+  fit on both platforms.
+
+What "tested on Linux" means stays exactly stated in the README: the
+fixture-independent suites. The 30 real-signal suites run where the
+recordings are, and the release gate's record mechanism is unchanged.
+
 ### 2026-08-27 — the pre-release delta audit, and what it found
 
 Everything that landed after the signed-off audit of 2026-08-19 — the

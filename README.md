@@ -390,27 +390,29 @@ T14].
 
 **What is not claimed:** Nova has had no coverage-guided fuzzing and no
 third-party security review. The corrupted-input testing it has had is a
-hand-built corpus of ~30 malformed files across two audit passes. A CI
-workflow exists as of session 35 but has never run — see Platforms.
+hand-built corpus of ~30 malformed files across two audit passes.
 
 ## Platforms
 
-**Built and tested on macOS arm64 only.** That is still the whole of it.
-The decoder, the command-line tools and the test suite are plain C++17
+**Developed on macOS arm64; CI-verified on macOS arm64 and Linux
+x86-64.** `.github/workflows/ci.yml` builds and runs the 10
+fixture-independent suites on both, with and without the GUI — and as of
+2026-08-27 it has actually executed, green on all four rows. Getting it
+there found four defects five weeks of macOS-only green could not: two
+standard headers libc++ provides transitively and libstdc++ does not, a
+link line whose order macOS's linker ignores and GNU ld does not, and a
+status panel sized to one platform's fonts. The Linux row builds FLTK
+1.4.5 and RtAudio 6.0.1 from source because Ubuntu's packages are the
+wrong major versions of each.
+
+What that run proves and what it does not: the 30 fixture-gated suites
+run only where the recordings are (this machine, out of band — see
+Continuous integration), so "tested on Linux" means the synthetic and
+wiring suites, not the real-signal regression. The decoder, the
+command-line tools and the test suite are plain C++17
 with no external dependencies, which is a reason to expect other 64-bit
 platforms to work — not evidence that they do. Reports from anywhere else
 are welcome.
-
-`.github/workflows/ci.yml` (session 35) builds and tests on macOS arm64
-and Linux x86-64 and would be that evidence, **but it has never executed:
-this repository has no remote, so no run of it exists.** Its steps were
-checked by hand against a fixture-less local build — the inventory it
-asserts, 40 suites registered and 30 skipped without recordings, is the
-inventory such a build actually produces, and the check was seen to fail
-when given the wrong numbers. That is a verified script, not a verified
-platform. The Linux row is there to find out whether Nova builds on
-x86-64; until someone has watched it go green, this section says macOS
-arm64 and nothing more.
 
 No 32-bit build has been attempted, and nothing here is written against
 an old-hardware floor.
@@ -464,10 +466,10 @@ the `version_flag` suite fails if any binary disagrees with it.
 ### Continuous integration
 
 `.github/workflows/ci.yml` builds and runs the 10 fixture-independent
-suites on macOS arm64 and Linux x86-64, with and without the GUI.
-**It has never executed: this repository has no remote.** See Platforms
-for what was verified by hand instead, and for why that is a verified
-script rather than a verified platform.
+suites on macOS arm64 and Linux x86-64, with and without the GUI —
+green on all four rows since the first executions on 2026-08-27
+(the repository gained a remote that day; see Platforms for what the
+first runs found).
 
 Because 30 suites cannot run without the recordings, a release tag is
 gated differently: whoever holds them runs

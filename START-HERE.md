@@ -35,10 +35,12 @@ in Hz rather than merely looking like a spectrum;
 **Since session 35 the tree carries a version and a CI workflow.** Every
 binary answers `--version` with `0.4.5` — milestone-based, M4.5 (the tuning
 aids) being the milestone that is complete — and `.github/workflows/ci.yml`
-builds and runs the 10 fixture-independent suites on macOS and Linux. **That workflow has
-never executed**, because the repository still has no remote; it is written
-and its assertions were checked by hand against a fixture-less build, which
-is not the same as having been seen green. The 30 fixture-gated suites can
+builds and runs the 10 fixture-independent suites on macOS and Linux.
+**Since 2026-08-27 the workflow runs for real** (the repository has a
+remote now) and is green on all four rows; getting there took five runs
+and fixed four defects no macOS-only build could see (two transitive
+includes, a link-order assumption, a panel sized to one platform's
+fonts). The 30 fixture-gated suites can
 only run where the recordings are, so a release tag is gated on a record
 written by `tools/record-fixture-regression.sh` instead
 (`.github/workflows/release.yml` refuses a tag whose commit is not the

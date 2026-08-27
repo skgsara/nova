@@ -7,6 +7,75 @@ anything as our develop history").
 
 ---
 
+## 2026-08-27 — Session 39 (continued): the remote, six CI runs, and
+## four defects no macOS build could see
+
+Agent: Kimi (Moonshot AI). Code changed: `core/resample.cpp`,
+`tests/test_live_engine.cpp`, `tests/test_hooks.cpp`,
+`tests/test_live_preview.cpp`, `tests/test_live_session.cpp` (the
+includes), `gui/nova-gui.cpp` (`kPanelW` 232, `kCorrBoxW` 110),
+`CMakeLists.txt` (the Apple/else FLTK link split). Files changed:
+`.github/workflows/ci.yml` (source-built FLTK/RtAudio on Linux),
+`tests/gui_layout.cmake` (the fit rule reports all fields),
+`README.md`, `START-HERE.md`, `ROADMAP.md`, `CHANGELOG.md`.
+Suite: **40, unchanged.** 40/40 green locally, zero warnings; CI green
+on all four rows. Version stays **0.4.5**.
+
+Sara's three calls at the top of the sitting: commit session 39, sign
+the Gate 0 convention note (SIGNED in HUMAN-SIGNOFF.md), GitHub for the
+remote. The repo is `github.com/skgsara/nova`, **private until the
+release decision** — CI is identical either way, and private-first
+keeps the first push reversible. The pre-push privacy audit (all 109
+paths in history) had already cleared the way.
+
+**Then the CI did in one hour what it was written to do.** Six runs,
+four real defects, each invisible to five weeks of macOS-only green:
+
+1. `std::invalid_argument` in `core/resample.cpp` — libc++ provides
+   `<stdexcept>` transitively, libstdc++ does not. Swept the tree: four
+   files throw or catch std:: exception types without naming the header
+   (three more only mention them in comments — left alone).
+2. Ubuntu's `libfltk1.3-dev` / `librtaudio-dev` are the wrong MAJORS —
+   the shell is FLTK 1.4 / RtAudio 6 API (`Fl_RGB_Image::scale`,
+   `RtAudioErrorType`, `getDeviceIds`). The Linux job now builds the
+   exact Homebrew versions from source. Also `std::sin` without
+   `<cmath>` in `test_live_engine.cpp`, same class as (1).
+3. Every `Fl_*` symbol undefined at link: `LINK_FLAGS` goes BEFORE the
+   object files, GNU ld resolves left to right and discarded the
+   archive. macOS's ld is order-insensitive. Apple keeps the verbatim
+   `-weak_framework` string (the dedup bug the comment there records);
+   other platforms link FLTK through `target_link_libraries`. The
+   source-built FLTK also gained `-fPIC` (Ubuntu links PIE by default).
+4. `gui_layout` failed on ONE field: the Linux runner's Helvetica
+   substitute measures the Lines witness ("21600/21600, 999 seams") at
+   158 px against the column's 146. The fit rule's FATAL_ERROR aborted
+   at the first field, so it was first taught to report ALL tight
+   fields in one run — the list came back exactly one line long — and
+   then the panel widened: `kPanelW` 232 (column 162), `kCorrBoxW` 110
+   to hold session 38's value column. Sized from one measurement list,
+   not from one CI cycle per field.
+
+**The lesson for the next agent: a platform claim is a debt, and the
+first run collects it in the order the platforms differ** — headers,
+then library versions, then linker semantics, then fonts. None of the
+four was findable by reading the code on the machine that wrote it;
+every one was findable only by running somewhere else. This is also why
+the README's Platforms section was rewritten to say exactly what a green
+Linux row proves (the fixture-independent suites) and what it does not
+(the 30 real-signal suites, which still run only where the recordings
+are).
+
+**Next step: the record, then the tag.** Run
+`tools/record-fixture-regression.sh` against the commit this entry is
+in, commit the fresh record, and tag `v0.4.5` — the tag is Sara's act
+and she will be asked first. The release gate then checks the record
+against the tag on every future tag push. The one by-hand blocker is
+unchanged: the real-receiver run (MLite-880 in the park) — an edit open
+when the second transmission arrives, and the tuning strip looked at
+while actually tuning.
+
+---
+
 ## 2026-08-27 — Session 39: the pre-release delta audit, and the bug the
 ## remediation itself had shipped
 

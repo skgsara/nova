@@ -1282,30 +1282,20 @@ is complete (`docs/audit/HUMAN-SIGNOFF.md`).
     recorded one.
 
 **Open, and these are the release blockers:**
-9. **CI exists but has never run** [E-GAP-002, partial].
-   `.github/workflows/ci.yml` builds and runs the 10 fixture-independent
-   suites on macOS arm64 and Linux x86-64; `.github/workflows/release.yml`
-   gates a `v*` tag on those suites, on the tag matching the declared
-   version, and on a full-suite record whose commit is the tagged commit.
-   **No run of any of it exists, because the repository has no remote.**
-   What was verified instead, by hand: the inventory assertion is the
-   inventory a fixture-less build really produces (**40 registered, 10 ran,
-   30 skipped; 38 and 9 and 29 with `NOVA_BUILD_GUI=OFF`** as of session
-   36 — re-measured on real fixture-less builds when M4.5 added a suite,
-   not carried forward from session 35's 39/9/30), and the check was seen
-   to FAIL when given wrong numbers. The recordings stay private,
-   so the 30 fixture-gated suites are run out of band by whoever holds
-   them (`tools/record-fixture-regression.sh`) rather than by a runner —
-   Pass E's RESOLVES IF names that as acceptable, and it is the strongest
-   available while the recordings are not published. What it does not do
-   is prove Nova builds on Linux; that stays unknown until a run happens.
-   **Hardened 2026-08-27 (delta audit):** the recorder now always builds
-   from a clean tree [PR-016], and the gate ties the record's
-   registered-suite count to the tag's own inventory so a quietly dropped
-   suite cannot pass as a smaller complete run [PR-015]. The same audit
-   closed the "does the documented build reproduce" gap by clean-clone
-   build + ctest of HEAD [PR-017], and swept the stale suite counts out
-   of README, MANIFEST, ci.yml and CMakeLists [PR-006…009].
+9. ~~**CI exists but has never run** [E-GAP-002, partial]~~ — **closed
+   2026-08-27.** The repository has a remote now, and the first
+   executions went green on all four rows (macOS arm64 and Linux x86-64,
+   with and without the GUI). Getting there took five runs and four
+   real fixes: `<stdexcept>` and `<cmath>` (libc++ provides both
+   transitively, libstdc++ does not), FLTK's libraries moving after the
+   object files for GNU ld (macOS's linker is order-insensitive), and
+   the status panel widening from 220 to 232 for the Linux runner's
+   wider Helvetica substitute — sized from the fit rule's new
+   all-fields report, not one CI cycle per field. The Linux row builds
+   FLTK 1.4.5 and RtAudio 6.0.1 from source, Ubuntu's packages being the
+   wrong majors. The 30 fixture-gated suites still run only out of band
+   (`tools/record-fixture-regression.sh`), and the tag gate checks that
+   record against the tag — that half is unchanged.
 13. **Session 31's by-hand GUI runs, PARTLY done — and it is now five of
     five.** Session 37: Sara ran the M4.5 window against a fed signal and
     found five defects in the status panel in one sitting, none of which
