@@ -1419,6 +1419,55 @@ void test_started_stamp(const char* wav_path, const char* tmp_dir) {
           "the start stamp is earlier than the one in the filename");
 }
 
+// --------------------------------------------------------------------------
+// [PR-002] measured_lpm's contract: published while a picture is drawn, 0
+// again once the transmission ends — from then on the authority is the
+// decode's own DecodeResult::lpm, not the preview renderer, which the
+// session keeps until the next transmission's opening. The panel's
+// decode-is-the-authority guard reads that 0; without the gate in thread
+// 2 the renderer's period kept arriving through SAVED and the guard was
+// dead code.
+// --------------------------------------------------------------------------
+void test_measured_lpm_contract(const char* wav_path, const char* tmp_dir) {
+    const char* base = std::strrchr(wav_path, '/');
+    base = base ? base + 1 : wav_path;
+    std::printf("\n== measured_lpm returns to 0 when the transmission ends "
+                "(%s)\n",
+                base);
+
+    nova::Wav w = nova::read_wav(wav_path);
+    const std::vector<float> audio =
+        nova::resample(w.samples, w.sample_rate, kInternalRate);
+
+    nova::EngineOptions opt;
+    opt.image_folder = tmp_dir;
+    opt.poll_ms = 1;
+    nova::LiveEngine eng(kInternalRate, opt);
+    eng.run();
+    eng.start_capture();
+    double peak = 0.0;
+    std::thread feeder([&] {
+        std::size_t at = 0;
+        while (at < audio.size()) {
+            const std::size_t n =
+                std::min<std::size_t>(4096, audio.size() - at);
+            const std::size_t took = eng.push_audio(audio.data() + at, n);
+            at += took;
+            peak = std::max(peak, eng.measured_lpm());
+            if (took < n)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    feeder.join();
+    eng.shutdown();
+    std::printf("    peak published rate %.2f lpm; %.2f after SAVED\n", peak,
+                eng.measured_lpm());
+    check(peak > 100.0 && peak < 140.0,
+          "the measured rate is published while the picture is drawn");
+    check(eng.measured_lpm() == 0.0,
+          "and it is 0 once the transmission has ended [PR-002]");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1464,6 +1513,7 @@ int main(int argc, char** argv) {
     // BEGINS, and only a recording that begins one on its own exercises
     // the path an operator will actually use.
     test_started_stamp(argv[2], tmp);
+    test_measured_lpm_contract(argv[2], tmp);
     test_tuning_strip();
     test_overrun_counted(argv[argc - 1]);
 

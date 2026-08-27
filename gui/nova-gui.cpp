@@ -1340,7 +1340,7 @@ private:
         fl_color(fl_rgb_color(255, 64, 255));
         for (int c : {black_, white_}) {
             if (c < 0 || columns_ <= 0) continue;
-            const int px = ix + c * iw / columns_;
+            const int px = ix + col_center_px(c, iw);
             fl_line(px, ty, px, axis_y - 1);
         }
     }
@@ -1355,11 +1355,20 @@ private:
                 FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
         fl_color(fl_rgb_color(255, 64, 255));
         if (black_ >= 0 && columns_ > 0)
-            fl_draw("1500", ix + black_ * iw / columns_ - 14, ay, 28,
+            fl_draw("1500", ix + col_center_px(black_, iw) - 14, ay, 28,
                     kStripAxisH, FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
         if (white_ >= 0 && columns_ > 0)
-            fl_draw("2300", ix + white_ * iw / columns_ - 14, ay, 28,
+            fl_draw("2300", ix + col_center_px(white_, iw) - 14, ay, 28,
                     kStripAxisH, FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+    }
+
+    // A marker names the frequency spectrum_column_hz() names — the
+    // column's CENTER — so it is drawn at the center: the waterfall maps
+    // column c to pixels [c*iw/columns_, (c+1)*iw/columns_), and the left
+    // edge would sit the line a systematic half column (~4 Hz) left of
+    // the frequency on its label [PR-003].
+    int col_center_px(int c, int iw) const {
+        return (2 * c + 1) * iw / (2 * columns_);
     }
 
     std::vector<float> rows_;
@@ -2674,6 +2683,11 @@ struct Shell {
             // drains as fast as it can push, and the default would make a
             // capture wait on a clock nothing here is running.
             opt.poll_ms = 1;
+            // The same one-object rule as start_live [PR-004]: the
+            // offline path drives the same widget, so it feeds the same
+            // band description, or analyser and widget CAN be configured
+            // differently here.
+            opt.spectrum = strip_opt;
             audio_rate = static_cast<unsigned int>(f.rate);
             engine.reset(new nova::LiveEngine(f.rate, opt));
             engine->run();
@@ -3627,31 +3641,10 @@ void print_metrics_state(const Shell& s) {
                 s.strip ? s.strip->white_col() : -1);
 }
 
-void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
-    // The picture actually ON the pane, which is the number `recv_rows` has
-    // to be told apart from. Without it the indicator's line count could
-    // only be compared with itself, and "the count names the BUFFERED
-    // picture" would be a claim with nothing on the other side of it —
-    // session 30's identity trap, which is worth suspecting hardest on the
-    // check one cares about most.
-    std::printf("  pane_rows            \"%d\"\n",
-                s.view ? s.view->image_rows() : 0);
-    // How many files the capture has announced, and the last one's name.
-    // A transmission buffered behind an edit is still SAVED — §8.2 holds
-    // the pane, never the disk — so a count that stops rising here is the
-    // shape that defect would take.
-    std::printf("  saves_seen           \"%d\"\n", s.saves_seen);
-    std::printf("  last_saved           \"%s\"\n",
-                s.last_saved.empty()
-                    ? ""
-                    : s.last_saved.substr(s.last_saved.find_last_of('/') + 1)
-                          .c_str());
-    std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
-    std::printf("  phase_value          \"%s\"\n", s.phase_input->value());
-    // The image is a control now [§8.3 item 1], so whether it can act is
-    // as inspectable as whether a button can.
-    std::printf("  image_click_enabled  \"%d\"\n",
-                s.view->click_enabled() ? 1 : 0);
+// The two-click gesture's whole inspectable state: where the scroll really
+// is, what is pending, and which gesture the picture is armed for [see
+// click_image].
+void print_metrics_gesture(const Shell& s, const nova::RulerView& v) {
     // Fl_Scroll's cached xposition against the child's own left edge — the
     // horizontal twin of `scroll_y_actual`, which session 27 needed after
     // the cached copy lied. Reported rather than used: the ruler and the
@@ -3677,6 +3670,34 @@ void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
                 s.sync_arm->active() ? 1 : 0);
     std::printf("  phase_arm_pushed     \"%d\"\n", s.phase_arm->value());
     std::printf("  sync_arm_pushed      \"%d\"\n", s.sync_arm->value());
+}
+
+void print_metrics_detail(const Shell& s, const nova::RulerView& v) {
+    // The picture actually ON the pane, which is the number `recv_rows` has
+    // to be told apart from. Without it the indicator's line count could
+    // only be compared with itself, and "the count names the BUFFERED
+    // picture" would be a claim with nothing on the other side of it —
+    // session 30's identity trap, which is worth suspecting hardest on the
+    // check one cares about most.
+    std::printf("  pane_rows            \"%d\"\n",
+                s.view ? s.view->image_rows() : 0);
+    // How many files the capture has announced, and the last one's name.
+    // A transmission buffered behind an edit is still SAVED — §8.2 holds
+    // the pane, never the disk — so a count that stops rising here is the
+    // shape that defect would take.
+    std::printf("  saves_seen           \"%d\"\n", s.saves_seen);
+    std::printf("  last_saved           \"%s\"\n",
+                s.last_saved.empty()
+                    ? ""
+                    : s.last_saved.substr(s.last_saved.find_last_of('/') + 1)
+                          .c_str());
+    std::printf("  sync_value           \"%s\"\n", s.sync_input->value());
+    std::printf("  phase_value          \"%s\"\n", s.phase_input->value());
+    // The image is a control now [§8.3 item 1], so whether it can act is
+    // as inspectable as whether a button can.
+    std::printf("  image_click_enabled  \"%d\"\n",
+                s.view->click_enabled() ? 1 : 0);
+    print_metrics_gesture(s, v);
     // What the last measurement was worth [see slant_error_ppm]. Separate
     // from `correct_reason` even though the reason line shows it, because
     // the two answer different questions and the note has to be checkable
@@ -4263,6 +4284,30 @@ struct ActionOutcome {
     int rc = 0;
 };
 
+// One --type action: through the box AND the box's own callback, in that
+// order, because that is what typing is. Setting the value alone would
+// move the number and leave `edit_dirty` false — the same omission
+// `nudge_sync` exists to make checkable, and a §8.2 scenario built on it
+// would never hold the pane at all. The Label box joined in session 37
+// for exactly that reason: its callback is the whole of what was missing,
+// so a check that set the value directly would pass against the defect.
+void run_type_action(Shell& shell, const Action& a) {
+    if (a.which == TypeBox::kLabel) {
+        shell.label_input->value(a.text.c_str());
+        // Through the WIDGET's own callback, not by naming the
+        // function: the defect this exists to catch was a box with
+        // no callback attached at all, and a driver that called
+        // the handler directly would pass against it.
+        shell.label_input->do_callback();
+        return;
+    }
+    Fl_Input* box = a.which == TypeBox::kSync
+                        ? static_cast<Fl_Input*>(shell.sync_input)
+                        : static_cast<Fl_Input*>(shell.phase_input);
+    box->value(a.text.c_str());
+    Shell::cb_edit(box, &shell);
+}
+
 // Each action goes through the shell's real handler, in order, so the
 // sequence under test is the sequence an operator makes. Arming goes
 // through `set_arm` — the buttons' own callback body — rather than
@@ -4289,28 +4334,7 @@ ActionOutcome run_actions(Shell& shell, const std::vector<Action>& actions) {
             continue;
         }
         if (a.kind == Action::kType) {
-            // Through the box AND the box's own callback, in that order,
-            // because that is what typing is. Setting the value alone
-            // would move the number and leave `edit_dirty` false — the
-            // same omission `nudge_sync` exists to make checkable, and a
-            // §8.2 scenario built on it would never hold the pane at all.
-            // The Label box joined in session 37 for exactly that reason:
-            // its callback is the whole of what was missing, so a check
-            // that set the value directly would pass against the defect.
-            if (a.which == TypeBox::kLabel) {
-                shell.label_input->value(a.text.c_str());
-                // Through the WIDGET's own callback, not by naming the
-                // function: the defect this exists to catch was a box with
-                // no callback attached at all, and a driver that called
-                // the handler directly would pass against it.
-                shell.label_input->do_callback();
-                continue;
-            }
-            Fl_Input* box = a.which == TypeBox::kSync
-                                ? static_cast<Fl_Input*>(shell.sync_input)
-                                : static_cast<Fl_Input*>(shell.phase_input);
-            box->value(a.text.c_str());
-            Shell::cb_edit(box, &shell);
+            run_type_action(shell, a);
             continue;
         }
         if (a.kind == Action::kApply) {

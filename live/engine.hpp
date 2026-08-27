@@ -98,6 +98,13 @@ struct EngineMessage {
     // begins with a state change and can begin no other way — see
     // `LiveEngine::emit`, which is the one place it is stamped.
     //
+    // "Began" is the moment Nova first HEARD it, not the transmitter's
+    // clock: the auto path stamps at tone detection (the detector emits
+    // `min_start_sec` into the tone by design), and a transmission whose
+    // tone qualified mid-decode is stamped when the previous decode
+    // finishes and admits it [PR-005]. The stamp is for naming the
+    // scheduled broadcast to the nearest minute; neither skew moves one.
+    //
     // Distinct from the time in the FILENAME, which `save_image` takes at
     // the moment it writes: on a ten-minute chart those two are ten
     // minutes and a decode apart, and it is the first one that names the
@@ -131,7 +138,7 @@ struct EngineMessage {
 
 struct EngineOptions {
     SessionOptions session;
-    int internal_rate = 8000;      // cli/nova-decode.cpp: kInternalRate
+    int internal_rate = 8000;      // cli/internal_rate.hpp: kInternalRate
     // 1900 Hz: the WEFAX audio subcarrier centre frequency [WMO §5.5.1].
     double demod_center = 1900.0;
     double demod_deviation = 400.0;
@@ -323,8 +330,10 @@ public:
     // able to show — an IOC of 576 displayed before any tone has been heard
     // would be Nova reporting a default as a measurement. `measured_lpm`
     // returns to 0 when a transmission ends, because from then on the
-    // authority is the decode's own `DecodeResult::lpm` and not a renderer
-    // that no longer exists.
+    // authority is the decode's own `DecodeResult::lpm` and not the preview
+    // renderer — which the session keeps until the next transmission's
+    // opening, so thread 2 gates the published value on DRAWING — PREVIEW
+    // rather than asking the renderer [PR-002].
     int measured_ioc() const {
         return live_ioc_.load(std::memory_order_acquire);
     }
@@ -447,6 +456,11 @@ private:
     };
 
     void thread2();
+    // One audio block through the live chain, out of thread2's loop so the
+    // loop stays under Gate 0's line limit [PR-012]. peak/since_stats are
+    // the loop's stats accumulator state, carried across blocks.
+    void process_block(const float* block, std::size_t got, double* peak,
+                       long long* since_stats);
     void run_commands();
     // Thread 2's half of `promote_background` [§8.2]. It runs here and not
     // on thread 4 because the picture does not travel alone: `saved_path_`

@@ -60,17 +60,24 @@ PhasingResult scan_watch_rates(const std::vector<float>& slice, int fs,
 }
 
 // The tone-event dispatch of `push`. The actions are the session's own
-// private steps, so they arrive as member-function pointers and the
-// decisions below move here unchanged.
+// private steps, so they arrive as member-function pointers. The state is
+// re-read through the session on EVERY event, not snapshotted once per
+// batch: an event can change it (begin_opening, end_transmission), and
+// the next event in the same batch must be judged against the NEW state.
+// A snapshot let two start-kind runs qualifying in one batch
+// (tone_stream.hpp: the kinds' runs can overlap) both pass the
+// kReady/kSaved test, opening the transmission twice and erasing the
+// first tone from the retained store [PR-001].
 void dispatch_tone_events(LiveSession* s,
                           const std::vector<ToneEvent>& events,
-                          SessionState state, int fs, SessionOutput& out,
+                          int fs, SessionOutput& out,
                           bool* pending_start, ToneEvent* pending_tone,
                           void (LiveSession::*end_tx)(long long, bool,
                                                       SessionOutput&),
                           void (LiveSession::*begin)(const ToneEvent&,
                                                      SessionOutput&)) {
     for (const ToneEvent& e : events) {
+        const SessionState state = s->state();
         if (e.kind == ToneKind::kStop) {
             // A stop tone ends the picture only when one is being drawn.
             // In every other state it is a recording that joined a
@@ -248,7 +255,7 @@ SessionOutput LiveSession::push(const float* video, std::size_t n) {
     // The tone detector is fed in every capturing state: monitoring never
     // stops, which is what the next transmission's start tone relies on.
     const std::vector<ToneEvent> events = tones_.push(video, n);
-    dispatch_tone_events(this, events, state_, fs_, out, &pending_start_,
+    dispatch_tone_events(this, events, fs_, out, &pending_start_,
                          &pending_tone_, &LiveSession::end_transmission,
                          &LiveSession::begin_opening);
 

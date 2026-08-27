@@ -5,8 +5,9 @@
 # "100% tests passed". A green run here means the 10 fixture-independent
 # suites passed — the synthetic {IOC 288,576} x {60,90,120} matrix, the
 # tone detector, the untrusted-input guards, the ruler mapping, the PNG
-# round-trip, the audio ring, the hooks, the GUI layout and the version
-# flag. It does NOT mean the real-signal regression ran. That is
+# round-trip, the audio ring, the hooks, the GUI layout, the tuning
+# spectrum and the version flag. It does NOT mean the real-signal
+# regression ran. That is
 # `release.yml` plus `tools/record-fixture-regression.sh`, and it is
 # deliberately a human with the recordings.
 #
@@ -67,7 +68,7 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Suites (9 run, 30 skipped without recordings)
+      - name: Suites (10 run, 30 skipped without recordings)
         run: |
           if [ "${{ runner.os }}" = "Linux" ]; then
             xvfb-run -a tools/check-suite-inventory.sh build 40 30
@@ -108,5 +109,5 @@ jobs:
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DNOVA_BUILD_GUI=OFF
       - name: Build
         run: cmake --build build --parallel
-      - name: Suites (8 run, 29 skipped)
+      - name: Suites (9 run, 29 skipped)
         run: tools/check-suite-inventory.sh build 38 29

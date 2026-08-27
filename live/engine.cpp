@@ -627,6 +627,12 @@ void LiveEngine::emit(const SessionOutput& out) {
         if (in_transmission_state(s) && !in_transmission_state(emitted_state_))
             started_utc_ = opt_.utc_now();
         emitted_state_ = s;
+        // measured_lpm's contract is 0 once the transmission ends [PR-002].
+        // The per-block publish only runs while audio flows, and a
+        // transmission can end at flush() — so the zero crosses here, on
+        // the transition, and the block loop's own gate keeps it there.
+        if (s != SessionState::kDrawingPreview)
+            live_lpm_.store(0.0, std::memory_order_release);
         EngineMessage m;
         m.kind = EngineMsg::kStateChanged;
         m.state = s;
@@ -961,11 +967,72 @@ void LiveEngine::collect_batch() {
     sync_operator_ = false;
 }
 
+// One audio block through the live chain [docs/05 §2]: the peak meter and
+// the tuning strip read the RAW block, then resample, demodulate, session,
+// and the publishes thread 4 reads. All of it thread-2 state; what thread
+// 4 may know crosses as atomics.
+void LiveEngine::process_block(const float* block, std::size_t got,
+                               double* peak, long long* since_stats) {
+    const long long stats_every = capture_rate_ / 10;  // ~10 Hz
+
+    for (std::size_t i = 0; i < got; i++)
+        *peak = std::max(*peak, static_cast<double>(std::fabs(block[i])));
+    *since_stats += static_cast<long long>(got);
+
+    // The tuning strip [ROADMAP M4.5], fed the same raw block the peak
+    // meter just read and BEFORE the resampler below. That ordering is
+    // the whole point: a spectrum taken after the demodulator would
+    // show the tuning error already removed, which is precisely the
+    // error the operator is trying to see.
+    {
+        std::lock_guard<std::mutex> g(spec_mu_);
+        spectrum_.push(block, got);
+    }
+
+    const std::vector<float> mono = resamp_.push(block, got);
+    if (!mono.empty()) {
+        const std::vector<float> video = demod_.push(mono);
+        if (!video.empty()) emit(session_.push(video));
+    }
+    // §3's FIRST retained snapshot, published for thread 4: thread 2
+    // owns the session and thread 4 may not ask it anything, so the
+    // one number the cost of the store can be read from crosses here.
+    receiving_samples_.store(session_.retained_samples(),
+                             std::memory_order_release);
+    // ...and the two numbers the status panel shows, for the same
+    // reason and by the same route [see measured_ioc/measured_lpm].
+    // Published every block rather than on state changes because the
+    // rate MOVES while a picture is drawn — an operator SYNC trim
+    // changes it with no transition to hang a message on.
+    // measured_lpm's contract is 0 once the transmission ends: from
+    // then on the authority is the decode's own DecodeResult::lpm.
+    // The session keeps its preview renderer until the next opening,
+    // so without the gate the renderer's period would keep arriving
+    // through STOP TONE / DECODING / SAVED and the panel's
+    // decode-is-the-authority guard would never fire [PR-002].
+    live_ioc_.store(session_.ioc(), std::memory_order_release);
+    live_lpm_.store(session_.state() == SessionState::kDrawingPreview
+                        ? session_.lpm()
+                        : 0.0,
+                    std::memory_order_release);
+    live_forced_.store(session_.forced(), std::memory_order_release);
+
+    if (*since_stats >= stats_every) {
+        EngineMessage m;
+        m.kind = EngineMsg::kStats;
+        m.level_dbfs = *peak > 0.0 ? 20.0 * std::log10(*peak) : -120.0;
+        m.overruns = ring_.overruns();
+        m.consumed_sec = session_.consumed_sec();
+        post(std::move(m));
+        *since_stats = 0;
+        *peak = 0.0;
+    }
+}
+
 void LiveEngine::thread2() {
     std::vector<float> block(4096);
     double peak = 0.0;
     long long since_stats = 0;
-    const long long stats_every = capture_rate_ / 10;  // ~10 Hz
 
     for (;;) {
         run_commands();
@@ -993,49 +1060,7 @@ void LiveEngine::thread2() {
             continue;
         }
 
-        for (std::size_t i = 0; i < got; i++)
-            peak = std::max(peak, static_cast<double>(std::fabs(block[i])));
-        since_stats += static_cast<long long>(got);
-
-        // The tuning strip [ROADMAP M4.5], fed the same raw block the peak
-        // meter just read and BEFORE the resampler below. That ordering is
-        // the whole point: a spectrum taken after the demodulator would
-        // show the tuning error already removed, which is precisely the
-        // error the operator is trying to see.
-        {
-            std::lock_guard<std::mutex> g(spec_mu_);
-            spectrum_.push(block.data(), got);
-        }
-
-        const std::vector<float> mono = resamp_.push(block.data(), got);
-        if (!mono.empty()) {
-            const std::vector<float> video = demod_.push(mono);
-            if (!video.empty()) emit(session_.push(video));
-        }
-        // §3's FIRST retained snapshot, published for thread 4: thread 2
-        // owns the session and thread 4 may not ask it anything, so the
-        // one number the cost of the store can be read from crosses here.
-        receiving_samples_.store(session_.retained_samples(),
-                                 std::memory_order_release);
-        // ...and the two numbers the status panel shows, for the same
-        // reason and by the same route [see measured_ioc/measured_lpm].
-        // Published every block rather than on state changes because the
-        // rate MOVES while a picture is drawn — an operator SYNC trim
-        // changes it with no transition to hang a message on.
-        live_ioc_.store(session_.ioc(), std::memory_order_release);
-        live_lpm_.store(session_.lpm(), std::memory_order_release);
-        live_forced_.store(session_.forced(), std::memory_order_release);
-
-        if (since_stats >= stats_every) {
-            EngineMessage m;
-            m.kind = EngineMsg::kStats;
-            m.level_dbfs = peak > 0.0 ? 20.0 * std::log10(peak) : -120.0;
-            m.overruns = ring_.overruns();
-            m.consumed_sec = session_.consumed_sec();
-            post(std::move(m));
-            since_stats = 0;
-            peak = 0.0;
-        }
+        process_block(block.data(), got, &peak, &since_stats);
     }
 
     // End of stream. The resampler's tail first — those are real samples

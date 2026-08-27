@@ -40,6 +40,34 @@ jobs:
       - run: cmake --build build --parallel
       - run: tools/check-suite-inventory.sh build 40 30
 
+      # The record's registered count must equal THIS build's [PR-015].
+      # Without the comparison a record of "39 passed, 0 skipped" written
+      # after a suite quietly stopped being registered would pass the
+      # record job's complete-run grep — the counts here are asserted
+      # (40/30 above), the record's are self-claimed, and only tying them
+      # together makes a quiet registration loss refuse the tag. The
+      # suites are registered even where the recordings are not (they
+      # become reported skips), so the counts are comparable across the
+      # two machines.
+      - name: The record claims the same suite inventory
+        run: |
+          on_tag=$(ctest --test-dir build -N | sed -n 's/^Total Tests: //p')
+          in_record=$(sed -n 's/^- \*\*Result:\*\* all [0-9]* suites passed, 0 skipped, \([0-9]*\) registered$/\1/p' \
+                      docs/audit/FIXTURE-REGRESSION.md)
+          echo "registered on this tag: ${on_tag:-<none>}   in the record: ${in_record:-<none>}"
+          if [ -z "$in_record" ]; then
+            echo "::error::no parseable registered count in the record —"
+            echo "::error::run tools/record-fixture-regression.sh where the"
+            echo "::error::recordings are, commit the record, then tag."
+            exit 1
+          fi
+          if [ "$on_tag" != "$in_record" ]; then
+            echo "::error::the record describes a different suite inventory"
+            echo "::error::than this tag. Re-run the recorder against the"
+            echo "::error::code being tagged."
+            exit 1
+          fi
+
   fixture-regression-record:
     name: The out-of-band full-suite record
     runs-on: ubuntu-latest

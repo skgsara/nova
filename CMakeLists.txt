@@ -109,7 +109,8 @@ enable_testing()
 #
 # 30 of the 40 suites need one of those recordings. From a checkout without
 # them they are still REGISTERED and reported Skipped, with the reason,
-# rather than quietly not existing — a suite that shrinks from 38 to 8 while
+# rather than quietly not existing — a suite that shrinks from 40 to 10
+# while
 # reporting a green run tells you nothing is wrong when two thirds of the
 # evidence is missing.
 #
@@ -126,9 +127,10 @@ enable_testing()
 # counts, so a suite that quietly stops being registered fails the gate
 # instead of passing as a smaller green run [E-GAP-002].
 #
-# The other 8 — the synthetic matrices, the ruler, the PNG round-trip, the
-# audio ring, the untrusted-input guards and the GUI layout — generate what
-# they need and run anywhere.
+# The other 10 — the synthetic matrices, the tone detector, the ruler, the
+# PNG round-trip, the audio ring, the hooks, the tuning spectrum, the
+# version flag, the untrusted-input guards and the GUI layout — generate
+# what they need and run anywhere.
 set(NOVA_FIXTURE_SENTINEL
     ${CMAKE_SOURCE_DIR}/fixtures/test-chart-jmh-kiwisdr-image-60s.wav)
 if(EXISTS ${NOVA_FIXTURE_SENTINEL})
@@ -137,7 +139,8 @@ else()
   set(NOVA_HAVE_FIXTURES OFF)
   message(STATUS
     "fixtures: ABSENT - 30 suites needing an off-air recording will be "
-    "SKIPPED (see fixtures/MANIFEST.md); 10 synthetic suites still run")
+    "SKIPPED (see fixtures/MANIFEST.md); the fixture-independent suites "
+    "still run")
 endif()
 
 # Registers a suite that needs a recording. Present: a normal test. Absent:
@@ -596,7 +599,7 @@ add_test(NAME tuning_spectrum COMMAND nova-test-spectrum)
 # M4 — the FLTK/RtAudio shell. This is the ONLY target in the project with an
 # external dependency [docs/05 §11]. The rule that shapes this block: a
 # missing toolkit skips the target and never fails the build, because the
-# core, the CLIs and the 24 GUI-independent tests must keep building on a
+# core, the CLIs and the 38 GUI-independent tests must keep building on a
 # machine with neither library installed.
 #
 # Found by their own tools rather than by find_package: neither FLTK 1.4.5

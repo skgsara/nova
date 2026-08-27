@@ -906,6 +906,52 @@ void test_opening_cap() {
           "and the session is still listening for the next one");
 }
 
+// --------------------------------------------------------------------------
+// T15: two start-kind runs qualifying in ONE push batch open exactly one
+// transmission [PR-001]. The tone kinds' runs can overlap and qualify in
+// the same block by design (tone_stream.hpp), so a 300 Hz and a 675 Hz
+// start can arrive as two events in one dispatch batch. The dispatch once
+// snapshotted the state once per batch; the second event was then judged
+// against the stale pre-batch state, begin_opening ran twice, and the
+// second call took the second tone's IOC and erased the first tone from
+// the retained store. The discriminators are exactly those two facts.
+// --------------------------------------------------------------------------
+void test_two_start_tones_one_batch() {
+    std::printf("\n== T15 two start tones in one batch open once [PR-001]\n");
+    nova::GenOptions g;
+    g.start_sec = 6.0;
+    g.phasing = false;
+    g.stop_tone = false;
+    const nova::Image content = nova::gen_test_pattern(600, 20);
+    g.ioc = 576;
+    const std::vector<float> a =
+        nova::fm_demod(nova::gen_fax_signal(content, 20, g), 8000);
+    g.ioc = 288;
+    const std::vector<float> b =
+        nova::fm_demod(nova::gen_fax_signal(content, 20, g), 8000);
+    std::vector<float> video = a;
+    video.insert(video.end(), b.begin(), b.end());
+    std::printf("    %.1f s: 300 Hz opening, then 675 Hz, fed in ONE push\n",
+                video.size() / 8000.0);
+
+    nova::LiveSession s(8000, nova::SessionOptions());
+    std::vector<nova::SessionState> seq;
+    auto collect = [&](const nova::SessionOutput& out) {
+        for (nova::SessionState st : out.entered) seq.push_back(st);
+    };
+    collect(s.start_capture());
+    collect(s.push(video.data(), video.size()));  // one push, one batch
+    print_seq(seq);
+
+    check(s.ioc() == 576,
+          "the FIRST tone's IOC stands (576, not the second tone's 288)");
+    check(s.retained_samples() + 12000 >= video.size(),
+          "and the first tone was not erased from the retained store");
+    check(s.state() == SS::kStartTone || s.state() == SS::kPhasing,
+          "exactly one opening is in progress");
+    collect(s.flush());
+}
+
 int main(int argc, char** argv) {
     if (argc < 6) {
         std::fprintf(stderr,
@@ -927,6 +973,7 @@ int main(int argc, char** argv) {
     test_page_cap(argv[5]);
     test_operator_values_reach_the_decode(argv[5]);
     test_opening_cap();
+    test_two_start_tones_one_batch();
 
     std::printf("\n%s (%d failure(s))\n", failures ? "FAILED" : "OK",
                 failures);

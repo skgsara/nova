@@ -21,6 +21,12 @@
 #  - a dirty working tree, because then the SHA does not describe what ran
 #  - a checkout without the recordings, because that is the very run this
 #    mechanism exists to substitute for
+#  - a pre-existing BUILD_DIR it cannot identify as this checkout's own
+#    CMake build tree, because the build is always from clean [PR-016]
+#
+# The release gate ties the record's registered-suite count to the tag's
+# own inventory, so a suite that quietly stops being registered cannot
+# pass as a smaller complete run [PR-015].
 set -eu
 
 build="${1:-build-regression}"
@@ -48,6 +54,21 @@ when=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 host="$(uname -s) $(uname -m)"
 
 echo "regression: building in $build at $sha"
+# The record asserts the suite ran against these exact bytes, so the build
+# tree is NOT reused incrementally [PR-016]: a tree configured against an
+# older commit and rebuilt in place is not byte-assured, and reusing one
+# was the normal case (the script is meant to be runnable twice in a row).
+# Only a directory identifiable as a CMake build tree of THIS checkout is
+# removed; anything else is refused rather than risked.
+if [ -d "$build" ]; then
+    if [ ! -f "$build/CMakeCache.txt" ] ||
+       ! grep -q "CMAKE_HOME_DIRECTORY:INTERNAL=$root" "$build/CMakeCache.txt"; then
+        echo "regression: $build exists and is not this checkout's CMake" >&2
+        echo "  build tree — refusing to remove it. Pick another BUILD_DIR." >&2
+        exit 1
+    fi
+    rm -rf "$build"
+fi
 cmake -B "$build" -S . >/dev/null
 cmake --build "$build" -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
 
