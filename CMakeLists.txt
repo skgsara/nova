@@ -644,8 +644,21 @@ if(NOVA_BUILD_GUI)
     # pairs, target_link_options de-duplicates the repeated `-weak_framework`
     # token, and the linker is then handed a bare `ScreenCaptureKit` it reads
     # as a filename. LINK_FLAGS is a string and goes through verbatim.
-    set_property(TARGET nova-gui APPEND_STRING PROPERTY
-      LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+    # But LINK_FLAGS goes BEFORE the object files on the link line, and GNU
+    # ld resolves left to right — an archive named before the objects that
+    # need it is discarded, and every Fl_* symbol comes back undefined
+    # (first Linux CI run, session 39). macOS's ld is order-insensitive,
+    # which is why the bug was invisible for five weeks. So: Apple keeps
+    # the verbatim string; everywhere else the ldflags go through
+    # target_link_libraries, after the objects, in fltk-config's own order.
+    if(APPLE)
+      set_property(TARGET nova-gui APPEND_STRING PROPERTY
+        LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+    else()
+      separate_arguments(NOVA_FLTK_LDFLAGS_LIST NATIVE_COMMAND
+        "${NOVA_FLTK_LDFLAGS}")
+      target_link_libraries(nova-gui PRIVATE ${NOVA_FLTK_LDFLAGS_LIST})
+    endif()
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
     # output identical to one dragged to it. The first test in the
