@@ -74,6 +74,7 @@
 #include <cmath>
 #include <limits>
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

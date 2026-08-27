@@ -17,6 +17,7 @@
 #include "../core/gen.hpp"
 #include "../core/tones.hpp"
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

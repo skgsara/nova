@@ -4,6 +4,7 @@
 #include "constants.hpp"
 #include <cmath>
 #include <algorithm>
+#include <stdexcept>
 
 namespace nova {
 namespace {
