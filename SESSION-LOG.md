@@ -7,6 +7,65 @@ anything as our develop history").
 
 ---
 
+## 2026-08-28 — Session 40: the repo is public, and CI grew the two
+## tier-1 rows M5 names
+
+Agent: Kimi (Moonshot AI), with the Windows port delegated to a coder
+subagent (4 CI rounds, verified independently before the merge). Code
+changed on the merged branch: `CMakeLists.txt` (config-package fallback
+for FLTK/RtAudio discovery; `-Wall -Wextra` guarded to non-MSVC, MSVC
+gets `/W3 /wd4996`), `gui/nova-gui.cpp` (`_WIN32` branches:
+`GetModuleFileNameA`, binary-mode stdout), `tests/test_live_tones.cpp`
+(`M_PI` → `nova::kPi`), `tests/test_png.cpp` (python3/python probe),
+`tools/check-suite-inventory.sh` (optional ctest `-C` argument),
+`.github/workflows/ci.yml` (the `windows-msvc` and `macos-universal2`
+jobs). Files changed: `README.md` (Platforms, CI), `ROADMAP.md` (M5),
+`CHANGELOG.md`, this file. Suite: **40, unchanged.** Version stays
+**0.4.5** — post-tag work, no milestone moved.
+
+**Sara's two calls:** make the repository public (done —
+`github.com/skgsara/nova`), and the platform question. Her memory was
+that both bit-widths and four OSes were decided; the record says it
+more precisely: M5's tier list is the plan (tier 1: Win64, macOS
+universal, Linux x86_64; tier 2: 32-bit Win/Linux, ARM, FreeBSD), but
+the signed Gate 0 floor is 64-bit little-endian, so tier 2's 32-bit
+rows are parked until she amends Gate 0 — that amendment is hers, like
+the rest of Gate 0. Today's scope was tier 1.
+
+**The Mac's universal2 row went green first try.** Homebrew's FLTK and
+RtAudio are single-architecture, so the row builds both from the pinned
+source tarballs as `arm64;x86_64`, builds Nova the same way, checks
+every binary carries both slices, and runs the suites.
+
+**The Windows row cost four rounds** (the subagent's handoff is in the
+session's task record; the highlights): FLTK's source install ships a
+`fltk-config` shell script even on Windows, which `find_program` finds
+and nothing can execute — discovery now falls back to the CMake config
+packages when the two tools don't BOTH find their library; ctest on a
+multi-config generator does not honor `CTEST_CONFIGURATION_TYPE` from
+the environment, so the inventory script takes the config as an
+argument (the 3-arg call the other rows make is byte-identical in
+behavior); vcpkg was checked, not assumed — it carries RtAudio 6.0.1
+but FLTK 1.3.11, the wrong major, so Windows builds both from source
+like the Linux row; and MSVC's C4996 (its deprecation of ISO C `fopen`
+and friends) is disabled rather than "fixed" into Microsoft-only `_s`
+variants, with the zero-warning standard staying on the `-Wall -Wextra`
+rows. Final run 33132830016: all six rows green, the Windows row
+verifiably running 10 and skipping 30 — re-verified by me against the
+run log before merging, not taken from the subagent's word.
+
+**Parked by decision, not forgotten:** the release gate's public-suites
+job runs macOS only; extending it to Windows duplicates what ci.yml
+already does on every push and can't be exercised without pushing a
+tag, so it waits for the next release cycle. Tier 2 per above.
+
+**Next step: unchanged — the MLite-880 park run** (ROADMAP item 13):
+an edit open when the second transmission arrives, and the tuning strip
+looked at while actually tuning. That is the 1.0 blocker; everything
+else on the release checklist is done.
+
+---
+
 ## 2026-08-27 — Session 39 (close): v0.4.5 is tagged, and the gate
 ## passed on its first real tag
 

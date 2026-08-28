@@ -33,11 +33,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS arm64 is the only platform Nova has ever been built on
-          # (README, Platforms). Linux x86-64 is here to find out, not
-          # because anything is claimed about it — a failure on this row
-          # is a finding, and the README must not be updated to claim the
-          # platform until this row has actually been seen green.
+          # The matrix exists to find out, not because anything is
+          # claimed beyond what a green row proves (README, Platforms):
+          # the 10 fixture-independent suites. A failure on a row is a
+          # finding; the README claims a platform only after the row has
+          # been seen green. The Linux row found four such defects the
+          # day it first ran; Windows and the universal2 row joined in
+          # session 40 (jobs below), each with its own findings.
           - os: macos-latest
             label: macos-arm64
           - os: ubuntu-latest

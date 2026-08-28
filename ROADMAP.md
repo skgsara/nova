@@ -1209,6 +1209,21 @@ a page-read instead of a grep.
 ## M5 — packaging & release  [pending]
 - CI: tier 1 release-tested (Win64, macOS universal, Linux x86_64);
   tier 2 CI-built (32-bit Win/Linux, ARM, FreeBSD).
+  **Tier 1 rows exist and are green on every push since 2026-08-28
+  (session 40):** windows-x86_64 (MSVC), macos-universal2 (both slices
+  checked with `file`), linux-x86_64, macos-arm64, each with and without
+  the GUI where the GUI applies. The port cost four CI rounds: CMake
+  config-package fallback for FLTK/RtAudio discovery (FLTK's source
+  install ships an unexecutable fltk-config on Windows), the inventory
+  script taking ctest's `-C` config, `_WIN32` branches in the GUI shell,
+  and `/wd4996` for MSVC's C4996 on ISO C calls. The release GATE still
+  runs its public-suites job on macOS only — extending it is a release-
+  process decision, parked.
+  **Tier 2 is parked, and 32-bit needs a Gate 0 amendment first:** the
+  signed floor (docs/06) is 64-bit little-endian, so a 32-bit CI row
+  would test a configuration the audit explicitly did not cover. Sara's
+  call, signed in HUMAN-SIGNOFF.md like the rest of Gate 0, before any
+  such row exists.
 - Zero compiler warnings on all runners (grep the log, not the tick).
 - Compliance matrix fully populated with test links [docs/02].
 - Pre-release: provenance/NOTICE audit, artifact download-and-inspect,

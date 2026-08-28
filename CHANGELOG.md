@@ -8,6 +8,31 @@ release, because making the tag was the release decision itself.
 This file records what changed and when, newest first. The full narrative
 lives in `SESSION-LOG.md`; this is the short form.
 
+## Unreleased
+
+### 2026-08-28 — M5 tier 1: CI on Windows and universal2 macOS
+
+The platform rows M5's tier 1 names now exist and run green on every
+push: **windows-x86_64 (MSVC)** and **macos-universal2** join the macOS
+arm64 and Linux x86-64 rows, each running the 10 fixture-independent
+suites, with the universal row's binaries checked to carry both
+architecture slices. The Windows port cost four CI rounds and five real
+fixes: a CMake config-package fallback for FLTK/RtAudio discovery
+(FLTK's source install ships a `fltk-config` script even on Windows,
+which nothing can execute), the inventory script learning ctest's `-C`
+for multi-config generators, `_WIN32` branches in the GUI shell
+(`GetModuleFileNameA`, binary-mode stdout so the gui suites' regexes
+see `\n`), `M_PI` out of a test, and `/wd4996` under MSVC (its C4996
+deprecates ISO C calls; the zero-warning standard stays with the
+`-Wall -Wextra` rows). Both rows build FLTK 1.4.5 and RtAudio 6.0.1
+from the pinned source tarballs — vcpkg was checked and carries the
+wrong FLTK major, same as Ubuntu.
+
+The release gate's public-suites job still runs macOS only; extending
+it is parked as a release-process decision. Tier 2 (32-bit, FreeBSD)
+stays parked: the signed Gate 0 floor is 64-bit, and a 32-bit row would
+test what the audit did not cover — that amendment is Sara's to make.
+
 ## 0.4.5 — tagged 2026-08-27
 
 ### 2026-08-27 — CI runs for real, and four platform defects fall

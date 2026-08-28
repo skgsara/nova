@@ -394,22 +394,27 @@ hand-built corpus of ~30 malformed files across two audit passes.
 
 ## Platforms
 
-**Developed on macOS arm64; CI-verified on macOS arm64 and Linux
-x86-64.** `.github/workflows/ci.yml` builds and runs the 10
-fixture-independent suites on both, with and without the GUI — and as of
-2026-08-27 it has actually executed, green on all four rows. Getting it
-there found four defects five weeks of macOS-only green could not: two
+**Developed on macOS arm64; CI-verified on macOS arm64, Linux x86-64,
+and Windows x86-64 (MSVC).** `.github/workflows/ci.yml` builds and runs
+the 10 fixture-independent suites on all three, with and without the
+GUI, plus a universal2 (`arm64;x86_64`) macOS build whose binaries are
+checked to carry both slices — green on all six rows. Getting there
+found defects macOS-only development could not: two
 standard headers libc++ provides transitively and libstdc++ does not, a
-link line whose order macOS's linker ignores and GNU ld does not, and a
-status panel sized to one platform's fonts. The Linux row builds FLTK
-1.4.5 and RtAudio 6.0.1 from source because Ubuntu's packages are the
-wrong major versions of each.
+link line whose order macOS's linker ignores and GNU ld does not, a
+status panel sized to one platform's fonts, FLTK's source install
+shipping a `fltk-config` script even on Windows (discovery now falls
+back to the CMake config packages), and ctest's multi-config `-C`
+needing to reach the suites through the inventory script. The Linux and
+Windows rows build FLTK
+1.4.5 and RtAudio 6.0.1 from source because the available packages are
+the wrong major versions of each.
 
-What that run proves and what it does not: the 30 fixture-gated suites
+What those runs prove and what they do not: the 30 fixture-gated suites
 run only where the recordings are (this machine, out of band — see
-Continuous integration), so "tested on Linux" means the synthetic and
-wiring suites, not the real-signal regression. The decoder, the
-command-line tools and the test suite are plain C++17
+Continuous integration), so "tested on Linux/Windows" means the
+synthetic and wiring suites, not the real-signal regression. The
+decoder, the command-line tools and the test suite are plain C++17
 with no external dependencies, which is a reason to expect other 64-bit
 platforms to work — not evidence that they do. Reports from anywhere else
 are welcome.
@@ -469,10 +474,10 @@ the `version_flag` suite fails if any binary disagrees with it.
 ### Continuous integration
 
 `.github/workflows/ci.yml` builds and runs the 10 fixture-independent
-suites on macOS arm64 and Linux x86-64, with and without the GUI —
-green on all four rows since the first executions on 2026-08-27
-(the repository gained a remote that day; see Platforms for what the
-first runs found).
+suites on macOS arm64, Linux x86-64 and Windows x86-64, with and
+without the GUI, plus a universal2 macOS build —
+green on all six rows since 2026-08-27/28
+(see Platforms for what the first runs found).
 
 Because 30 suites cannot run without the recordings, a release tag is
 gated differently: whoever holds them runs
