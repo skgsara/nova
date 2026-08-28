@@ -135,3 +135,46 @@ jobs:
         run: cmake --build build --parallel
       - name: Suites (9 run, 29 skipped)
         run: tools/check-suite-inventory.sh build 38 29
+
+  # M5 tier 1: the release binary for the Mac is universal2. Homebrew's
+  # FLTK and RtAudio are single-architecture, so both are built from
+  # source as universal here — the same pinned versions the other rows
+  # use — and the row proves the tree builds AND passes as
+  # arm64;x86_64, not merely on the runner's own slice.
+  macos-universal:
+    name: macos-universal2
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build FLTK 1.4.5 and RtAudio 6.0.1 as universal2
+        run: |
+          curl -sL https://github.com/fltk/fltk/archive/refs/tags/release-1.4.5.tar.gz | tar xz
+          cmake -B fltk-build -S fltk-release-1.4.5 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/nova-deps" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DFLTK_BUILD_TEST=OFF -DFLTK_BUILD_EXAMPLES=OFF
+          cmake --build fltk-build --parallel
+          cmake --install fltk-build
+          curl -sL https://github.com/thestk/rtaudio/archive/refs/tags/6.0.1.tar.gz | tar xz
+          cmake -B rtaudio-build -S rtaudio-6.0.1 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/nova-deps" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DRTAUDIO_API_CORE=ON
+          cmake --build rtaudio-build --parallel
+          cmake --install rtaudio-build
+      - name: Configure and build universal
+        run: |
+          export PATH="$HOME/nova-deps/bin:$PATH"
+          export PKG_CONFIG_PATH="$HOME/nova-deps/lib/pkgconfig"
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build build --parallel
+      - name: Every binary carries both architectures
+        run: |
+          for b in nova-decode nova-gen nova-tones nova-preview nova-gui; do
+            file "build/$b"
+            file "build/$b" | grep -q x86_64 || {
+              echo "::error::$b is not universal"; exit 1; }
+          done
+      - name: Suites (10 run, 30 skipped without recordings)
+        run: tools/check-suite-inventory.sh build 40 30
