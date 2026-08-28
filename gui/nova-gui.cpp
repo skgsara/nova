@@ -121,6 +121,11 @@
 #include <mach-o/dyld.h>
 #elif defined(__linux__)
 #include <unistd.h>
+#elif defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 #endif
 
 namespace {
@@ -698,9 +703,18 @@ std::string executable_dir(const char* argv0) {
         buf[n] = '\0';
         path = buf;
     }
+#elif defined(_WIN32)
+    char buf[4096];
+    const DWORD n = GetModuleFileNameA(nullptr, buf, sizeof buf - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        path = buf;
+    }
 #endif
     if (path.empty() && argv0) path = argv0;
-    const size_t slash = path.find_last_of('/');
+    // Windows answers with backslashes; accept both separators so the
+    // argv0 fallback (a forward-slash path under ctest) works too.
+    const size_t slash = path.find_last_of("/\\");
     if (slash == std::string::npos) return ".";
     return path.substr(0, slash);
 }
@@ -4405,6 +4419,13 @@ bool feed_without_folder(const ParsedArgs& args, bool any_feed) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    // The CRT opens stdout in text mode, which rewrites every \n to \r\n —
+    // and the gui_layout/gui_shell suites parse this output with
+    // \n-anchored patterns. Binary mode keeps the byte stream identical on
+    // every platform.
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     // Ahead of parse_args, and ahead of every window and sound card:
     // --version is a question about the program [E-GAP-001].
     if (nova::handled_version_flag(argc, argv, "nova-gui")) return 0;

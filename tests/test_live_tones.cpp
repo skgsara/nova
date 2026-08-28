@@ -47,6 +47,7 @@
 #include "../core/image.hpp"
 #include "../core/tones.hpp"
 #include "../core/wav.hpp"
+#include "../core/constants.hpp"
 #include "../live/tone_stream.hpp"
 
 #include <algorithm>
@@ -389,7 +390,9 @@ void run_two_bursts() {
         if (in_burst) {
             // A control tone is a black/white alternation, so a square
             // wave is the real waveform, not a convenience.
-            video[i] = std::sin(2.0 * M_PI * f * t) >= 0.0 ? 0.5f : -0.5f;
+            // M_PI is a POSIX extension MSVC does not define; kPi is the
+            // project's own constant [core/constants.hpp].
+            video[i] = std::sin(2.0 * nova::kPi * f * t) >= 0.0 ? 0.5f : -0.5f;
         } else {
             seed = seed * 1664525u + 1013904223u;
             const double u = static_cast<double>(seed >> 8) / 16777216.0;

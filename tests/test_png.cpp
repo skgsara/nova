@@ -36,6 +36,9 @@ namespace {
 
 int failures = 0;
 
+// The interpreter found by main's probe; roundtrip() shells out to it.
+const char* g_python = nullptr;
+
 void check(bool ok, const char* what) {
     std::printf("  %s %s\n", ok ? "PASS" : "FAIL", what);
     if (!ok) failures++;
@@ -128,10 +131,11 @@ void roundtrip(const char* tag, const nova::Image& img,
     write_file(manifest, man);
     write_file(script, kChecker);
 
-    const std::string cmd = "python3 \"" + script + "\" \"" + png +
-                            "\" \"" + raw + "\" " + std::to_string(img.width) +
-                            " " + std::to_string(img.height) + " \"" +
-                            manifest + "\"";
+    const std::string cmd = std::string(g_python) + " \"" + script +
+                            "\" \"" + png + "\" \"" + raw + "\" " +
+                            std::to_string(img.width) + " " +
+                            std::to_string(img.height) + " \"" + manifest +
+                            "\"";
     const int rc = std::system(cmd.c_str());
     std::printf("    %s: %dx%d\n", tag, img.width, img.height);
     check(rc == 0, "independent decoder verifies the file");
@@ -140,16 +144,31 @@ void roundtrip(const char* tag, const nova::Image& img,
 }  // namespace
 
 int main() {
-    // No python3 -> skip (77), not fail: the writer still ships, the
-    // independent check is what is missing.
-    if (std::system("python3 -c \"import zlib, binascii, struct\" > "
-#ifndef _WIN32
-                    "/dev/null"
+    // No python -> skip (77), not fail: the writer still ships, the
+    // independent check is what is missing. POSIX names the interpreter
+    // python3; the Windows runner images install it as `python` (with a
+    // python3 alias that is not always on PATH), so both are probed there.
+#if defined(_WIN32)
+    const char* const candidates[] = {"python3", "python"};
 #else
-                    "NUL"
+    const char* const candidates[] = {"python3"};
 #endif
-                    " 2>&1") != 0) {
-        std::printf("SKIP: python3 not found\n");
+    for (const char* c : candidates) {
+        const std::string probe =
+            std::string(c) + " -c \"import zlib, binascii, struct\" > "
+#ifndef _WIN32
+            "/dev/null"
+#else
+            "NUL"
+#endif
+            " 2>&1";
+        if (std::system(probe.c_str()) == 0) {
+            g_python = c;
+            break;
+        }
+    }
+    if (!g_python) {
+        std::printf("SKIP: no python with zlib/binascii/struct found\n");
         return 77;
     }
 
