@@ -181,8 +181,9 @@ jobs:
 
   # M5 tier 1: Windows Win64, MSVC (the default Visual Studio generator on
   # windows-latest — multi-config, so every build/test step names the
-  # Release configuration, and the inventory script gets the configuration
-  # through CTEST_CONFIGURATION_TYPE, which ctest honours). The runner has
+  # Release configuration, and the inventory script gets it as its
+  # optional fourth argument — ctest does NOT read CTEST_CONFIGURATION_TYPE
+  # here, measured on the runner, which cost a run of "Missing -C"). The runner has
   # neither fltk-config nor pkg-config, so FLTK and RtAudio are built from
   # source at the same pinned versions the other rows use and found through
   # their CMake config packages — the fallback the NOVA_BUILD_GUI block
@@ -223,6 +224,4 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Suites (10 run, 30 skipped without recordings)
-        run: |
-          export CTEST_CONFIGURATION_TYPE=Release
-          tools/check-suite-inventory.sh build 40 30
+        run: tools/check-suite-inventory.sh build 40 30 Release

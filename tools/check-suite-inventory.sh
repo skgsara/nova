@@ -2,7 +2,11 @@
 # check-suite-inventory.sh — assert WHICH suites ran, not just that ctest
 # was happy.
 #
-# usage: tools/check-suite-inventory.sh BUILD_DIR EXPECT_REGISTERED EXPECT_SKIPPED
+# usage: tools/check-suite-inventory.sh BUILD_DIR EXPECT_REGISTERED EXPECT_SKIPPED [CTEST_CONFIG]
+#
+# The optional fourth argument is the build configuration for a
+# multi-config generator (the Windows CI row builds with Visual Studio):
+# it becomes ctest's -C. Single-config trees leave it out.
 #
 # Why this exists. CMakeLists.txt states the limit of the skip mechanism
 # plainly: "ctest counts a skipped test as passed in its headline, so
@@ -21,16 +25,18 @@
 # as a smaller green run.
 set -eu
 
-if [ $# -ne 3 ]; then
-    echo "usage: $0 BUILD_DIR EXPECT_REGISTERED EXPECT_SKIPPED" >&2
+if [ $# -ne 3 ] && [ $# -ne 4 ]; then
+    echo "usage: $0 BUILD_DIR EXPECT_REGISTERED EXPECT_SKIPPED [CTEST_CONFIG]" >&2
     exit 2
 fi
 
 build="$1"
 expect_registered="$2"
 expect_skipped="$3"
+config="${4:-}"
 
-registered=$(ctest --test-dir "$build" -N | sed -n 's/^Total Tests: //p')
+registered=$(ctest --test-dir "$build" ${config:+-C} ${config:+"$config"} -N \
+    | sed -n 's/^Total Tests: //p')
 if [ -z "$registered" ]; then
     echo "inventory: could not read the registered test count from ctest -N" >&2
     exit 1
@@ -40,7 +46,8 @@ log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 # The run itself must pass on its own terms first.
-if ! ctest --test-dir "$build" --output-on-failure >"$log" 2>&1; then
+if ! ctest --test-dir "$build" ${config:+-C} ${config:+"$config"} \
+        --output-on-failure >"$log" 2>&1; then
     cat "$log"
     echo "inventory: ctest reported failures" >&2
     exit 1
