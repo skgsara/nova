@@ -623,15 +623,14 @@ if(NOVA_BUILD_GUI)
   # Config-package fallback [M5, the Windows CI row]: a stock Windows
   # machine has neither fltk-config nor pkg-config, but FLTK 1.4 and
   # RtAudio 6 both install CMake config packages (targets fltk::fltk and
-  # RtAudio::rtaudio) when built from source. The fltk-config/pkg-config
-  # path stays first and is what the macOS and Linux rows still use; the
-  # fallback only engages where that path found nothing.
-  if(NOT NOVA_FLTK_CONFIG)
-    find_package(FLTK CONFIG QUIET)
-  endif()
-  if(NOT NOVA_RTAUDIO_FOUND)
-    find_package(RtAudio CONFIG QUIET)
-  endif()
+  # RtAudio::rtaudio) when built from source. Both finders run
+  # unconditionally, because the two mechanisms are NOT mutually exclusive:
+  # FLTK's source install ships a fltk-config even on Windows (where the
+  # shell script cannot run), so "fltk-config found" must not suppress the
+  # config-package search — and on Homebrew, which ships neither config
+  # package, the extra find_packages change nothing.
+  find_package(FLTK CONFIG QUIET)
+  find_package(RtAudio CONFIG QUIET)
 
   if(NOVA_FLTK_CONFIG OR (FLTK_FOUND AND TARGET fltk::fltk))
     set(NOVA_HAVE_FLTK ON)
@@ -659,7 +658,7 @@ if(NOVA_BUILD_GUI)
     # code and by the zoom control, so no column arithmetic lives in a
     # widget; the streaming front end is there for the capture thread
     # that has not been written yet.
-    if(NOVA_FLTK_CONFIG)
+    if(NOVA_FLTK_CONFIG AND NOVA_RTAUDIO_FOUND)
       execute_process(COMMAND ${NOVA_FLTK_CONFIG} --cxxflags
         OUTPUT_VARIABLE NOVA_FLTK_CXXFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
       execute_process(COMMAND ${NOVA_FLTK_CONFIG} --ldflags
