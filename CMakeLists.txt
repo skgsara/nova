@@ -14,7 +14,14 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_compile_options(-Wall -Wextra)
+# -Wall -Wextra are GCC/Clang spellings; MSVC reads "-Wall" as /Wall, which
+# is orders of magnitude noisier and warns on its own standard library.
+# /W3 is MSVC's default; written out so the two branches read as one rule.
+if(MSVC)
+  add_compile_options(/W3)
+else()
+  add_compile_options(-Wall -Wextra)
+endif()
 
 # M4 is the first milestone with threads [docs/05 §2]: the RtAudio
 # callback, the live decode, the batch decode and FLTK's main loop. Only
@@ -613,19 +620,37 @@ if(NOVA_BUILD_GUI)
   if(PkgConfig_FOUND)
     pkg_check_modules(NOVA_RTAUDIO QUIET rtaudio)
   endif()
-
+  # Config-package fallback [M5, the Windows CI row]: a stock Windows
+  # machine has neither fltk-config nor pkg-config, but FLTK 1.4 and
+  # RtAudio 6 both install CMake config packages (targets fltk::fltk and
+  # RtAudio::rtaudio) when built from source. The fltk-config/pkg-config
+  # path stays first and is what the macOS and Linux rows still use; the
+  # fallback only engages where that path found nothing.
   if(NOT NOVA_FLTK_CONFIG)
-    message(STATUS "nova-gui: SKIPPED - fltk-config not found (install FLTK)")
-  elseif(NOT NOVA_RTAUDIO_FOUND)
-    message(STATUS "nova-gui: SKIPPED - rtaudio not found by pkg-config")
-  else()
-    execute_process(COMMAND ${NOVA_FLTK_CONFIG} --cxxflags
-      OUTPUT_VARIABLE NOVA_FLTK_CXXFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND ${NOVA_FLTK_CONFIG} --ldflags
-      OUTPUT_VARIABLE NOVA_FLTK_LDFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-    separate_arguments(NOVA_FLTK_CXXFLAGS NATIVE_COMMAND
-      "${NOVA_FLTK_CXXFLAGS}")
+    find_package(FLTK CONFIG QUIET)
+  endif()
+  if(NOT NOVA_RTAUDIO_FOUND)
+    find_package(RtAudio CONFIG QUIET)
+  endif()
 
+  if(NOVA_FLTK_CONFIG OR (FLTK_FOUND AND TARGET fltk::fltk))
+    set(NOVA_HAVE_FLTK ON)
+  else()
+    set(NOVA_HAVE_FLTK OFF)
+  endif()
+  if(NOVA_RTAUDIO_FOUND OR TARGET RtAudio::rtaudio)
+    set(NOVA_HAVE_RTAUDIO ON)
+  else()
+    set(NOVA_HAVE_RTAUDIO OFF)
+  endif()
+
+  if(NOT NOVA_HAVE_FLTK)
+    message(STATUS "nova-gui: SKIPPED - FLTK not found "
+      "(no fltk-config, no CMake config package)")
+  elseif(NOT NOVA_HAVE_RTAUDIO)
+    message(STATUS "nova-gui: SKIPPED - rtaudio not found "
+      "(not in pkg-config, no CMake config package)")
+  else()
     add_executable(nova-gui gui/nova-gui.cpp)
     # docs/05 §1 is core -> live -> gui, and the link line now says so
     # literally: the GUI links nova-live, which carries nova-core
@@ -634,30 +659,49 @@ if(NOVA_BUILD_GUI)
     # code and by the zoom control, so no column arithmetic lives in a
     # widget; the streaming front end is there for the capture thread
     # that has not been written yet.
-    target_link_libraries(nova-gui PRIVATE nova-live ${NOVA_RTAUDIO_LIBRARIES})
-    target_include_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_INCLUDE_DIRS})
-    target_link_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_LIBRARY_DIRS})
-    target_compile_options(nova-gui PRIVATE
-      ${NOVA_FLTK_CXXFLAGS} ${NOVA_RTAUDIO_CFLAGS_OTHER})
-    # LINK_FLAGS, not target_link_options, and the difference is a real bug
-    # this skeleton hit: FLTK's ldflags end in two `-weak_framework NAME`
-    # pairs, target_link_options de-duplicates the repeated `-weak_framework`
-    # token, and the linker is then handed a bare `ScreenCaptureKit` it reads
-    # as a filename. LINK_FLAGS is a string and goes through verbatim.
-    # But LINK_FLAGS goes BEFORE the object files on the link line, and GNU
-    # ld resolves left to right — an archive named before the objects that
-    # need it is discarded, and every Fl_* symbol comes back undefined
-    # (first Linux CI run, session 39). macOS's ld is order-insensitive,
-    # which is why the bug was invisible for five weeks. So: Apple keeps
-    # the verbatim string; everywhere else the ldflags go through
-    # target_link_libraries, after the objects, in fltk-config's own order.
-    if(APPLE)
-      set_property(TARGET nova-gui APPEND_STRING PROPERTY
-        LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+    if(NOVA_FLTK_CONFIG)
+      execute_process(COMMAND ${NOVA_FLTK_CONFIG} --cxxflags
+        OUTPUT_VARIABLE NOVA_FLTK_CXXFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+      execute_process(COMMAND ${NOVA_FLTK_CONFIG} --ldflags
+        OUTPUT_VARIABLE NOVA_FLTK_LDFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+      separate_arguments(NOVA_FLTK_CXXFLAGS NATIVE_COMMAND
+        "${NOVA_FLTK_CXXFLAGS}")
+
+      target_link_libraries(nova-gui PRIVATE nova-live ${NOVA_RTAUDIO_LIBRARIES})
+      target_include_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_INCLUDE_DIRS})
+      target_link_directories(nova-gui PRIVATE ${NOVA_RTAUDIO_LIBRARY_DIRS})
+      target_compile_options(nova-gui PRIVATE
+        ${NOVA_FLTK_CXXFLAGS} ${NOVA_RTAUDIO_CFLAGS_OTHER})
+      # LINK_FLAGS, not target_link_options, and the difference is a real bug
+      # this skeleton hit: FLTK's ldflags end in two `-weak_framework NAME`
+      # pairs, target_link_options de-duplicates the repeated `-weak_framework`
+      # token, and the linker is then handed a bare `ScreenCaptureKit` it reads
+      # as a filename. LINK_FLAGS is a string and goes through verbatim.
+      # But LINK_FLAGS goes BEFORE the object files on the link line, and GNU
+      # ld resolves left to right — an archive named before the objects that
+      # need it is discarded, and every Fl_* symbol comes back undefined
+      # (first Linux CI run, session 39). macOS's ld is order-insensitive,
+      # which is why the bug was invisible for five weeks. So: Apple keeps
+      # the verbatim string; everywhere else the ldflags go through
+      # target_link_libraries, after the objects, in fltk-config's own order.
+      if(APPLE)
+        set_property(TARGET nova-gui APPEND_STRING PROPERTY
+          LINK_FLAGS " ${NOVA_FLTK_LDFLAGS}")
+      else()
+        separate_arguments(NOVA_FLTK_LDFLAGS_LIST NATIVE_COMMAND
+          "${NOVA_FLTK_LDFLAGS}")
+        target_link_libraries(nova-gui PRIVATE ${NOVA_FLTK_LDFLAGS_LIST})
+      endif()
+      message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
+                     "${NOVA_RTAUDIO_VERSION})")
     else()
-      separate_arguments(NOVA_FLTK_LDFLAGS_LIST NATIVE_COMMAND
-        "${NOVA_FLTK_LDFLAGS}")
-      target_link_libraries(nova-gui PRIVATE ${NOVA_FLTK_LDFLAGS_LIST})
+      # The config-package path: include dirs, system libraries and (for
+      # static RtAudio on Windows) the audio-API import libs all ride on
+      # the imported targets.
+      target_link_libraries(nova-gui PRIVATE nova-live
+        fltk::fltk RtAudio::rtaudio)
+      message(STATUS "nova-gui: enabled (FLTK ${FLTK_VERSION} and RtAudio "
+                     "via CMake config packages)")
     endif()
     # §9 screamer 7 [docs/05]: ruler/pane interior alignment at several
     # window sizes, and a window built at a size producing --metrics
@@ -690,8 +734,6 @@ if(NOVA_BUILD_GUI)
       -DNOVA_FIXTURE=${CMAKE_SOURCE_DIR}/fixtures/vmw-phasing-image-160s.wav
       -DNOVA_TMP=${CMAKE_CURRENT_BINARY_DIR}/gui-shell-capture
       -P ${CMAKE_SOURCE_DIR}/tests/gui_shell.cmake)
-    message(STATUS "nova-gui: enabled (${NOVA_FLTK_CONFIG}, rtaudio "
-                   "${NOVA_RTAUDIO_VERSION})")
   endif()
 else()
   # The OFF path said nothing at all until session 34 (C-GAP-003): the
