@@ -178,3 +178,51 @@ jobs:
           done
       - name: Suites (10 run, 30 skipped without recordings)
         run: tools/check-suite-inventory.sh build 40 30
+
+  # M5 tier 1: Windows Win64, MSVC (the default Visual Studio generator on
+  # windows-latest — multi-config, so every build/test step names the
+  # Release configuration, and the inventory script gets the configuration
+  # through CTEST_CONFIGURATION_TYPE, which ctest honours). The runner has
+  # neither fltk-config nor pkg-config, so FLTK and RtAudio are built from
+  # source at the same pinned versions the other rows use and found through
+  # their CMake config packages — the fallback the NOVA_BUILD_GUI block
+  # grew for exactly this row. RtAudio is static (nothing to ship beside
+  # the binary) and told to keep the shared CRT: its default for a static
+  # MSVC build is /MT, which would not match the rest of the tree.
+  # There is deliberately no "No warnings" step here: the project's
+  # warning-free standard is stated for -Wall -Wextra, which are GCC/Clang
+  # spellings; MSVC runs at /W3 and is not gated on warnings.
+  windows-msvc:
+    name: windows-x86_64 (MSVC)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build FLTK 1.4.5 and RtAudio 6.0.1 from source
+        run: |
+          set -e
+          deps="$PWD/nova-deps"
+          curl -sL https://github.com/fltk/fltk/archive/refs/tags/release-1.4.5.tar.gz | tar xz
+          cmake -B fltk-build -S fltk-release-1.4.5 \
+            -DCMAKE_INSTALL_PREFIX="$deps" \
+            -DFLTK_BUILD_TEST=OFF -DFLTK_BUILD_EXAMPLES=OFF -DFLTK_BUILD_GL=OFF
+          cmake --build fltk-build --config Release --parallel
+          cmake --install fltk-build --config Release
+          curl -sL https://github.com/thestk/rtaudio/archive/refs/tags/6.0.1.tar.gz | tar xz
+          cmake -B rtaudio-build -S rtaudio-6.0.1 \
+            -DCMAKE_INSTALL_PREFIX="$deps" \
+            -DBUILD_SHARED_LIBS=OFF -DRTAUDIO_STATIC_MSVCRT=OFF
+          cmake --build rtaudio-build --config Release --parallel
+          cmake --install rtaudio-build --config Release
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_PREFIX_PATH="$PWD/nova-deps"
+      - name: Require the GUI target to have been built
+        run: cmake --build build --config Release --target nova-gui
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Suites (10 run, 30 skipped without recordings)
+        run: |
+          export CTEST_CONFIGURATION_TYPE=Release
+          tools/check-suite-inventory.sh build 40 30
