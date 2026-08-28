@@ -19,6 +19,11 @@ endif()
 # /W3 is MSVC's default; written out so the two branches read as one rule.
 if(MSVC)
   add_compile_options(/W3)
+  # C4996 ("consider fopen_s / _dupenv_s") is a Microsoft-only deprecation
+  # of ISO C functions; the _s variants do not exist on the other
+  # platforms, so the warning cannot be acted on portably and would only
+  # bury the ones that can.
+  add_compile_options(/wd4996)
 else()
   add_compile_options(-Wall -Wextra)
 endif()
